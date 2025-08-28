@@ -1,0 +1,29 @@
+## OS
+.DS_Store
+Thumbs.db
+
+## Node
+node_modules/
+npm-debug.log*
+pnpm-lock.yaml
+yarn.lock
+
+## Python
+pycache/
+*.pyc
+.venv/
+.mypy_cache/
+.pytest_cache/
+
+## Dotnet
+/bin/
+/obj/
+
+## Env & data
+.env
+data/
+*.sqlite
+
+## IDE
+.vscode/
+.idea/
