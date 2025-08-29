@@ -1,0 +1,8 @@
+pandas
+numpy
+scikit-learn
+statsmodels
+xgboost
+mysql-connector-python
+SQLAlchemy
+python-dotenv
