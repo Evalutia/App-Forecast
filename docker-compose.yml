@@ -1,0 +1,95 @@
+version: "3.9"
+
+services:
+  db:
+    image: mysql:8.4
+    container_name: ${PROJECT_NAME}-db
+    environment:
+      MYSQL_ROOT_PASSWORD: ${DB_ROOT_PASSWORD}
+      MYSQL_DATABASE: ${DB_NAME}
+      MYSQL_USER: ${DB_USER}
+      MYSQL_PASSWORD: ${DB_PASSWORD}
+    ports:
+      - "${DB_PORT}:3306"
+    volumes:
+      - mysql_data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h localhost -p${DB_ROOT_PASSWORD} --silent"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7
+    container_name: ${PROJECT_NAME}-redis
+    ports:
+      - "${REDIS_PORT}:6379"
+
+  adminer:
+    image: adminer
+    container_name: ${PROJECT_NAME}-adminer
+    depends_on:
+      - db
+    ports:
+      - "${ADMINER_PORT}:8080"
+
+  webapi:
+    build:
+      context: ./apps/webapi
+    container_name: ${PROJECT_NAME}-webapi
+    environment:
+      ASPNETCORE_ENVIRONMENT: ${ASPNETCORE_ENVIRONMENT}
+      ConnectionStrings__Default: "Server=db;Port=3306;Database=${DB_NAME};User=${DB_USER};Password=${DB_PASSWORD};"
+      CORS__Origins: ${CORS_ORIGINS}
+    ports:
+      - "${WEBAPI_PORT}:8080"
+    depends_on:
+      db:
+        condition: service_healthy
+
+  webapp:
+    build:
+      context: ./apps/webapp
+    container_name: ${PROJECT_NAME}-webapp
+    environment:
+      VITE_API_BASE_URL: ${VITE_API_BASE_URL}
+    ports:
+      - "${WEBAPP_PORT}:5173"
+    depends_on:
+      - webapi
+
+  python-worker:
+    build:
+      context: ./services/python-worker
+    container_name: ${PROJECT_NAME}-python-worker
+    environment:
+      DB_HOST: ${DB_HOST}
+      DB_PORT: ${DB_PORT}
+      DB_NAME: ${DB_NAME}
+      DB_USER: ${DB_USER}
+      DB_PASSWORD: ${DB_PASSWORD}
+      REDIS_HOST: ${REDIS_HOST}
+      REDIS_PORT: ${REDIS_PORT}
+    volumes:
+      - ./data:/app/data
+    depends_on:
+      - db
+      - redis
+
+  etl:
+    build:
+      context: ./services/etl
+    container_name: ${PROJECT_NAME}-etl
+    environment:
+      DB_HOST: ${DB_HOST}
+      DB_PORT: ${DB_PORT}
+      DB_NAME: ${DB_NAME}
+      DB_USER: ${DB_USER}
+      DB_PASSWORD: ${DB_PASSWORD}
+    volumes:
+      - ./data:/app/data
+    depends_on:
+      - db
+
+volumes:
+  mysql_data:
