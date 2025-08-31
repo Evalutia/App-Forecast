@@ -55,3 +55,18 @@ Persistir:
 - Usuario MySQL dedicado (`evalutia`) con permisos acotados.
 
 - Hash de contraseñas con `bcrypt` o `argon2` desde la WebAPI.
+
+## Cómo ejecutarlo con Docker Compose
+
+### 1 Base + tablas
+docker compose exec mysql sh -lc "mysql -uroot -p\"\$MYSQL_ROOT_PASSWORD\" < /sql/00_create_database.sql"
+docker compose exec mysql sh -lc "mysql -uroot -p\"\$MYSQL_ROOT_PASSWORD\" < /sql/01_tables.sql"
+
+### 2 Índices
+docker compose exec mysql sh -lc "mysql -uroot -p\"\$MYSQL_ROOT_PASSWORD\" < /sql/02_indexes.sql"
+
+### 3 Seed (opcional)
+docker compose exec mysql sh -lc "mysql -uroot -p\"\$MYSQL_ROOT_PASSWORD\" < /sql/03_seed.sql"
+
+### 4 Grants (opcional)
+docker compose exec mysql sh -lc "mysql -uroot -p\"\$MYSQL_ROOT_PASSWORD\" < /sql/99_grants_example.sql"
