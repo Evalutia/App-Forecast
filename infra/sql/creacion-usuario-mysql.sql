@@ -1,0 +1,5 @@
+-- Ejecutar como root en MySQL del contenedor
+CREATE USER IF NOT EXISTS 'evalutia'@'%' IDENTIFIED BY 'evalutia1234-';
+GRANT SELECT, INSERT, UPDATE, DELETE, CREATE, ALTER, INDEX
+  ON evalutia.* TO 'evalutia'@'%';
+FLUSH PRIVILEGES;
