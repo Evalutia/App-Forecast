@@ -31,7 +31,7 @@ CREATE TABLE IF NOT EXISTS predicciones (
   id                 BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
   sku                VARCHAR(120)    NOT NULL,
   fecha_predicha     DATE            NOT NULL,            -- día/mes predicho
-  cantidad_predicha  DECIMAL(18,4)   NOT NULL,            -- puede ser fraccional
+  cantidad_predicha  DECIMAL(18,2)   NOT NULL,            -- puede ser fraccional
   modelo             VARCHAR(64)     NOT NULL,            -- 'SARIMA','ETS','RF','XGB','COMBINADA', etc.
   version_modelo     VARCHAR(32)     NOT NULL,            -- ej: 'v1.2.3' o hash
   horizonte          TINYINT UNSIGNED NOT NULL,           -- pasos hacia adelante, p.ej. meses (1..36)
@@ -54,12 +54,9 @@ CREATE TABLE IF NOT EXISTS jobs_historial (
   PRIMARY KEY (id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
-/*
-Opcional recomendado (separado para no cambiar tu alcance actual):
-- Vincular predicciones a un job que las generó.
+-- Vincular predicciones a un job que las generó.
 ALTER TABLE predicciones
   ADD COLUMN job_id BIGINT UNSIGNED NULL,
   ADD CONSTRAINT fk_pred_job
     FOREIGN KEY (job_id) REFERENCES jobs_historial(id)
     ON DELETE SET NULL ON UPDATE RESTRICT;
-*/
