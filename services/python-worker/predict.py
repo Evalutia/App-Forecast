@@ -16,14 +16,14 @@ from typing import Dict, Iterable, List, Optional, Tuple
 import numpy as np
 import pandas as pd
 
-from io.db import (
+from ioworker.db import (
     DBConfig,
     get_engine,
     insert_job_start,
     update_job_end,
     upsert_predicciones,
 )
-from io.data import load_series_by_sku
+from ioworker.data import load_series_by_sku, load_series_by_sku_mysql
 from ml.evaluate import holdout_split, rmse, r2_score
 from ml.features import make_lag_matrix, recursive_forecast_tree
 from ml.models import (
@@ -43,7 +43,7 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Forecasting CLI (SARIMA/ETS/RF/XGB/COMBINADA) y escritura en MySQL."
     )
-    parser.add_argument("--csv", type=str, required=True, help="Ruta a calendario_ventas.csv")
+    parser.add_argument("--csv", type=str, help="Ruta a calendario_ventas.csv")
     parser.add_argument("--freq", type=str, default="MS", help="Frecuencia de resampleo (default MS)")
     parser.add_argument("--periods", type=int, default=6, help="Meses a pronosticar")
     parser.add_argument("--skus", type=str, default=None, help='Lista de SKUs "SKU1,SKU2"')
@@ -61,14 +61,23 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--mysql-db", type=str, default=os.getenv("MYSQL_DB", "evalutia"))
     parser.add_argument("--mysql-user", type=str, default=os.getenv("MYSQL_USER", "evalutia"))
     parser.add_argument("--mysql-pass", type=str, default=os.getenv("MYSQL_PASS", "evalutia1234-"))
-    parser.add_argument(
-        "--start-month",
-        type=str,
-        default=None,
-        help="YYYY-MM del primer mes a pronosticar (default: mes siguiente al último dato)",
-    )
+    parser.add_argument("--start-month", type=str, default=None,
+                        help="YYYY-MM del primer mes a pronosticar (default: mes siguiente al último dato)")
     parser.add_argument("--log-level", type=str, default="INFO", help="Nivel de logs")
-    return parser.parse_args()
+
+    # Fuente de datos
+    parser.add_argument("--input-source", type=str, default="csv", choices=["csv", "mysql"],
+                        help="Origen de datos: csv (por defecto) o mysql")
+    parser.add_argument("--mysql-table", type=str, default="ventas_historicas",
+                        help="Tabla MySQL con columnas fecha, sku, cantidad (default: ventas_historicas)")
+    parser.add_argument("--mysql-schema", type=str, default=None,
+                        help="Schema/Base opcional si difiere de MYSQL_DB")
+
+    args = parser.parse_args()
+    if args.input_source == "csv" and not args.csv:
+        parser.error("--csv es obligatorio cuando --input-source=csv")
+    return args
+
 
 
 def months_gap(base_next: pd.Timestamp, target_start: pd.Timestamp, freq: str) -> int:
@@ -118,7 +127,20 @@ def main() -> None:
         if args.skus:
             only_skus = [s.strip() for s in args.skus.split(",") if s.strip()]
 
-        sku_series = load_series_by_sku(csv_path=args.csv, freq=args.freq, only_skus=only_skus)
+        if args.input_source == "mysql":
+            sku_series = load_series_by_sku_mysql(
+                engine=engine,
+                table=args.mysql_table,
+                schema=args.mysql_schema,
+                freq=args.freq,
+                only_skus=only_skus,
+            )
+        else:
+            sku_series = load_series_by_sku(
+                csv_path=args.csv,
+                freq=args.freq,
+                only_skus=only_skus,
+            )
 
         if not sku_series:
             raise RuntimeError("No se cargaron series por SKU. Verifique el CSV y los filtros.")
@@ -261,6 +283,18 @@ def main() -> None:
                 combined: Optional[CombinedResult] = None
                 if want_comb and results:
                     combined = combine_by_inverse_rmse(results, steps=args.periods)
+
+                    base = [r for r in results if r.holdout_pred is not None and r.rmse is not None]
+                    if base and len(test) > 0:
+                        min_len = min(len(r.holdout_pred) for r in base)
+                        y_true = test.values[:min_len]
+                        y_pred = np.zeros(min_len)
+                        for r in base:
+                            w = combined.weights.get(r.name, 0.0)
+                            y_pred += w * np.asarray(r.holdout_pred[:min_len])
+                        combined.rmse = rmse(y_true, y_pred)
+                        combined.r2 = r2_score(y_true, y_pred)
+                        
                     summary_rows.append(
                         {
                             "sku": sku,
