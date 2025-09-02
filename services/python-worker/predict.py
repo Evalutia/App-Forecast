@@ -93,8 +93,8 @@ def forecast_index(start_month: pd.Timestamp, periods: int, freq: str) -> pd.Dat
     return pd.date_range(start=start_month, periods=periods, freq=freq)
 
 
-def as_decimal4(x: float) -> Decimal:
-    return Decimal(f"{x:.4f}")
+def as_decimal2(x: float) -> Decimal:
+    return Decimal(f"{x:.2f}")
 
 
 def main() -> None:
@@ -315,7 +315,7 @@ def main() -> None:
                             {
                                 "sku": sku,
                                 "fecha_predicha": dt.date(),
-                                "cantidad_predicha": as_decimal4(float(yhat)),
+                                "cantidad_predicha": as_decimal2(float(yhat)),
                                 "modelo": r.name,
                                 "version_modelo": version,
                                 "horizonte": h,
@@ -329,7 +329,7 @@ def main() -> None:
                             {
                                 "sku": sku,
                                 "fecha_predicha": dt.date(),
-                                "cantidad_predicha": as_decimal4(float(yhat)),
+                                "cantidad_predicha": as_decimal2(float(yhat)),
                                 "modelo": "COMBINADA",
                                 "version_modelo": version,
                                 "horizonte": h,
