@@ -82,6 +82,7 @@ def parse_args() -> argparse.Namespace:
 
 def months_gap(base_next: pd.Timestamp, target_start: pd.Timestamp, freq: str) -> int:
     """Cantidad de meses entre base_next y target_start (si target está después)."""
+    logging.getLogger("predict").info("months_gap parcheado activo")
     if freq not in ("MS", "M"):
         raise ValueError("Solo se contemplan frecuencias mensuales (MS/M).")
     b = pd.Timestamp(base_next).to_period("M")

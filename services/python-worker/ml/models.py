@@ -104,31 +104,120 @@ def fit_ets(
     steps_eval: int,
     steps_forecast: int,
 ) -> Optional[ModelResult]:
-    try:
-        # Primero multiplicativo; si no converge, aditivo
-        try:
-            ets = ExponentialSmoothing(
-                train, trend="add", seasonal="mul", seasonal_periods=12, initialization_method="estimated"
-            ).fit(optimized=True, use_brute=False)
-            seasonal = "mul"
-        except Exception:
-            ets = ExponentialSmoothing(
-                train, trend="add", seasonal="add", seasonal_periods=12, initialization_method="estimated"
-            ).fit(optimized=True, use_brute=False)
-            seasonal = "add"
+    """
+    ETS (Holt-Winters) con:
+      - detección de no-positivos -> evita componentes multiplicativos,
+      - inicialización 'estimated',
+      - use_boxcox=False (evita log con ceros),
+      - silenciamiento de warnings conocidos,
+      - fallback a suavizamiento simple si falla.
+    """
+    import warnings
+    from statsmodels.tsa.holtwinters import ExponentialSmoothing
+    from statsmodels.tools.sm_exceptions import ConvergenceWarning
 
-        y_pred_eval = ets.forecast(steps=steps_eval)
-        r = ModelResult(
+    try:
+        y = pd.Series(train, dtype="float64").copy()
+        seasonal_periods = 12  # mensual con estacionalidad anual
+        trend = "add"
+
+        # Evitar multiplicativo si hay valores <= 0
+        has_nonpos = (y <= 0).any()
+
+        # Intento 1: multiplicativo (solo si todos > 0)
+        seasonal_used = None
+        fit = None
+        with warnings.catch_warnings():
+            warnings.filterwarnings("ignore", ".*Optimization failed to converge.*", ConvergenceWarning)
+            warnings.filterwarnings("ignore", ".*divide by zero encountered in log.*", RuntimeWarning)
+
+            if (not has_nonpos) and seasonal_periods and seasonal_periods > 1:
+                try:
+                    model = ExponentialSmoothing(
+                        y,
+                        trend=trend,
+                        seasonal="mul",
+                        seasonal_periods=seasonal_periods,
+                        initialization_method="estimated",
+                    )
+                    fit = model.fit(optimized=True, use_boxcox=False, remove_bias=True)
+                    seasonal_used = "mul"
+                except Exception:
+                    fit = None  # cae al intento aditivo
+
+            # Intento 2: aditivo
+            if fit is None:
+                model = ExponentialSmoothing(
+                    y,
+                    trend=trend,
+                    seasonal="add" if seasonal_periods and seasonal_periods > 1 else None,
+                    seasonal_periods=seasonal_periods if seasonal_periods and seasonal_periods > 1 else None,
+                    initialization_method="estimated",
+                )
+                fit = model.fit(optimized=True, use_boxcox=False, remove_bias=True)
+                seasonal_used = "add" if seasonal_periods and seasonal_periods > 1 else None
+
+        # Predicción en holdout (para métricas)
+        if steps_eval > 0:
+            y_pred_eval = fit.forecast(steps=steps_eval)
+            y_true = np.asarray(test.values, dtype="float64")
+            y_pred_eval_np = np.asarray(y_pred_eval.values, dtype="float64")
+            rmse_val = _rmse(y_true, y_pred_eval_np)
+            r2_val = _r2(y_true, y_pred_eval_np)
+            holdout_pred = y_pred_eval_np
+        else:
+            rmse_val = None
+            r2_val = None
+            holdout_pred = None
+
+        # Forecast futuro
+        yhat_forecast = np.asarray(fit.forecast(steps=steps_forecast), dtype="float64")
+
+        return ModelResult(
             name="ETS",
-            forecast=np.asarray(ets.forecast(steps=steps_forecast)),
-            rmse=_rmse(test.values, y_pred_eval.values),
-            r2=_r2(test.values, y_pred_eval.values),
-            params={"trend": "add", "seasonal": seasonal, "sp": 12},
-            holdout_pred=y_pred_eval.values,
+            forecast=yhat_forecast,
+            rmse=rmse_val,
+            r2=r2_val,
+            params={"trend": trend, "seasonal": seasonal_used, "sp": seasonal_periods},
+            holdout_pred=holdout_pred,
         )
-        return r
+
     except Exception:
-        return None
+        # Fallback final: suavizamiento simple (sin tendencia/estacionalidad)
+        try:
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore")
+                model = ExponentialSmoothing(
+                    pd.Series(train, dtype="float64"),
+                    initialization_method="estimated",
+                )
+                fit = model.fit(optimized=True, use_boxcox=False, remove_bias=True)
+
+            if steps_eval > 0:
+                y_pred_eval = fit.forecast(steps=steps_eval)
+                y_true = np.asarray(test.values, dtype="float64")
+                y_pred_eval_np = np.asarray(y_pred_eval.values, dtype="float64")
+                rmse_val = _rmse(y_true, y_pred_eval_np)
+                r2_val = _r2(y_true, y_pred_eval_np)
+                holdout_pred = y_pred_eval_np
+            else:
+                rmse_val = None
+                r2_val = None
+                holdout_pred = None
+
+            yhat_forecast = np.asarray(fit.forecast(steps=steps_forecast), dtype="float64")
+
+            return ModelResult(
+                name="ETS",
+                forecast=yhat_forecast,
+                rmse=rmse_val,
+                r2=r2_val,
+                params={"trend": None, "seasonal": None, "sp": None},
+                holdout_pred=holdout_pred,
+            )
+        except Exception:
+            return None
+
 
 
 def fit_rf(
