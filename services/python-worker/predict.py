@@ -65,6 +65,21 @@ def parse_args() -> argparse.Namespace:
                         help="YYYY-MM del primer mes a pronosticar (default: mes siguiente al último dato)")
     parser.add_argument("--log-level", type=str, default="INFO", help="Nivel de logs")
 
+    parser.add_argument("--holdout-k", type=int, default=None,
+                    help="Tamaño del holdout para métricas; si no se pasa usa min(6, periods)")
+    parser.add_argument("--eval-scheme", type=str, default="holdout",
+                        choices=["holdout", "rolling"],
+                        help="Esquema de evaluación: holdout simple o backtest rolling")
+
+    parser.add_argument("--resample-rule", type=str, default="MS", choices=["MS","M"],
+                        help="Regla mensual como en el notebook ('MS' inicio de mes, 'M' fin de mes)")
+    parser.add_argument("--resample-agg", type=str, default="sum",
+                        choices=["sum","mean","first","last"],
+                        help="Agregación mensual idéntica al notebook")
+    parser.add_argument("--fill-na", type=str, default="zero",
+                        choices=["zero","ffill","none"],
+                        help="Cómo se rellenan faltantes tras el resampleo, igual al notebook")
+
     # Fuente de datos
     parser.add_argument("--input-source", type=str, default="csv", choices=["csv", "mysql"],
                         help="Origen de datos: csv (por defecto) o mysql")
@@ -104,7 +119,7 @@ def safe_metric(x: Optional[float]) -> Optional[float]:
         xf = float(x)
     except Exception:
         return None
-    return xf if np.isfinite(xf) else None
+    return round(xf, 4) if np.isfinite(xf) else None
 
 
 def main() -> None:
@@ -205,7 +220,8 @@ def main() -> None:
                     continue
 
                 # Holdout para métricas (asunción: últimos 6 puntos)
-                train, test = holdout_split(serie, k=min(6, args.periods))
+                k_eval = args.holdout_k if args.holdout_k is not None else min(6, args.periods)
+                train, test = holdout_split(serie, k=k_eval)
 
                 # Determina fechas de forecast reales
                 last_train_month = train.index.max().to_period("M").to_timestamp()

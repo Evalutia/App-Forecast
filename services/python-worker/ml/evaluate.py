@@ -21,4 +21,11 @@ def rmse(y_true, y_pred) -> float:
 
 
 def r2_score(y_true, y_pred) -> float:
-    return float(_r2(y_true, y_pred))
+    y_true = np.asarray(y_true, dtype=float).ravel()
+    y_pred = np.asarray(y_pred, dtype=float).ravel()
+    u = np.sum((y_true - y_pred) ** 2)
+    v = np.sum((y_true - y_true.mean()) ** 2)
+    if v <= 0:
+        return 0.0  # mismo criterio que usan muchos notebooks si varianza cero
+    return 1.0 - (u / v)
+

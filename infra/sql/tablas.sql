@@ -37,7 +37,7 @@ CREATE TABLE IF NOT EXISTS predicciones (
   horizonte          TINYINT UNSIGNED NOT NULL,           -- pasos hacia adelante, p.ej. meses (1..36)
   rmse               DOUBLE            NULL,
   r2                 DOUBLE            NULL,       -- puede ser negativo, no forzamos [0,1]
-  ts_generacion      TIMESTAMP(6)    NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+  ts_generacion      DATE    NOT NULL DEFAULT CURRENT_DATE(),
   PRIMARY KEY (id),
   CONSTRAINT chk_pred_cantidad CHECK (cantidad_predicha >= 0),
   CONSTRAINT chk_pred_horizonte CHECK (horizonte BETWEEN 1 AND 36)
