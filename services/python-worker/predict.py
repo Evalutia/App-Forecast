@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-
+from __future__ import annotations
 import argparse
 import logging
 import os
@@ -9,7 +9,7 @@ import time
 import numpy as np
 import pandas as pd
 
-from __future__ import annotations
+
 from datetime import datetime
 from decimal import Decimal
 from typing import Dict, List, Optional

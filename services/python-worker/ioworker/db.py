@@ -1,6 +1,6 @@
+from __future__ import annotations
 import json
 
-from __future__ import annotations
 from dataclasses import dataclass
 from typing import Dict, List, Optional
 from sqlalchemy import create_engine, text
