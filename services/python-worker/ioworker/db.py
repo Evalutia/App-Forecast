@@ -50,11 +50,19 @@ def update_job_end(engine: Engine, job_id: int, estado: str, detalle: Dict) -> N
         conn.execute(sql, {"estado": estado, "detalle": json.dumps(detalle, ensure_ascii=False), "job_id": job_id})
 
 
-def upsert_predicciones(engine: Engine, rows: List[Dict]) -> int:
+def upsert_predicciones(engine: Engine, rows: List[Dict], job_id: Optional[int] = None) -> int:
     """
     Requiere índice único en (sku, modelo, version_modelo, fecha_predicha).
     Hace INSERT ... ON DUPLICATE KEY UPDATE.
     """
+    if job_id is not None:
+        for r in rows:
+            r["job_id"] = job_id
+    else:
+        # Asegurar clave presente para el SQL (aunque sea None)
+        for r in rows:
+            r.setdefault("job_id", None)
+
     sql = text(
         """
         INSERT INTO predicciones
@@ -66,7 +74,8 @@ def upsert_predicciones(engine: Engine, rows: List[Dict]) -> int:
             horizonte = VALUES(horizonte),
             rmse = VALUES(rmse),
             r2 = VALUES(r2),
-            ts_generacion = CURRENT_TIMESTAMP(6)
+            ts_generacion = CURRENT_TIMESTAMP(6),
+            job_id            = VALUES(job_id)
         """
     )
     with engine.begin() as conn:

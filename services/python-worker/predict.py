@@ -82,7 +82,6 @@ def parse_args() -> argparse.Namespace:
 
 def months_gap(base_next: pd.Timestamp, target_start: pd.Timestamp, freq: str) -> int:
     """Cantidad de meses entre base_next y target_start (si target está después)."""
-    logging.getLogger("predict").info("months_gap parcheado activo")
     if freq not in ("MS", "M"):
         raise ValueError("Solo se contemplan frecuencias mensuales (MS/M).")
     b = pd.Timestamp(base_next).to_period("M")
@@ -360,7 +359,7 @@ def main() -> None:
         # Inserción/upsert a MySQL
         inserted = 0
         if rows_buffer:
-            inserted = upsert_predicciones(engine, rows_buffer)
+            inserted = upsert_predicciones(engine, rows_buffer, job_id=job_id)
 
         # Detalle para jobs_historial
         modelos_ejecutados = sorted({r["modelo"] for r in summary_rows})
@@ -384,21 +383,92 @@ def main() -> None:
         # --- Resumen tabular requerido ---
         if summary_rows:
             df_sum = pd.DataFrame(summary_rows)
-            # Orden de columnas
             cols = ["sku", "modelo", "rmse", "r2", "params", "features"]
             for c in cols:
                 if c not in df_sum.columns:
                     df_sum[c] = None
-            df_sum = df_sum[cols]
-            print("\n=== Resumen por modelo/SKU ===")
-            print(df_sum.to_string(index=False))
 
-        dur = time.time() - t0
-        print("\n--- RESULTADO ---")
-        print(f"Ruta de inserción: MySQL://{db_cfg.user}@{db_cfg.host}:{db_cfg.port}/{db_cfg.db}")
-        print(f"job_id: {job_id}")
-        print(f"Filas upsert en predicciones: {inserted}")
-        print(f"Tiempo total: {dur:.2f}s")
+            def _fmt_num(x):
+                if x is None:
+                    return ""
+                try:
+                    x = float(x)
+                except Exception:
+                    return ""
+                return "" if not np.isfinite(x) else f"{x:.6f}"
+
+            def _clean_nan(v):
+                # reemplaza np.nan/inf por None y limpia dict/list anidados
+                if v is None:
+                    return None
+                if isinstance(v, float):
+                    return v if np.isfinite(v) else None
+                if isinstance(v, dict):
+                    out = {}
+                    for k, vv in v.items():
+                        cv = _clean_nan(vv)
+                        if cv is not None:
+                            out[k] = cv
+                    return out
+                if isinstance(v, list):
+                    out = []
+                    for vv in v:
+                        cv = _clean_nan(vv)
+                        if cv is not None:
+                            out.append(cv)
+                    return out
+                return v
+
+            def _params_compact(modelo: str, params: dict | None) -> str:
+                p = _clean_nan(params) if isinstance(params, dict) else {}
+                if modelo == "RF":
+                    keys = ["n_estimators", "max_depth", "min_samples_leaf", "random_state", "n_jobs"]
+                    p = {k: p.get(k) for k in keys if k in p}
+                elif modelo == "XGB":
+                    keys = ["objective", "n_estimators", "max_depth", "learning_rate",
+                            "subsample", "colsample_bytree", "reg_alpha", "reg_lambda",
+                            "random_state", "n_jobs"]
+                    p = {k: p.get(k) for k in keys if k in p}
+                elif modelo == "COMBINADA":
+                    # Mostrar pesos redondeados
+                    w = (p or {}).get("weights", {})
+                    if isinstance(w, dict) and w:
+                        return "weights: " + ", ".join(f"{k}={float(v):.3f}" for k, v in w.items())
+                    return ""
+                # para SARIMA/ETS dejamos el dict como viene (suele ser chico)
+                try:
+                    return json.dumps(p, ensure_ascii=False)
+                except Exception:
+                    return str(p)
+
+            def _features_compact(f: list | None) -> str:
+                if isinstance(f, list):
+                    try:
+                        lags = [int(str(x).split("_")[1]) for x in f if str(x).startswith("lag_")]
+                        lags = sorted(set(lags))
+                        if lags and lags == list(range(lags[0], lags[-1] + 1)):
+                            # rango continuo
+                            return f"lags {lags[0]}–{lags[-1]}"
+                        return ", ".join(str(x) for x in f)
+                    except Exception:
+                        return ", ".join(str(x) for x in f)
+                return ""
+
+            # aplicar formatos
+            df_sum["rmse"] = df_sum["rmse"].apply(_fmt_num)
+            df_sum["r2"]   = df_sum["r2"].apply(_fmt_num)
+            df_sum["params"] = [ _params_compact(m, p) for m, p in zip(df_sum["modelo"], df_sum["params"]) ]
+            df_sum["features"] = df_sum["features"].apply(_features_compact)
+
+            # orden estable y ancho razonable
+            df_sum = df_sum[cols].sort_values(["sku", "modelo"]).reset_index(drop=True)
+            pd.set_option("display.width", 180)
+            pd.set_option("display.max_colwidth", 120)
+
+            print("\n=== Resumen por modelo/SKU ===")
+            print(df_sum.to_string(index=False, justify="left"))
+
+
 
     except Exception as e:
         detalle = {
