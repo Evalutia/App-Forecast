@@ -44,7 +44,7 @@ def _fit_sarima_aic_grid(y_train: pd.Series):
     for p, d, q, P, D, Q in itertools.product([0,1],[1],[0,1],[0,1],[1],[0,1]):
         try:
             with warnings.catch_warnings():
-                warnings.filterwarnings("ignore", ".*converge.*", ConvergenceWarning)
+                warnings.simplefilter("ignore")  # <<< ignora todos los warnings aquí
                 mod = SARIMAX(
                     y,
                     order=(p, d, q),
