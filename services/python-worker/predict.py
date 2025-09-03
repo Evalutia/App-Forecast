@@ -81,12 +81,13 @@ def parse_args() -> argparse.Namespace:
 
 
 def months_gap(base_next: pd.Timestamp, target_start: pd.Timestamp, freq: str) -> int:
-    """Cuántos pasos de freq hay entre base_next y target_start (si target está después)."""
-    if freq not in ("MS", "M", "MS"):
+    """Cantidad de meses entre base_next y target_start (si target está después)."""
+    if freq not in ("MS", "M"):
         raise ValueError("Solo se contemplan frecuencias mensuales (MS/M).")
-    base = pd.Period(base_next, freq="M")
-    target = pd.Period(target_start, freq="M")
-    return max(0, (target - base))
+    b = pd.Timestamp(base_next).to_period("M")
+    t = pd.Timestamp(target_start).to_period("M")
+    diff = (t.year - b.year) * 12 + (t.month - b.month)
+    return int(diff) if diff > 0 else 0
 
 
 def forecast_index(start_month: pd.Timestamp, periods: int, freq: str) -> pd.DatetimeIndex:
@@ -112,7 +113,7 @@ def main() -> None:
         port=args.mysql_port,
         db=args.mysql_db or "evalutia",
         user=args.mysql_user or "evalutia",
-        password=args.mysql_pass or "evalutia1234-",
+        password=args.mysql_pass or "evalutia",
     )
     engine = get_engine(db_cfg)
 
@@ -159,6 +160,26 @@ def main() -> None:
         want_rf = args.model_set in ("full", "tree")
         want_xgb = args.model_set in ("full", "tree")
         want_comb = args.model_set == "full"
+
+        rf_params = {
+            "n_estimators": 400,
+            "max_depth": 8,
+            "min_samples_leaf": 2,
+            "random_state": 42,
+            "n_jobs": -1,
+        }
+        xgb_params = {
+            "objective": "reg:squarederror",
+            "n_estimators": 600,
+            "max_depth": 6,
+            "learning_rate": 0.05,
+            "subsample": 0.8,
+            "colsample_bytree": 0.8,
+            "reg_alpha": 0.1,
+            "reg_lambda": 1.0,
+            "random_state": 42,
+            "n_jobs": -1,
+        }
 
         processed = 0
         rows_buffer: List[Dict] = []
@@ -210,26 +231,6 @@ def main() -> None:
                         summary_rows.append(
                             {"sku": sku, "modelo": "ETS", "rmse": res.rmse, "r2": res.r2, "params": res.params}
                         )
-
-                rf_params = {
-                    "n_estimators": 400,
-                    "max_depth": 8,
-                    "min_samples_leaf": 2,
-                    "random_state": 42,
-                    "n_jobs": -1,
-                }
-                xgb_params = {
-                    "objective": "reg:squarederror",
-                    "n_estimators": 600,
-                    "max_depth": 6,
-                    "learning_rate": 0.05,
-                    "subsample": 0.8,
-                    "colsample_bytree": 0.8,
-                    "reg_alpha": 0.1,
-                    "reg_lambda": 1.0,
-                    "random_state": 42,
-                    "n_jobs": -1,
-                }
 
                 if want_rf:
                     res = fit_rf(
