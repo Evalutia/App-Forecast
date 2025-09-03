@@ -98,6 +98,15 @@ def forecast_index(start_month: pd.Timestamp, periods: int, freq: str) -> pd.Dat
 def as_decimal2(x: float) -> Decimal:
     return Decimal(f"{x:.2f}")
 
+def safe_metric(x: Optional[float]) -> Optional[float]:
+    if x is None:
+        return None
+    try:
+        xf = float(x)
+    except Exception:
+        return None
+    return xf if np.isfinite(xf) else None
+
 
 def main() -> None:
     args = parse_args()
@@ -321,8 +330,8 @@ def main() -> None:
                                 "modelo": r.name,
                                 "version_modelo": version,
                                 "horizonte": h,
-                                "rmse": float(r.rmse) if r.rmse is not None else None,
-                                "r2": float(r.r2) if r.r2 is not None else None,
+                                "rmse": safe_metric(r.rmse),
+                                "r2":   safe_metric(r.r2),
                             }
                         )
                 if combined is not None:
@@ -335,8 +344,8 @@ def main() -> None:
                                 "modelo": "COMBINADA",
                                 "version_modelo": version,
                                 "horizonte": h,
-                                "rmse": float(combined.rmse) if combined.rmse is not None else None,
-                                "r2": float(combined.r2) if combined.r2 is not None else None,
+                                "rmse": safe_metric(combined.rmse),
+                                "r2":   safe_metric(combined.r2),
                             }
                         )
 

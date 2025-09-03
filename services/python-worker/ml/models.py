@@ -49,17 +49,19 @@ def _fit_sarima_small_grid(y_train: pd.Series):
                             order = (p, d, q)
                             seasonal_order = (P, D, Q, 12)
                             try:
-                                mod = SARIMAX(
-                                    y_train,
-                                    order=order,
-                                    seasonal_order=seasonal_order,
-                                    enforce_stationarity=False,
-                                    enforce_invertibility=False,
-                                )
-                                res = mod.fit(disp=False)
-                                if res.aic < best_aic:
-                                    best_aic = res.aic
-                                    best = (order, seasonal_order, res.params)
+                                with warnings.catch_warnings():
+                                    warnings.filterwarnings("ignore", ".*converge.*", ConvergenceWarning)
+                                    mod = SARIMAX(
+                                        y_train,
+                                        order=order,
+                                        seasonal_order=seasonal_order,
+                                        enforce_stationarity=True,
+                                        enforce_invertibility=True,
+                                    )
+                                    res = mod.fit(disp=False)
+                                    if res.aic < best_aic:
+                                        best_aic = res.aic
+                                        best = (order, seasonal_order, res.params)
                             except Exception:
                                 continue
     return best

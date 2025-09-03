@@ -35,8 +35,8 @@ CREATE TABLE IF NOT EXISTS predicciones (
   modelo             VARCHAR(64)     NOT NULL,            -- 'SARIMA','ETS','RF','XGB','COMBINADA', etc.
   version_modelo     VARCHAR(32)     NOT NULL,            -- ej: 'v1.2.3' o hash
   horizonte          TINYINT UNSIGNED NOT NULL,           -- pasos hacia adelante, p.ej. meses (1..36)
-  rmse               DECIMAL(18,6)            NULL,
-  r2                 DECIMAL(6,4)             NULL,       -- puede ser negativo, no forzamos [0,1]
+  rmse               DOUBLE            NULL,
+  r2                 DOUBLE            NULL,       -- puede ser negativo, no forzamos [0,1]
   ts_generacion      TIMESTAMP(6)    NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
   PRIMARY KEY (id),
   CONSTRAINT chk_pred_cantidad CHECK (cantidad_predicha >= 0),
