@@ -1,20 +1,18 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 
-from __future__ import annotations
-
 import argparse
 import logging
 import os
 import sys
 import time
-from datetime import datetime
-from decimal import Decimal
-from typing import Dict, List, Optional
-
 import numpy as np
 import pandas as pd
 
+from __future__ import annotations
+from datetime import datetime
+from decimal import Decimal
+from typing import Dict, List, Optional
 from ioworker.db import (
     DBConfig,
     get_engine,
@@ -35,7 +33,6 @@ from ml.models import (
 )
 from utils.logging_conf import setup_logging
 from utils.versioning import resolve_version
-
 
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser("Forecast CLI (paridad de notebook)")
@@ -61,7 +58,7 @@ def parse_args() -> argparse.Namespace:
     args = p.parse_args()
     if args.input_source == "csv" and not args.csv:
         p.error("--csv es obligatorio con --input-source=csv")
-    args.freq = "MS"  # el notebook usa explícitamente MS
+    args.freq = "MS"
     return args
 
 
@@ -80,7 +77,6 @@ def ensure_monthly_series(serie: pd.Series, rule: str, agg: str, fill: str) -> p
     else:
         raise ValueError("agg inválido")
 
-    # cortar desde la primera venta > 0 (igual que notebook)
     first_sale = s[s > 0].first_valid_index()
     if first_sale is not None:
         s = s.loc[first_sale:]
@@ -90,6 +86,7 @@ def ensure_monthly_series(serie: pd.Series, rule: str, agg: str, fill: str) -> p
         s = s.reindex(idx)
         s = s.fillna(0.0) if fill == "zero" else s.ffill().fillna(0.0)
     return s
+
 
 def _sanitize_forecast(a: np.ndarray, min_val: float = 0.0, max_val: float = 1e9) -> np.ndarray:
     """
@@ -103,9 +100,11 @@ def _sanitize_forecast(a: np.ndarray, min_val: float = 0.0, max_val: float = 1e9
     arr = np.clip(arr, min_val, max_val)
     return arr
 
+
 def safe_metric(val):
     """Devuelve float o None si es None/NaN/Inf (para DB)."""
     return float(round(val,4)) if (val is not None and np.isfinite(val)) else None
+
 
 def as_decimal2(x: float) -> Decimal:
     return Decimal(f"{x:.2f}")
@@ -117,7 +116,6 @@ def main() -> None:
     setup_logging(level="INFO")
     log = logging.getLogger("predict")
 
-    # DB
     db_cfg = DBConfig(
         host=args.mysql_host or "localhost",
         port=args.mysql_port,
@@ -154,7 +152,6 @@ def main() -> None:
 
                 train = serie.copy()
 
-                # Índice de forecast (igual que notebook)
                 fidx = pd.date_range(
                     start=train.index[-1] + pd.offsets.MonthBegin(),
                     periods=args.periods,
@@ -181,20 +178,16 @@ def main() -> None:
                     r = fit_xgb_insample(train, steps_forecast=args.periods, lags=12)
                     if r: results.append(r)
 
-                # === COMBINADA (= notebook) ===
                 combined = combine_by_inverse_rmse_insample(results, train, steps=args.periods)
 
-                # in-sample combinado para métricas (suma ponderada de fits)
                 base = [m for m in results if m.holdout_pred is not None and m.rmse is not None]
                 if base:
-                    # alinear fits al índice del train
                     fits = [m.holdout_pred.reindex(train.index) for m in base]
                     weights = np.array([combined.weights[m.name] for m in base], dtype="float64")
                     weights = weights / weights.sum()
                     combined_ins = sum(w * f.values for w, f in zip(weights, fits))
                     combined_ins = pd.Series(combined_ins, index=train.index)
 
-                    # slope hack (primer paso)
                     if len(combined_ins) > 12:
                         n = 12
                         slope = (combined_ins.iloc[-1] - combined_ins.iloc[-1-n]) / n
@@ -207,13 +200,11 @@ def main() -> None:
                     combined.rmse = rmse(train.values, combined_ins.values)
                     combined.r2   = r2_score(train.values, combined_ins.values)
 
-                # --- SANEAR FORECASTS ANTES DE ESCRIBIR ---
                 for r in results:
                     r.forecast = _sanitize_forecast(r.forecast)
                 if combined is not None:
                     combined.forecast = _sanitize_forecast(combined.forecast)
 
-                # === Guardar filas para DB ===
                 for r in results:
                     for h, (dt, yhat) in enumerate(zip(fidx, r.forecast), start=1):
                         rows_buffer.append(
@@ -243,12 +234,10 @@ def main() -> None:
                             }
                         )
 
-                # Resumen
                 for r in results + ([combined] if combined else []):
                     summary_rows.append({"sku": sku, "modelo": r.name, "rmse": r.rmse, "r2": r.r2,
                                          "features": getattr(r, "features", None)})
 
-                # Dump debug opcional
                 if args.debug_dump:
                     df_dump = pd.DataFrame({"fecha": train.index, "y_true": train.values})
                     for r in results:
@@ -280,7 +269,6 @@ def main() -> None:
         }
         update_job_end(engine, job_id, estado="exitoso", detalle=detalle)
 
-        # resumen a stdout
         if summary_rows:
             df_sum = pd.DataFrame(summary_rows)
             for c in ["rmse","r2"]:
@@ -299,7 +287,6 @@ def main() -> None:
             pass
         logging.getLogger("predict").exception("Ejecución fallida")
         sys.exit(1)
-
 
 
 if __name__ == "__main__":

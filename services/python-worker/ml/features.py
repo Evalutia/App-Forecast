@@ -1,10 +1,8 @@
 from __future__ import annotations
-
 from typing import List, Tuple
 
 import numpy as np
 import pandas as pd
-
 
 def make_lag_matrix(y: pd.Series, lags: int = 12) -> Tuple[pd.DataFrame, pd.Series, List[str]]:
     """

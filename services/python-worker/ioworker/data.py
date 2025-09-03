@@ -1,12 +1,9 @@
 from __future__ import annotations
-
 from typing import Dict, Iterable, Optional
 
 import pandas as pd
 
-
 def _prepare_series(df: pd.DataFrame, freq: str) -> pd.Series:
-    # Suma mensual de 'cantidad' por defecto; fechas al inicio de mes
     s = (
         df.resample(freq, on="fecha")["cantidad"]
         .sum()
@@ -31,7 +28,6 @@ def load_series_by_sku(csv_path: str, freq: str = "MS", only_skus: Optional[Iter
     if only_skus:
         df = df[df["sku"].isin(set(only_skus))].copy()
 
-    # Ordena y limpia
     df = df.dropna(subset=["fecha", "sku", "cantidad"]).copy()
     df["cantidad"] = pd.to_numeric(df["cantidad"], errors="coerce").fillna(0).astype(float)
     df = df.sort_values(["sku", "fecha"])
@@ -42,6 +38,7 @@ def load_series_by_sku(csv_path: str, freq: str = "MS", only_skus: Optional[Iter
         if len(s) > 0:
             series_by_sku[sku] = s
     return series_by_sku
+
 
 def load_series_by_sku_mysql(
     engine,
@@ -57,7 +54,6 @@ def load_series_by_sku_mysql(
     """
     tbl = f"{schema}.{table}" if schema else table
 
-    # Agregación a nivel diario por si hay múltiples 'fuente' para mismo día/SKU
     q = f"""
         SELECT
             fecha,
@@ -69,7 +65,6 @@ def load_series_by_sku_mysql(
     """
     df = pd.read_sql_query(q, con=engine, parse_dates=["fecha"])
 
-    # Normalización de columnas y filtros
     df = df.rename(columns={"Fecha": "fecha", "SKU": "sku", "Cantidad": "cantidad"})
     if only_skus:
         only = set(s.strip() for s in only_skus if s and s.strip())
@@ -79,7 +74,6 @@ def load_series_by_sku_mysql(
     df["cantidad"] = pd.to_numeric(df["cantidad"], errors="coerce").fillna(0).astype(float)
     df = df.sort_values(["sku", "fecha"])
 
-    # Resampleo mensual por SKU
     series_by_sku: Dict[str, pd.Series] = {}
     for sku, g in df.groupby("sku", sort=False):
         s = (
@@ -88,7 +82,6 @@ def load_series_by_sku_mysql(
              .sum()
              .asfreq(freq, fill_value=0.0)
         )
-        # Aseguramos índice en primer día del mes
         s.index = s.index.to_period("M").to_timestamp()
         if len(s) > 0:
             series_by_sku[sku] = s

@@ -1,12 +1,10 @@
-from __future__ import annotations
-
 import json
+
+from __future__ import annotations
 from dataclasses import dataclass
 from typing import Dict, List, Optional
-
 from sqlalchemy import create_engine, text
 from sqlalchemy.engine import Engine
-
 
 @dataclass
 class DBConfig:
@@ -59,7 +57,6 @@ def upsert_predicciones(engine: Engine, rows: List[Dict], job_id: Optional[int] 
         for r in rows:
             r["job_id"] = job_id
     else:
-        # Asegurar clave presente para el SQL (aunque sea None)
         for r in rows:
             r.setdefault("job_id", None)
     sql = text(
@@ -79,5 +76,4 @@ def upsert_predicciones(engine: Engine, rows: List[Dict], job_id: Optional[int] 
     )
     with engine.begin() as conn:
         res = conn.execute(sql, rows)
-        # Para executemany el rowcount puede ser 2 por upsert; devolvemos número de VALUES procesados
         return len(rows)

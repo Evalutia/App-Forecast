@@ -1,30 +1,27 @@
-from __future__ import annotations
-
-from dataclasses import dataclass
-from typing import Dict, List, Optional
 import warnings
 import itertools
-
 import numpy as np
 import pandas as pd
+
+from __future__ import annotations
+from dataclasses import dataclass
+from typing import Dict, List, Optional
 from sklearn.ensemble import RandomForestRegressor
 from xgboost import XGBRegressor
 from statsmodels.tsa.statespace.sarimax import SARIMAX
 from statsmodels.tsa.holtwinters import ExponentialSmoothing
 from statsmodels.tools.sm_exceptions import ConvergenceWarning
-
 from .evaluate import rmse as _rmse, r2_score as _r2
-
 
 @dataclass
 class ModelResult:
     name: str
-    forecast: np.ndarray              # pronóstico OOS (length = steps_forecast)
-    rmse: Optional[float]             # RMSE in-sample (como notebook)
-    r2: Optional[float]               # R2   in-sample (como notebook)
+    forecast: np.ndarray
+    rmse: Optional[float]
+    r2: Optional[float]
     params: Dict
     features: Optional[List[str]] = None
-    holdout_pred: Optional[pd.Series] = None  # acá guardamos el FIT in-sample alineado a train.index
+    holdout_pred: Optional[pd.Series] = None
 
 
 @dataclass
@@ -36,7 +33,6 @@ class CombinedResult:
     weights: Dict[str, float]
 
 
-# === SARIMA: grid igual al notebook (p,q,P,Q en {0,1}; d=1, D=1; s=12) ===
 def _fit_sarima_aic_grid(y_train: pd.Series):
     best_res = None
     best_aic = np.inf
@@ -44,7 +40,7 @@ def _fit_sarima_aic_grid(y_train: pd.Series):
     for p, d, q, P, D, Q in itertools.product([0,1],[1],[0,1],[0,1],[1],[0,1]):
         try:
             with warnings.catch_warnings():
-                warnings.simplefilter("ignore")  # <<< ignora todos los warnings aquí
+                warnings.simplefilter("ignore")
                 mod = SARIMAX(
                     y,
                     order=(p, d, q),
@@ -67,11 +63,9 @@ def fit_sarima_insample(train: pd.Series, steps_forecast: int) -> Optional[Model
         if res is None:
             return None
 
-        # FIT in-sample exactamente como el notebook
         y_fit = res.predict(start=tr.index[0], end=tr.index[-1])
         fit_series = pd.Series(np.asarray(y_fit, dtype="float64"), index=tr.index)
 
-        # Forecast OOS
         y_fc = res.get_forecast(steps=steps_forecast).predicted_mean
         y_fc = np.asarray(y_fc, dtype="float64")
 
@@ -100,7 +94,6 @@ def fit_ets_insample(train: pd.Series, steps_forecast: int) -> Optional[ModelRes
             fit_series = pd.Series(fit.predict(start=tr.index[0], end=tr.index[-1]), index=tr.index, dtype="float64")
             y_fc = np.asarray(fit.forecast(steps_forecast), dtype="float64")
         else:
-            # Sin estacionalidad si no alcanza
             model = ExponentialSmoothing(tr)
             fit = model.fit()
             fit_series = pd.Series(fit.predict(start=tr.index[0], end=tr.index[-1]), index=tr.index, dtype="float64")
@@ -142,12 +135,9 @@ def fit_rf_insample(train: pd.Series, steps_forecast: int, lags: int = 12) -> Op
         )
         rf.fit(X_rf, y_rf)
 
-        # in-sample (solo donde hay features)
         fit_part = pd.Series(rf.predict(X_rf), index=X_rf.index, dtype="float64")
-        # FIX deprecations: .ffill().bfill()
         rf_full = fit_part.reindex(tr.index).ffill().bfill()
 
-        # forecast recursivo multi-step con month/trend
         hist = tr.tolist()[-lags:]
         oos = []
         for i in range(steps_forecast):
@@ -156,7 +146,7 @@ def fit_rf_insample(train: pd.Series, steps_forecast: int, lags: int = 12) -> Op
             df_feat = pd.DataFrame([xlags], columns=[f"lag_{j+1}" for j in range(lags)])
             df_feat["month"] = idx.month
             df_feat["trend"] = len(tr) + i
-            df_feat = df_feat[feats]  # orden idéntico
+            df_feat = df_feat[feats]
             p = float(rf.predict(df_feat)[0])
             oos.append(p)
             hist.append(p)
@@ -189,10 +179,8 @@ def fit_xgb_insample(train: pd.Series, steps_forecast: int, lags: int = 12) -> O
         xgb.fit(X_rf, y_rf)
 
         fit_part = pd.Series(xgb.predict(X_rf), index=X_rf.index, dtype="float64")
-        # FIX deprecations: .ffill().bfill()
         xgb_full = fit_part.reindex(tr.index).ffill().bfill()
 
-        # forecast recursivo con month/trend
         hist = tr.tolist()[-lags:]
         oos = []
         for i in range(steps_forecast):
@@ -234,7 +222,6 @@ def combine_by_inverse_rmse_insample(models: List[ModelResult], train: pd.Series
     s = sum(inv)
     weights = {m.name: w / s for m, w in zip(base, inv)}
 
-    # Combined forecast = suma ponderada de forecasts
     combo_fc = np.zeros(steps, dtype="float64")
     for m in base:
         combo_fc += weights[m.name] * np.asarray(m.forecast[:steps], dtype="float64")

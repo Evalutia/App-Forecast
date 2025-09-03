@@ -1,11 +1,9 @@
 from __future__ import annotations
-
+from sklearn.metrics import mean_squared_error, r2_score as _r2
 from typing import Tuple
 
 import numpy as np
 import pandas as pd
-from sklearn.metrics import mean_squared_error, r2_score as _r2
-
 
 def holdout_split(series: pd.Series, k: int = 6) -> Tuple[pd.Series, pd.Series]:
     """

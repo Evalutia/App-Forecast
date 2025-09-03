@@ -30,7 +30,7 @@ Persistir:
   SELECT p.*
   FROM predicciones p
   WHERE p.sku = ? AND p.fecha_predicha BETWEEN ? AND ?
-  QUALIFY ROW_NUMBER() OVER (PARTITION BY p.sku, p.fecha_predicha ORDER BY p.ts_generacion DESC) = 1; -- (MySQL: usar subconsulta + ORDER/LIMIT)
+  QUALIFY ROW_NUMBER() OVER (PARTITION BY p.sku, p.fecha_predicha ORDER BY p.ts_generacion DESC) = 1;
 
 ## Operación
 
