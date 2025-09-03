@@ -3,12 +3,14 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Dict, List, Optional
 
+import warnings
 import numpy as np
 import pandas as pd
 from sklearn.ensemble import RandomForestRegressor
 from xgboost import XGBRegressor
 from statsmodels.tsa.statespace.sarimax import SARIMAX
 from statsmodels.tsa.holtwinters import ExponentialSmoothing
+from statsmodels.tools.sm_exceptions import ConvergenceWarning
 
 from .evaluate import rmse as _rmse, r2_score as _r2
 from .features import make_lag_matrix, recursive_forecast_tree
@@ -37,9 +39,12 @@ class CombinedResult:
 def _fit_sarima_small_grid(y_train: pd.Series):
     """
     Grid chico para estabilidad (mensual con estacionalidad 12).
+    Homogeneizado con enforce_* = False (igual que el fit final) para paridad numérica.
     """
     best = None
     best_aic = np.inf
+    y_train = pd.Series(y_train).astype("float64").sort_index()
+
     for p in (0, 1):
         for d in (1,):
             for q in (0, 1):
@@ -55,13 +60,13 @@ def _fit_sarima_small_grid(y_train: pd.Series):
                                         y_train,
                                         order=order,
                                         seasonal_order=seasonal_order,
-                                        enforce_stationarity=True,
-                                        enforce_invertibility=True,
+                                        enforce_stationarity=False,
+                                        enforce_invertibility=False,
                                     )
-                                    res = mod.fit(disp=False)
+                                    res = mod.fit(disp=False, maxiter=200)
                                     if res.aic < best_aic:
                                         best_aic = res.aic
-                                        best = (order, seasonal_order, res.params)
+                                        best = (order, seasonal_order)
                             except Exception:
                                 continue
     return best
@@ -74,26 +79,31 @@ def fit_sarima(
     steps_forecast: int,
 ) -> Optional[ModelResult]:
     try:
+        train = pd.Series(train).astype("float64").sort_index()
+        test = pd.Series(test).astype("float64").sort_index()
+
         grid = _fit_sarima_small_grid(train)
         if grid is None:
             return None
-        order, seasonal_order, _ = grid
+        order, seasonal_order = grid
+
         model = SARIMAX(
             train,
             order=order,
             seasonal_order=seasonal_order,
             enforce_stationarity=False,
             enforce_invertibility=False,
-        ).fit(disp=False)
+        ).fit(disp=False, maxiter=200)
+
         # holdout
         y_pred_eval = model.forecast(steps=steps_eval)
         r = ModelResult(
             name="SARIMA",
-            forecast=model.forecast(steps=steps_forecast).values,
+            forecast=np.asarray(model.forecast(steps=steps_forecast), dtype="float64"),
             rmse=_rmse(test.values, y_pred_eval.values),
             r2=_r2(test.values, y_pred_eval.values),
             params={"order": order, "seasonal_order": seasonal_order},
-            holdout_pred=y_pred_eval.values,
+            holdout_pred=np.asarray(y_pred_eval.values, dtype="float64"),
         )
         return r
     except Exception:
@@ -107,62 +117,52 @@ def fit_ets(
     steps_forecast: int,
 ) -> Optional[ModelResult]:
     """
-    ETS (Holt-Winters) con:
-      - detección de no-positivos -> evita componentes multiplicativos,
-      - inicialización 'estimated',
-      - use_boxcox=False (evita log con ceros),
-      - silenciamiento de warnings conocidos,
-      - fallback a suavizamiento simple si falla.
+    ETS (Holt-Winters):
+      - trend='add'
+      - seasonal='mul' si todo > 0, si no 'add'
+      - sp=12 mensual
+      - initialization_method='estimated'
+      - use_boxcox=False, remove_bias=True
+      - warnings silenciados y fallback simple si falla.
     """
-    import warnings
-    from statsmodels.tsa.holtwinters import ExponentialSmoothing
-    from statsmodels.tools.sm_exceptions import ConvergenceWarning
-
     try:
-        y = pd.Series(train, dtype="float64").copy()
-        seasonal_periods = 12  # mensual con estacionalidad anual
+        y = pd.Series(train, dtype="float64").copy().sort_index()
+        seasonal_periods = 12
         trend = "add"
-
-        # Evitar multiplicativo si hay valores <= 0
         has_nonpos = (y <= 0).any()
 
-        # Intento 1: multiplicativo (solo si todos > 0)
-        seasonal_used = None
-        fit = None
         with warnings.catch_warnings():
             warnings.filterwarnings("ignore", ".*Optimization failed to converge.*", ConvergenceWarning)
             warnings.filterwarnings("ignore", ".*divide by zero encountered in log.*", RuntimeWarning)
 
-            if (not has_nonpos) and seasonal_periods and seasonal_periods > 1:
+            fit = None
+            seasonal_used = None
+
+            if (not has_nonpos) and seasonal_periods > 1:
                 try:
                     model = ExponentialSmoothing(
-                        y,
-                        trend=trend,
-                        seasonal="mul",
+                        y, trend=trend, seasonal="mul",
                         seasonal_periods=seasonal_periods,
                         initialization_method="estimated",
                     )
                     fit = model.fit(optimized=True, use_boxcox=False, remove_bias=True)
                     seasonal_used = "mul"
                 except Exception:
-                    fit = None  # cae al intento aditivo
+                    fit = None
 
-            # Intento 2: aditivo
             if fit is None:
                 model = ExponentialSmoothing(
-                    y,
-                    trend=trend,
-                    seasonal="add" if seasonal_periods and seasonal_periods > 1 else None,
-                    seasonal_periods=seasonal_periods if seasonal_periods and seasonal_periods > 1 else None,
+                    y, trend=trend,
+                    seasonal="add" if seasonal_periods > 1 else None,
+                    seasonal_periods=seasonal_periods if seasonal_periods > 1 else None,
                     initialization_method="estimated",
                 )
                 fit = model.fit(optimized=True, use_boxcox=False, remove_bias=True)
-                seasonal_used = "add" if seasonal_periods and seasonal_periods > 1 else None
+                seasonal_used = "add" if seasonal_periods > 1 else None
 
-        # Predicción en holdout (para métricas)
         if steps_eval > 0:
             y_pred_eval = fit.forecast(steps=steps_eval)
-            y_true = np.asarray(test.values, dtype="float64")
+            y_true = np.asarray(pd.Series(test).astype("float64").values, dtype="float64")
             y_pred_eval_np = np.asarray(y_pred_eval.values, dtype="float64")
             rmse_val = _rmse(y_true, y_pred_eval_np)
             r2_val = _r2(y_true, y_pred_eval_np)
@@ -172,7 +172,6 @@ def fit_ets(
             r2_val = None
             holdout_pred = None
 
-        # Forecast futuro
         yhat_forecast = np.asarray(fit.forecast(steps=steps_forecast), dtype="float64")
 
         return ModelResult(
@@ -185,19 +184,19 @@ def fit_ets(
         )
 
     except Exception:
-        # Fallback final: suavizamiento simple (sin tendencia/estacionalidad)
+        # Fallback: suavizamiento simple
         try:
             with warnings.catch_warnings():
                 warnings.simplefilter("ignore")
                 model = ExponentialSmoothing(
-                    pd.Series(train, dtype="float64"),
+                    pd.Series(train, dtype="float64").sort_index(),
                     initialization_method="estimated",
                 )
                 fit = model.fit(optimized=True, use_boxcox=False, remove_bias=True)
 
             if steps_eval > 0:
                 y_pred_eval = fit.forecast(steps=steps_eval)
-                y_true = np.asarray(test.values, dtype="float64")
+                y_true = np.asarray(pd.Series(test).astype("float64").values, dtype="float64")
                 y_pred_eval_np = np.asarray(y_pred_eval.values, dtype="float64")
                 rmse_val = _rmse(y_true, y_pred_eval_np)
                 r2_val = _r2(y_true, y_pred_eval_np)
@@ -221,7 +220,6 @@ def fit_ets(
             return None
 
 
-
 def fit_rf(
     train: pd.Series,
     test: pd.Series,
@@ -232,21 +230,17 @@ def fit_rf(
 ) -> Optional[ModelResult]:
     try:
         X_tr, y_tr, feats = make_lag_matrix(train, lags=lags)
-
         rf = RandomForestRegressor(**rf_params)
         rf.fit(X_tr, y_tr)
 
-        # Holdout: predicción recursiva sobre k pasos
         y_pred_eval = recursive_forecast_tree(rf, train, steps=steps_eval, lags=lags)
-
-        # Forecast real
         y_pred_fc = recursive_forecast_tree(rf, train, steps=steps_forecast, lags=lags)
 
         return ModelResult(
             name="RF",
             forecast=y_pred_fc,
-            rmse=_rmse(test.values, y_pred_eval),
-            r2=_r2(test.values, y_pred_eval),
+            rmse=_rmse(pd.Series(test).values, y_pred_eval),
+            r2=_r2(pd.Series(test).values, y_pred_eval),
             params=rf.get_params(),
             features=feats,
             holdout_pred=y_pred_eval,
@@ -274,8 +268,8 @@ def fit_xgb(
         return ModelResult(
             name="XGB",
             forecast=y_pred_fc,
-            rmse=_rmse(test.values, y_pred_eval),
-            r2=_r2(test.values, y_pred_eval),
+            rmse=_rmse(pd.Series(test).values, y_pred_eval),
+            r2=_r2(pd.Series(test).values, y_pred_eval),
             params=xgb.get_params(),
             features=feats,
             holdout_pred=y_pred_eval,
@@ -286,48 +280,24 @@ def fit_xgb(
 
 def combine_by_inverse_rmse(models: List[ModelResult], steps: int) -> CombinedResult:
     """
-    Combina por pesos ~ 1/RMSE sobre los MODELOS NO combinados.
-    Si solo hay un modelo, usa peso 1. Normaliza pesos.
-    RMSE/R2 de la combinada se calculan sobre las predicciones de holdout.
+    Pesos ~ 1/RMSE sobre modelos base (no COMBINADA). Normaliza pesos.
+    Forecast combinado y holdout combinados por promedio ponderado.
+    Las métricas (rmse/r2) se calculan en el caller, que sí conoce y_true.
     """
     base = [m for m in models if m.name != "COMBINADA" and m.rmse is not None and m.holdout_pred is not None]
     if not base:
-        # si no hay base, fallback a primer forecast disponible que tenga longitud adecuada
         for m in models:
             if len(m.forecast) >= steps:
                 return CombinedResult(name="COMBINADA", forecast=m.forecast[:steps], rmse=None, r2=None, weights={m.name: 1.0})
-        return CombinedResult(name="COMBINADA", forecast=np.zeros(steps), rmse=None, r2=None, weights={})
+        return CombinedResult(name="COMBINADA", forecast=np.zeros(steps, dtype=np.float64), rmse=None, r2=None, weights={})
 
-    inv = []
-    for m in base:
-        val = (1.0 / max(m.rmse, 1e-6)) if m.rmse is not None else 0.0
-        inv.append(val)
+    inv = [(1.0 / max(m.rmse, 1e-6)) for m in base]
     s = sum(inv)
-    if s <= 0:
-        weights = {m.name: 1.0 / len(base) for m in base}
-    else:
-        weights = {m.name: w / s for m, w in zip(base, inv)}
+    weights = {m.name: (w / s if s > 0 else 1.0 / len(base)) for m, w in zip(base, inv)}
 
-    # Holdout combinado
-    # Alineamos por longitud mínima
     min_len = min(len(m.holdout_pred) for m in base)
-    combo_hold = np.zeros(min_len)
+    combo_fc = np.zeros(steps, dtype=np.float64)
     for m in base:
-        combo_hold += weights[m.name] * np.asarray(m.holdout_pred[:min_len])
+        combo_fc += weights[m.name] * np.asarray(m.forecast[:steps], dtype=np.float64)
 
-    # Forecast combinado (asume todos tienen al menos 'steps' valores tras recortes previos)
-    combo_fc = np.zeros(steps)
-    for m in base:
-        combo_fc += weights[m.name] * np.asarray(m.forecast[:steps])
-
-    # Para métricas de la combinada necesitamos el y_true del holdout.
-    # Tomamos y_true a partir de cualquiera (debería ser idéntico entre modelos)
-    # Aquí devolvemos None; la métrica será calculada externamente si se requiere.
-    # En este diseño necesitamos que quien llama tenga 'test' para evaluar,
-    # así que movemos el cálculo aquí recibiendo y_true… pero para mantener firmas
-    # calcularemos aproximado con el primer modelo base y_true de su RMSE (no accesible).
-    # => Alternativa: guardamos y_true dentro de ModelResult no estaba; resolvemos en caller.
-    # Solución: pedimos que los resultados ya tengan RMSE/R2 de holdout. Para la combinada:
-    # no tenemos y_true aquí; devolvemos rmse/r2 como None y el caller las computa si lo desea.
-    # En nuestra implementación de CLI sí conocemos 'test', por eso allí recalculamos:
     return CombinedResult(name="COMBINADA", forecast=combo_fc, rmse=None, r2=None, weights=weights)

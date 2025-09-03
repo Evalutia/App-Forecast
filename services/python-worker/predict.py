@@ -91,9 +91,56 @@ def parse_args() -> argparse.Namespace:
     args = parser.parse_args()
     if args.input_source == "csv" and not args.csv:
         parser.error("--csv es obligatorio cuando --input-source=csv")
+
+    # Paridad notebook: usamos la misma regla mensual como frecuencia "de trabajo"
+    args.freq = args.resample_rule
     return args
 
+def ensure_monthly_series(
+    serie: pd.Series,
+    rule: str = "MS",
+    agg: str = "sum",
+    fill: str = "zero",
+) -> pd.Series:
+    """
+    Normaliza una serie temporal a mensual con:
+    - rule: 'MS' (inicio de mes) o 'M' (fin de mes)
+    - agg:  'sum'|'mean'|'first'|'last'
+    - fill: 'zero' -> completa meses faltantes con 0
+            'ffill'-> completa por forward-fill (y si arranque es NaN, usa 0)
+            'none' -> no completa (se queda con meses observados)
+    """
+    s = pd.Series(serie).astype("float64")
+    s.index = pd.to_datetime(s.index)
+    s = s.sort_index()
 
+    # Resampleo + agregación
+    if agg == "sum":
+        s = s.resample(rule).sum()
+    elif agg == "mean":
+        s = s.resample(rule).mean()
+    elif agg == "first":
+        s = s.resample(rule).first()
+    elif agg == "last":
+        s = s.resample(rule).last()
+    else:
+        raise ValueError("resample-agg inválido")
+
+    # Completar meses faltantes (si corresponde)
+    if fill == "zero":
+        full_idx = pd.date_range(start=s.index.min(), end=s.index.max(), freq=rule)
+        s = s.reindex(full_idx)
+        s = s.fillna(0.0)
+    elif fill == "ffill":
+        full_idx = pd.date_range(start=s.index.min(), end=s.index.max(), freq=rule)
+        s = s.reindex(full_idx)
+        s = s.ffill().fillna(0.0)
+    elif fill == "none":
+        pass
+    else:
+        raise ValueError("fill-na inválido")
+
+    return s
 
 def months_gap(base_next: pd.Timestamp, target_start: pd.Timestamp, freq: str) -> int:
     """Cantidad de meses entre base_next y target_start (si target está después)."""
@@ -219,6 +266,10 @@ def main() -> None:
                     warnings.append(msg)
                     continue
 
+                # Normaliza serie mensual EXACTA como el notebook
+                serie = ensure_monthly_series(
+                    serie, rule=args.resample_rule, agg=args.resample_agg, fill=args.fill_na
+                )
                 # Holdout para métricas (asunción: últimos 6 puntos)
                 k_eval = args.holdout_k if args.holdout_k is not None else min(6, args.periods)
                 train, test = holdout_split(serie, k=k_eval)
