@@ -66,9 +66,9 @@ def upsert_predicciones(engine: Engine, rows: List[Dict], job_id: Optional[int] 
     sql = text(
         """
         INSERT INTO predicciones
-            (sku, fecha_predicha, cantidad_predicha, modelo, version_modelo, horizonte, rmse, r2)
+            (sku, fecha_predicha, cantidad_predicha, modelo, version_modelo, horizonte, rmse, r2, job_id)
         VALUES
-            (:sku, :fecha_predicha, :cantidad_predicha, :modelo, :version_modelo, :horizonte, :rmse, :r2)
+            (:sku, :fecha_predicha, :cantidad_predicha, :modelo, :version_modelo, :horizonte, :rmse, :r2, :job_id)
         ON DUPLICATE KEY UPDATE
             cantidad_predicha = VALUES(cantidad_predicha),
             horizonte = VALUES(horizonte),

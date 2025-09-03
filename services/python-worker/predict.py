@@ -383,7 +383,7 @@ def main() -> None:
         # --- Resumen tabular requerido ---
         if summary_rows:
             df_sum = pd.DataFrame(summary_rows)
-            cols = ["sku", "modelo", "rmse", "r2", "params", "features"]
+            cols = ["sku", "modelo", "rmse", "r2", "features"]
             for c in cols:
                 if c not in df_sum.columns:
                     df_sum[c] = None
@@ -419,28 +419,6 @@ def main() -> None:
                     return out
                 return v
 
-            def _params_compact(modelo: str, params: dict | None) -> str:
-                p = _clean_nan(params) if isinstance(params, dict) else {}
-                if modelo == "RF":
-                    keys = ["n_estimators", "max_depth", "min_samples_leaf", "random_state", "n_jobs"]
-                    p = {k: p.get(k) for k in keys if k in p}
-                elif modelo == "XGB":
-                    keys = ["objective", "n_estimators", "max_depth", "learning_rate",
-                            "subsample", "colsample_bytree", "reg_alpha", "reg_lambda",
-                            "random_state", "n_jobs"]
-                    p = {k: p.get(k) for k in keys if k in p}
-                elif modelo == "COMBINADA":
-                    # Mostrar pesos redondeados
-                    w = (p or {}).get("weights", {})
-                    if isinstance(w, dict) and w:
-                        return "weights: " + ", ".join(f"{k}={float(v):.3f}" for k, v in w.items())
-                    return ""
-                # para SARIMA/ETS dejamos el dict como viene (suele ser chico)
-                try:
-                    return json.dumps(p, ensure_ascii=False)
-                except Exception:
-                    return str(p)
-
             def _features_compact(f: list | None) -> str:
                 if isinstance(f, list):
                     try:
@@ -457,7 +435,6 @@ def main() -> None:
             # aplicar formatos
             df_sum["rmse"] = df_sum["rmse"].apply(_fmt_num)
             df_sum["r2"]   = df_sum["r2"].apply(_fmt_num)
-            df_sum["params"] = [ _params_compact(m, p) for m, p in zip(df_sum["modelo"], df_sum["params"]) ]
             df_sum["features"] = df_sum["features"].apply(_features_compact)
 
             # orden estable y ancho razonable
