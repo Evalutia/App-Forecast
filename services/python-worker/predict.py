@@ -4,14 +4,13 @@
 from __future__ import annotations
 
 import argparse
-import json
 import logging
 import os
 import sys
 import time
 from datetime import datetime
 from decimal import Decimal
-from typing import Dict, Iterable, List, Optional, Tuple
+from typing import Dict, List, Optional
 
 import numpy as np
 import pandas as pd
@@ -24,97 +23,52 @@ from ioworker.db import (
     upsert_predicciones,
 )
 from ioworker.data import load_series_by_sku, load_series_by_sku_mysql
-from ml.evaluate import holdout_split, rmse, r2_score
-from ml.features import make_lag_matrix, recursive_forecast_tree
+from ml.evaluate import rmse, r2_score
 from ml.models import (
-    fit_ets,
-    fit_sarima,
-    fit_rf,
-    fit_xgb,
+    fit_sarima_insample,
+    fit_ets_insample,
+    fit_rf_insample,
+    fit_xgb_insample,
+    combine_by_inverse_rmse_insample,
     ModelResult,
     CombinedResult,
-    combine_by_inverse_rmse,
 )
 from utils.logging_conf import setup_logging
 from utils.versioning import resolve_version
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(
-        description="Forecasting CLI (SARIMA/ETS/RF/XGB/COMBINADA) y escritura en MySQL."
-    )
-    parser.add_argument("--csv", type=str, help="Ruta a calendario_ventas.csv")
-    parser.add_argument("--freq", type=str, default="MS", help="Frecuencia de resampleo (default MS)")
-    parser.add_argument("--periods", type=int, default=6, help="Meses a pronosticar")
-    parser.add_argument("--skus", type=str, default=None, help='Lista de SKUs "SKU1,SKU2"')
-    parser.add_argument("--min-history", type=int, default=24, help="Mínimo histórico por SKU")
-    parser.add_argument("--version", type=str, required=True, help="Versión del modelo a guardar")
-    parser.add_argument(
-        "--model-set",
-        type=str,
-        default="full",
-        choices=["full", "classic", "tree"],
-        help="full=SARIMA+ETS+RF+XGB+COMBINADA; classic=SARIMA+ETS; tree=RF+XGB",
-    )
-    parser.add_argument("--mysql-host", type=str, default=os.getenv("MYSQL_HOST"))
-    parser.add_argument("--mysql-port", type=int, default=int(os.getenv("MYSQL_PORT", "3306")))
-    parser.add_argument("--mysql-db", type=str, default=os.getenv("MYSQL_DB", "evalutia"))
-    parser.add_argument("--mysql-user", type=str, default=os.getenv("MYSQL_USER", "evalutia"))
-    parser.add_argument("--mysql-pass", type=str, default=os.getenv("MYSQL_PASS", "evalutia1234-"))
-    parser.add_argument("--start-month", type=str, default=None,
-                        help="YYYY-MM del primer mes a pronosticar (default: mes siguiente al último dato)")
-    parser.add_argument("--log-level", type=str, default="INFO", help="Nivel de logs")
-
-    parser.add_argument("--holdout-k", type=int, default=None,
-                    help="Tamaño del holdout para métricas; si no se pasa usa min(6, periods)")
-    parser.add_argument("--eval-scheme", type=str, default="holdout",
-                        choices=["holdout", "rolling"],
-                        help="Esquema de evaluación: holdout simple o backtest rolling")
-
-    parser.add_argument("--resample-rule", type=str, default="MS", choices=["MS","M"],
-                        help="Regla mensual como en el notebook ('MS' inicio de mes, 'M' fin de mes)")
-    parser.add_argument("--resample-agg", type=str, default="sum",
-                        choices=["sum","mean","first","last"],
-                        help="Agregación mensual idéntica al notebook")
-    parser.add_argument("--fill-na", type=str, default="zero",
-                        choices=["zero","ffill","none"],
-                        help="Cómo se rellenan faltantes tras el resampleo, igual al notebook")
-
-    # Fuente de datos
-    parser.add_argument("--input-source", type=str, default="csv", choices=["csv", "mysql"],
-                        help="Origen de datos: csv (por defecto) o mysql")
-    parser.add_argument("--mysql-table", type=str, default="ventas_historicas",
-                        help="Tabla MySQL con columnas fecha, sku, cantidad (default: ventas_historicas)")
-    parser.add_argument("--mysql-schema", type=str, default=None,
-                        help="Schema/Base opcional si difiere de MYSQL_DB")
-
-    args = parser.parse_args()
+    p = argparse.ArgumentParser("Forecast CLI (paridad de notebook)")
+    p.add_argument("--csv", type=str, help="Ruta a calendario_ventas.csv")
+    p.add_argument("--freq", type=str, default="MS")
+    p.add_argument("--periods", type=int, default=6)
+    p.add_argument("--skus", type=str, default=None)
+    p.add_argument("--min-history", type=int, default=24)
+    p.add_argument("--version", type=str, required=True)
+    p.add_argument("--model-set", type=str, default="full", choices=["full","classic","tree"])
+    p.add_argument("--mysql-host", type=str, default=os.getenv("MYSQL_HOST"))
+    p.add_argument("--mysql-port", type=int, default=int(os.getenv("MYSQL_PORT", "3306")))
+    p.add_argument("--mysql-db", type=str, default=os.getenv("MYSQL_DB", "evalutia"))
+    p.add_argument("--mysql-user", type=str, default=os.getenv("MYSQL_USER", "evalutia"))
+    p.add_argument("--mysql-pass", type=str, default=os.getenv("MYSQL_PASS", "evalutia1234-"))
+    p.add_argument("--resample-rule", type=str, default="MS", choices=["MS","M"])
+    p.add_argument("--resample-agg", type=str, default="sum", choices=["sum","mean","first","last"])
+    p.add_argument("--fill-na", type=str, default="zero", choices=["zero","ffill","none"])
+    p.add_argument("--input-source", type=str, default="csv", choices=["csv","mysql"])
+    p.add_argument("--mysql-table", type=str, default="ventas_historicas")
+    p.add_argument("--mysql-schema", type=str, default=None)
+    p.add_argument("--debug-dump", action="store_true")
+    args = p.parse_args()
     if args.input_source == "csv" and not args.csv:
-        parser.error("--csv es obligatorio cuando --input-source=csv")
-
-    # Paridad notebook: usamos la misma regla mensual como frecuencia "de trabajo"
-    args.freq = args.resample_rule
+        p.error("--csv es obligatorio con --input-source=csv")
+    args.freq = "MS"  # el notebook usa explícitamente MS
     return args
 
-def ensure_monthly_series(
-    serie: pd.Series,
-    rule: str = "MS",
-    agg: str = "sum",
-    fill: str = "zero",
-) -> pd.Series:
-    """
-    Normaliza una serie temporal a mensual con:
-    - rule: 'MS' (inicio de mes) o 'M' (fin de mes)
-    - agg:  'sum'|'mean'|'first'|'last'
-    - fill: 'zero' -> completa meses faltantes con 0
-            'ffill'-> completa por forward-fill (y si arranque es NaN, usa 0)
-            'none' -> no completa (se queda con meses observados)
-    """
+
+def ensure_monthly_series(serie: pd.Series, rule: str, agg: str, fill: str) -> pd.Series:
     s = pd.Series(serie).astype("float64")
     s.index = pd.to_datetime(s.index)
     s = s.sort_index()
-
-    # Resampleo + agregación
     if agg == "sum":
         s = s.resample(rule).sum()
     elif agg == "mean":
@@ -124,61 +78,46 @@ def ensure_monthly_series(
     elif agg == "last":
         s = s.resample(rule).last()
     else:
-        raise ValueError("resample-agg inválido")
+        raise ValueError("agg inválido")
 
-    # Completar meses faltantes (si corresponde)
-    if fill == "zero":
-        full_idx = pd.date_range(start=s.index.min(), end=s.index.max(), freq=rule)
-        s = s.reindex(full_idx)
-        s = s.fillna(0.0)
-    elif fill == "ffill":
-        full_idx = pd.date_range(start=s.index.min(), end=s.index.max(), freq=rule)
-        s = s.reindex(full_idx)
-        s = s.ffill().fillna(0.0)
-    elif fill == "none":
-        pass
-    else:
-        raise ValueError("fill-na inválido")
+    # cortar desde la primera venta > 0 (igual que notebook)
+    first_sale = s[s > 0].first_valid_index()
+    if first_sale is not None:
+        s = s.loc[first_sale:]
 
+    if fill in ("zero","ffill"):
+        idx = pd.date_range(s.index.min(), s.index.max(), freq=rule)
+        s = s.reindex(idx)
+        s = s.fillna(0.0) if fill == "zero" else s.ffill().fillna(0.0)
     return s
 
-def months_gap(base_next: pd.Timestamp, target_start: pd.Timestamp, freq: str) -> int:
-    """Cantidad de meses entre base_next y target_start (si target está después)."""
-    if freq not in ("MS", "M"):
-        raise ValueError("Solo se contemplan frecuencias mensuales (MS/M).")
-    b = pd.Timestamp(base_next).to_period("M")
-    t = pd.Timestamp(target_start).to_period("M")
-    diff = (t.year - b.year) * 12 + (t.month - b.month)
-    return int(diff) if diff > 0 else 0
+def _sanitize_forecast(a: np.ndarray, min_val: float = 0.0, max_val: float = 1e9) -> np.ndarray:
+    """
+    Asegura valores válidos para DB:
+    - Reemplaza NaN/Inf por 0
+    - Recorta negativos a 0
+    - Recorta superiores a max_val (por prudencia)
+    """
+    arr = np.asarray(a, dtype="float64")
+    arr = np.where(np.isfinite(arr), arr, 0.0)
+    arr = np.clip(arr, min_val, max_val)
+    return arr
 
-
-def forecast_index(start_month: pd.Timestamp, periods: int, freq: str) -> pd.DatetimeIndex:
-    return pd.date_range(start=start_month, periods=periods, freq=freq)
-
+def safe_metric(val):
+    """Devuelve float o None si es None/NaN/Inf (para DB)."""
+    return float(round(val,4)) if (val is not None and np.isfinite(val)) else None
 
 def as_decimal2(x: float) -> Decimal:
     return Decimal(f"{x:.2f}")
 
-def safe_metric(x: Optional[float]) -> Optional[float]:
-    if x is None:
-        return None
-    try:
-        xf = float(x)
-    except Exception:
-        return None
-    return round(xf, 4) if np.isfinite(xf) else None
-
 
 def main() -> None:
     args = parse_args()
-
     version = resolve_version(args.version)
-    setup_logging(level=args.log_level)
-
+    setup_logging(level="INFO")
     log = logging.getLogger("predict")
-    log.info("Inicializando ejecución", extra={"version": version})
 
-    # Config DB
+    # DB
     db_cfg = DBConfig(
         host=args.mysql_host or "localhost",
         port=args.mysql_port,
@@ -187,205 +126,94 @@ def main() -> None:
         password=args.mysql_pass or "evalutia",
     )
     engine = get_engine(db_cfg)
-
-    # Inserta registro de job al comenzar
     job_id = insert_job_start(engine, tipo_job="forecast")
-    log = logging.LoggerAdapter(log, extra={"job_id": job_id})  # inyecta job_id en todos los logs
+    log = logging.LoggerAdapter(log, extra={"job_id": job_id})
     t0 = time.time()
 
     try:
-        # Carga datos
-        only_skus = None
-        if args.skus:
-            only_skus = [s.strip() for s in args.skus.split(",") if s.strip()]
-
+        only_skus = [s.strip() for s in args.skus.split(",")] if args.skus else None
         if args.input_source == "mysql":
             sku_series = load_series_by_sku_mysql(
-                engine=engine,
-                table=args.mysql_table,
-                schema=args.mysql_schema,
-                freq=args.freq,
-                only_skus=only_skus,
+                engine=engine, table=args.mysql_table, schema=args.mysql_schema, freq=args.freq, only_skus=only_skus
             )
         else:
-            sku_series = load_series_by_sku(
-                csv_path=args.csv,
-                freq=args.freq,
-                only_skus=only_skus,
-            )
+            sku_series = load_series_by_sku(args.csv, freq=args.freq, only_skus=only_skus)
 
-        if not sku_series:
-            raise RuntimeError("No se cargaron series por SKU. Verifique el CSV y los filtros.")
-
-        # Determina fecha de inicio del forecast
-        # Si no se pasa --start-month => mes siguiente al último dato de cada SKU
-        start_month_cli = (
-            pd.to_datetime(args.start_month, format="%Y-%m").to_period("M").to_timestamp()
-            if args.start_month
-            else None
-        )
-
-        # Selección de modelos
-        want_sarima = args.model_set in ("full", "classic")
-        want_ets = args.model_set in ("full", "classic")
-        want_rf = args.model_set in ("full", "tree")
-        want_xgb = args.model_set in ("full", "tree")
-        want_comb = args.model_set == "full"
-
-        rf_params = {
-            "n_estimators": 400,
-            "max_depth": 8,
-            "min_samples_leaf": 2,
-            "random_state": 42,
-            "n_jobs": -1,
-        }
-        xgb_params = {
-            "objective": "reg:squarederror",
-            "n_estimators": 600,
-            "max_depth": 6,
-            "learning_rate": 0.05,
-            "subsample": 0.8,
-            "colsample_bytree": 0.8,
-            "reg_alpha": 0.1,
-            "reg_lambda": 1.0,
-            "random_state": 42,
-            "n_jobs": -1,
-        }
-
-        processed = 0
         rows_buffer: List[Dict] = []
-        warnings: List[str] = []
-        summary_rows: List[Dict] = []  # para la impresión final
+        summary_rows: List[Dict] = []
+        processed = 0
+        warnings_list: List[str] = []
 
         for sku, serie in sku_series.items():
             try:
-                # Filtra por mínimo histórico
-                if len(serie.dropna()) < args.min_history:
-                    msg = f"SKU {sku} omitido por historial insuficiente ({len(serie)} < {args.min_history})."
-                    log.warning(msg)
-                    warnings.append(msg)
+                serie = ensure_monthly_series(serie, rule="MS", agg="sum", fill=args.fill_na)
+
+                if len(serie) < (12 + args.periods):
+                    warnings_list.append(f"SKU {sku} omitido por pocos datos ({len(serie)} meses)")
                     continue
 
-                # Normaliza serie mensual EXACTA como el notebook
-                serie = ensure_monthly_series(
-                    serie, rule=args.resample_rule, agg=args.resample_agg, fill=args.fill_na
-                )
-                # Holdout para métricas (asunción: últimos 6 puntos)
-                k_eval = args.holdout_k if args.holdout_k is not None else min(6, args.periods)
-                train, test = holdout_split(serie, k=k_eval)
+                train = serie.copy()
 
-                # Determina fechas de forecast reales
-                last_train_month = train.index.max().to_period("M").to_timestamp()
-                desired_start = (
-                    start_month_cli
-                    if start_month_cli is not None
-                    else (serie.index.max().to_period("M").to_timestamp() + pd.offsets.MonthBegin(1))
+                # Índice de forecast (igual que notebook)
+                fidx = pd.date_range(
+                    start=train.index[-1] + pd.offsets.MonthBegin(),
+                    periods=args.periods,
+                    freq="MS"
                 )
-                base_next = last_train_month + pd.offsets.MonthBegin(1)
-                lead_in = months_gap(base_next=base_next, target_start=desired_start, freq=args.freq)
 
-                # Ejecuta modelos
                 results: List[ModelResult] = []
 
+                want_sarima = args.model_set in ("full","classic")
+                want_ets    = args.model_set in ("full","classic")
+                want_rf     = args.model_set in ("full","tree")
+                want_xgb    = args.model_set in ("full","tree")
+
                 if want_sarima:
-                    res = fit_sarima(train, test, steps_eval=len(test), steps_forecast=lead_in + args.periods)
-                    if res is not None:
-                        # recorta para alinear con desired_start
-                        if lead_in:
-                            res.forecast = res.forecast[lead_in:]
-                        results.append(res)
-                        summary_rows.append(
-                            {"sku": sku, "modelo": "SARIMA", "rmse": res.rmse, "r2": res.r2, "params": res.params}
-                        )
-
+                    r = fit_sarima_insample(train, steps_forecast=args.periods)
+                    if r: results.append(r)
                 if want_ets:
-                    res = fit_ets(train, test, steps_eval=len(test), steps_forecast=lead_in + args.periods)
-                    if res is not None:
-                        if lead_in:
-                            res.forecast = res.forecast[lead_in:]
-                        results.append(res)
-                        summary_rows.append(
-                            {"sku": sku, "modelo": "ETS", "rmse": res.rmse, "r2": res.r2, "params": res.params}
-                        )
-
+                    r = fit_ets_insample(train, steps_forecast=args.periods)
+                    if r: results.append(r)
                 if want_rf:
-                    res = fit_rf(
-                        train,
-                        test,
-                        steps_eval=len(test),
-                        steps_forecast=lead_in + args.periods,
-                        rf_params=rf_params,
-                        lags=12,
-                    )
-                    if res is not None:
-                        if lead_in:
-                            res.forecast = res.forecast[lead_in:]
-                        results.append(res)
-                        summary_rows.append(
-                            {
-                                "sku": sku,
-                                "modelo": "RF",
-                                "rmse": res.rmse,
-                                "r2": res.r2,
-                                "params": res.params,
-                                "features": res.features,
-                            }
-                        )
-
+                    r = fit_rf_insample(train, steps_forecast=args.periods, lags=12)
+                    if r: results.append(r)
                 if want_xgb:
-                    res = fit_xgb(
-                        train,
-                        test,
-                        steps_eval=len(test),
-                        steps_forecast=lead_in + args.periods,
-                        xgb_params=xgb_params,
-                        lags=12,
-                    )
-                    if res is not None:
-                        if lead_in:
-                            res.forecast = res.forecast[lead_in:]
-                        results.append(res)
-                        summary_rows.append(
-                            {
-                                "sku": sku,
-                                "modelo": "XGB",
-                                "rmse": res.rmse,
-                                "r2": res.r2,
-                                "params": res.params,
-                                "features": res.features,
-                            }
-                        )
+                    r = fit_xgb_insample(train, steps_forecast=args.periods, lags=12)
+                    if r: results.append(r)
 
-                # COMBINADA (si al menos 2 modelos válidos, o 1 => copia)
-                combined: Optional[CombinedResult] = None
-                if want_comb and results:
-                    combined = combine_by_inverse_rmse(results, steps=args.periods)
+                # === COMBINADA (= notebook) ===
+                combined = combine_by_inverse_rmse_insample(results, train, steps=args.periods)
 
-                    base = [r for r in results if r.holdout_pred is not None and r.rmse is not None]
-                    if base and len(test) > 0:
-                        min_len = min(len(r.holdout_pred) for r in base)
-                        y_true = test.values[:min_len]
-                        y_pred = np.zeros(min_len)
-                        for r in base:
-                            w = combined.weights.get(r.name, 0.0)
-                            y_pred += w * np.asarray(r.holdout_pred[:min_len])
-                        combined.rmse = rmse(y_true, y_pred)
-                        combined.r2 = r2_score(y_true, y_pred)
-                        
-                    summary_rows.append(
-                        {
-                            "sku": sku,
-                            "modelo": "COMBINADA",
-                            "rmse": combined.rmse,
-                            "r2": combined.r2,
-                            "params": {"weights": combined.weights},
-                        }
-                    )
+                # in-sample combinado para métricas (suma ponderada de fits)
+                base = [m for m in results if m.holdout_pred is not None and m.rmse is not None]
+                if base:
+                    # alinear fits al índice del train
+                    fits = [m.holdout_pred.reindex(train.index) for m in base]
+                    weights = np.array([combined.weights[m.name] for m in base], dtype="float64")
+                    weights = weights / weights.sum()
+                    combined_ins = sum(w * f.values for w, f in zip(weights, fits))
+                    combined_ins = pd.Series(combined_ins, index=train.index)
 
-                # Index del forecast final
-                fidx = forecast_index(start_month=desired_start, periods=args.periods, freq=args.freq)
+                    # slope hack (primer paso)
+                    if len(combined_ins) > 12:
+                        n = 12
+                        slope = (combined_ins.iloc[-1] - combined_ins.iloc[-1-n]) / n
+                    else:
+                        slope = 0.0
+                    if len(combined.forecast) > 0:
+                        alpha = 0.5
+                        combined.forecast[0] = float(alpha * (combined_ins.iloc[-1] + slope) + (1 - alpha) * combined.forecast[0])
 
-                # Construye filas para DB
+                    combined.rmse = rmse(train.values, combined_ins.values)
+                    combined.r2   = r2_score(train.values, combined_ins.values)
+
+                # --- SANEAR FORECASTS ANTES DE ESCRIBIR ---
+                for r in results:
+                    r.forecast = _sanitize_forecast(r.forecast)
+                if combined is not None:
+                    combined.forecast = _sanitize_forecast(combined.forecast)
+
+                # === Guardar filas para DB ===
                 for r in results:
                     for h, (dt, yhat) in enumerate(zip(fidx, r.forecast), start=1):
                         rows_buffer.append(
@@ -415,117 +243,63 @@ def main() -> None:
                             }
                         )
 
+                # Resumen
+                for r in results + ([combined] if combined else []):
+                    summary_rows.append({"sku": sku, "modelo": r.name, "rmse": r.rmse, "r2": r.r2,
+                                         "features": getattr(r, "features", None)})
+
+                # Dump debug opcional
+                if args.debug_dump:
+                    df_dump = pd.DataFrame({"fecha": train.index, "y_true": train.values})
+                    for r in results:
+                        if r.holdout_pred is not None:
+                            df_dump[r.name] = r.holdout_pred.reindex(train.index).values
+                    if combined and base:
+                        df_dump["COMBINADA"] = combined_ins.values
+                    df_dump.to_csv(f"eval_{sku}.csv", index=False)
+
                 processed += 1
 
             except Exception as e:
-                msg = f"Error procesando SKU {sku}: {e}"
-                log.exception(msg)
-                warnings.append(msg)
+                warnings_list.append(f"Error SKU {sku}: {e}")
                 continue
 
-        # Inserción/upsert a MySQL
         inserted = 0
         if rows_buffer:
             inserted = upsert_predicciones(engine, rows_buffer, job_id=job_id)
 
-        # Detalle para jobs_historial
-        modelos_ejecutados = sorted({r["modelo"] for r in summary_rows})
+        modelos = sorted({r["modelo"] for r in summary_rows})
         detalle = {
             "job_id": job_id,
             "version": version,
             "periods": args.periods,
             "model_set": args.model_set,
             "skus_procesados": processed,
-            "modelos": modelos_ejecutados,
-            "hiperparam_rf": rf_params if want_rf else None,
-            "hiperparam_xgb": xgb_params if want_xgb else None,
-            "features_rf": [f"lag_{i}" for i in range(1, 13)] if want_rf else None,
-            "features_xgb": [f"lag_{i}" for i in range(1, 13)] if want_xgb else None,
-            "warnings": warnings,
+            "modelos": modelos,
+            "warnings": warnings_list,
         }
-
-        # Finaliza job
         update_job_end(engine, job_id, estado="exitoso", detalle=detalle)
 
-        # --- Resumen tabular requerido ---
+        # resumen a stdout
         if summary_rows:
             df_sum = pd.DataFrame(summary_rows)
-            cols = ["sku", "modelo", "rmse", "r2", "features"]
-            for c in cols:
-                if c not in df_sum.columns:
-                    df_sum[c] = None
-
-            def _fmt_num(x):
-                if x is None:
-                    return ""
-                try:
-                    x = float(x)
-                except Exception:
-                    return ""
-                return "" if not np.isfinite(x) else f"{x:.6f}"
-
-            def _clean_nan(v):
-                # reemplaza np.nan/inf por None y limpia dict/list anidados
-                if v is None:
-                    return None
-                if isinstance(v, float):
-                    return v if np.isfinite(v) else None
-                if isinstance(v, dict):
-                    out = {}
-                    for k, vv in v.items():
-                        cv = _clean_nan(vv)
-                        if cv is not None:
-                            out[k] = cv
-                    return out
-                if isinstance(v, list):
-                    out = []
-                    for vv in v:
-                        cv = _clean_nan(vv)
-                        if cv is not None:
-                            out.append(cv)
-                    return out
-                return v
-
-            def _features_compact(f: list | None) -> str:
-                if isinstance(f, list):
-                    try:
-                        lags = [int(str(x).split("_")[1]) for x in f if str(x).startswith("lag_")]
-                        lags = sorted(set(lags))
-                        if lags and lags == list(range(lags[0], lags[-1] + 1)):
-                            # rango continuo
-                            return f"lags {lags[0]}–{lags[-1]}"
-                        return ", ".join(str(x) for x in f)
-                    except Exception:
-                        return ", ".join(str(x) for x in f)
-                return ""
-
-            # aplicar formatos
-            df_sum["rmse"] = df_sum["rmse"].apply(_fmt_num)
-            df_sum["r2"]   = df_sum["r2"].apply(_fmt_num)
-            df_sum["features"] = df_sum["features"].apply(_features_compact)
-
-            # orden estable y ancho razonable
-            df_sum = df_sum[cols].sort_values(["sku", "modelo"]).reset_index(drop=True)
-            pd.set_option("display.width", 180)
-            pd.set_option("display.max_colwidth", 120)
-
+            for c in ["rmse","r2"]:
+                df_sum[c] = df_sum[c].apply(lambda x: f"{float(x):.6f}" if x is not None and np.isfinite(x) else "")
+            def _feat(f):
+                return "lags 1–12 + month + trend" if isinstance(f, list) and len(f)>0 else ""
+            if "features" in df_sum.columns:
+                df_sum["features"] = df_sum["features"].apply(_feat)
             print("\n=== Resumen por modelo/SKU ===")
-            print(df_sum.to_string(index=False, justify="left"))
-
-
+            print(df_sum[["sku","modelo","rmse","r2","features"]].sort_values(["sku","modelo"]).to_string(index=False))
 
     except Exception as e:
-        detalle = {
-            "job_id": job_id,
-            "error": str(e),
-            "warnings": [],
-        }
         try:
-            update_job_end(engine, job_id, estado="fallido", detalle=detalle)
+            update_job_end(engine, job_id, estado="fallido", detalle={"error": str(e)})
         except Exception:
             pass
         logging.getLogger("predict").exception("Ejecución fallida")
         sys.exit(1)
+
 
 
 if __name__ == "__main__":
