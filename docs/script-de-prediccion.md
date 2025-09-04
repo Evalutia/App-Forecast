@@ -8,7 +8,7 @@ MYSQL_HOST=localhost
 MYSQL_PORT=3306
 MYSQL_DB=evalutia
 MYSQL_USER=evalutia
-MYSQL_PASS=evalutia1234-
+MYSQL_PASS=evalutia
 
 ## Uso en Docker
 
@@ -24,7 +24,11 @@ docker compose exec python-worker python /app/services/python-worker/predict.py 
 export MYSQL_HOST=localhost MYSQL_DB=evalutia MYSQL_USER=evalutia MYSQL_PASS=evalutia1234-
 python -m pip install -r services/python-worker/requirements.txt
 
+### Con Csv en data/
 python services/python-worker/predict.py --input-source csv --csv data/calendario_ventas.csv --version v2025.09.03 --model-set full --periods 6 --resample-rule MS --resample-agg sum --fill-na zero --min-history 24 --mysql-db evalutia --mysql-user evalutia --mysql-pass evalutia
+
+### Desde MySQL
+python services/python-worker/predict.py --input-source=mysql --mysql-host localhost --mysql-port 3306 --mysql-db evalutia --mysql-user evalutia --mysql-pass 'evalutia' --mysql-table ventas_historicas --periods 6 --model-set full --version v2025.09.04
 
 
 ## Preguntas frecuentes (FAQ)
