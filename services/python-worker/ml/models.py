@@ -1,4 +1,5 @@
 from __future__ import annotations
+
 import warnings
 import itertools
 import numpy as np
@@ -152,11 +153,14 @@ def fit_rf_insample(train: pd.Series, steps_forecast: int, lags: int = 12) -> Op
             hist.append(p)
         y_fc = np.asarray(oos, dtype="float64")
 
+        rmse_full = _rmse(tr.values, rf_full.values)          
+        r2_valid  = _r2(y_rf.values, fit_part.values)          
+
         return ModelResult(
             name="RF",
             forecast=y_fc,
-            rmse=_rmse(tr.values, rf_full.values),
-            r2=_r2(tr.values, rf_full.values),
+            rmse=rmse_full,
+            r2=r2_valid,
             params=rf.get_params(),
             features=feats,
             holdout_pred=rf_full,
@@ -195,11 +199,14 @@ def fit_xgb_insample(train: pd.Series, steps_forecast: int, lags: int = 12) -> O
             hist.append(p)
         y_fc = np.asarray(oos, dtype="float64")
 
+        rmse_full = _rmse(tr.values, xgb_full.values)          
+        r2_valid  = _r2(y_rf.values, fit_part.values)          
+
         return ModelResult(
             name="XGB",
             forecast=y_fc,
-            rmse=_rmse(tr.values, xgb_full.values),
-            r2=_r2(tr.values, xgb_full.values),
+            rmse=rmse_full,
+            r2=r2_valid,
             params=xgb.get_params(),
             features=feats,
             holdout_pred=xgb_full,
