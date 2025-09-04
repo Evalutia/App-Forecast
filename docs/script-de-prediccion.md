@@ -24,13 +24,7 @@ docker compose exec python-worker python /app/services/python-worker/predict.py 
 export MYSQL_HOST=localhost MYSQL_DB=evalutia MYSQL_USER=evalutia MYSQL_PASS=evalutia1234-
 python -m pip install -r services/python-worker/requirements.txt
 
-python services/python-worker/predict.py \
-  --csv ./data/calendario_ventas.csv \
-  --periods 6 \
-  --version v1.0.0 \
-  --model-set full \
-  --min-history 24 \
-  --log-level INFO
+python services/python-worker/predict.py --input-source csv --csv data/calendario_ventas.csv --version v2025.09.03 --model-set full --periods 6 --resample-rule MS --resample-agg sum --fill-na zero --min-history 24 --mysql-db evalutia --mysql-user evalutia --mysql-pass evalutia
 
 
 ## Preguntas frecuentes (FAQ)
