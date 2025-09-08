@@ -21,7 +21,6 @@ pycache/
 
 ## Env & data
 .env
-data/
 *.sqlite
 
 ## IDE
