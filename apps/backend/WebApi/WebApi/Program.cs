@@ -6,6 +6,7 @@ using Services.Security.Auth;
 using Services.Usuarios;
 using System.Text;
 using WebApi.Data;
+using Microsoft.OpenApi.Models;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -28,7 +29,39 @@ builder.Services.AddControllers();
 // builder.Services.AddControllers(o => o.Filters.Add<ExceptionFilter>()); // <- cuando tengamos el exception filter
 
 builder.Services.AddEndpointsApiExplorer();
-builder.Services.AddSwaggerGen();
+
+// 🔒 Swagger con seguridad Bearer (reemplaza tu AddSwaggerGen() anterior)
+builder.Services.AddSwaggerGen(c =>
+{
+  c.SwaggerDoc("v1", new OpenApiInfo { Title = "Evalutia API", Version = "v1" });
+
+  // Definición del esquema Bearer
+  c.AddSecurityDefinition("Bearer", new OpenApiSecurityScheme
+  {
+    Description = "JWT en el header Authorization. Ejemplo: **Bearer eyJhbGciOi...**",
+    Name = "Authorization",
+    In = ParameterLocation.Header,
+    Type = SecuritySchemeType.Http,
+    Scheme = "bearer",
+    BearerFormat = "JWT"
+  });
+
+  // Requisito global: aplica el esquema a todas las operaciones
+  c.AddSecurityRequirement(new OpenApiSecurityRequirement
+  {
+    {
+      new OpenApiSecurityScheme
+      {
+        Reference = new OpenApiReference
+        {
+          Type = ReferenceType.SecurityScheme,
+          Id = "Bearer"
+        }
+      },
+      Array.Empty<string>()
+    }
+  });
+});
 
 // AuthN/AuthZ (si vas a proteger endpoints ahora)
 var jwt = builder.Configuration.GetSection("Jwt").Get<JwtOptions>()!;

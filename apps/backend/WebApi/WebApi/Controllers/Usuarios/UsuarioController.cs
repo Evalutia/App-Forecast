@@ -6,6 +6,8 @@ using WebApi.Models;
 
 namespace WebApi.Controllers.Usuarios
 {
+  [ApiController]
+  [Route("api/[controller]")]
   public class UsuarioController : ControllerBase
   {
     private readonly IUsuarioService _usuarioService;
@@ -53,7 +55,7 @@ namespace WebApi.Controllers.Usuarios
         Rol = "duenoDeEmpresa"           
       };
 
-      var creado = _usuarioService.Add(dueno);
+      Usuario creado = _usuarioService.Add(dueno);
 
       return new DuenoDeEmpresaOutDto(creado);
     }
