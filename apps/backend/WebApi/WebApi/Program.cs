@@ -7,6 +7,8 @@ using Services.Usuarios;
 using System.Text;
 using WebApi.Data;
 using Microsoft.OpenApi.Models;
+using DataAccess.Repositories.JobDataAccess;
+using Services.Jobs;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -24,6 +26,8 @@ builder.Services.AddScoped<IJwtService, JwtService>();
 builder.Services.AddScoped<IUsuarioRepository, UsuarioRepository>();
 builder.Services.AddScoped<IAuthService, AuthService>();
 builder.Services.AddScoped<IUsuarioService, UsuarioService>();
+builder.Services.AddScoped<IJobRepository, JobRepository>();
+builder.Services.AddScoped<IJobService, JobService>();
 
 builder.Services.AddControllers();
 // builder.Services.AddControllers(o => o.Filters.Add<ExceptionFilter>()); // <- cuando tengamos el exception filter
