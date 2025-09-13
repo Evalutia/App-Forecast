@@ -1,14 +1,16 @@
+using DataAccess.Repositories.JobDataAccess;
+using DataAccess.Repositories.PrediccionDataAccess;
 using DataAccess.Repositories.UsuarioDataAccess;
+using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
-using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.OpenApi.Models;
+using Services.Jobs;
+using Services.Predicciones;
 using Services.Security.Auth;
 using Services.Usuarios;
 using System.Text;
 using WebApi.Data;
-using Microsoft.OpenApi.Models;
-using DataAccess.Repositories.JobDataAccess;
-using Services.Jobs;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -28,6 +30,9 @@ builder.Services.AddScoped<IAuthService, AuthService>();
 builder.Services.AddScoped<IUsuarioService, UsuarioService>();
 builder.Services.AddScoped<IJobRepository, JobRepository>();
 builder.Services.AddScoped<IJobService, JobService>();
+builder.Services.AddScoped<IPrediccionRepository, PrediccionRepository>();
+builder.Services.AddScoped<IPrediccionService, PrediccionService>();
+
 
 builder.Services.AddControllers();
 // builder.Services.AddControllers(o => o.Filters.Add<ExceptionFilter>()); // <- cuando tengamos el exception filter
