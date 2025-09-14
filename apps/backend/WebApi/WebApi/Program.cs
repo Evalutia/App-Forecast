@@ -1,19 +1,22 @@
 using DataAccess.Repositories.UsuarioDataAccess;
+using DataAccess.Repositories.JobDataAccess;
+using DataAccess.Repositories.VentaDataAccess;   // 👈 agregado
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Services.Security.Auth;
 using Services.Usuarios;
+using Services.Jobs;
+using Services.Ventas;                           // 👈 agregado
 using System.Text;
 using WebApi.Data;
 using Microsoft.OpenApi.Models;
-using DataAccess.Repositories.JobDataAccess;
-using Services.Jobs;
 
 var builder = WebApplication.CreateBuilder(args);
 
 // DbContext (Pomelo MySQL)
-builder.Services.AddDbContextPool<EvalutiaDbContext>(opt => {
+builder.Services.AddDbContextPool<EvalutiaDbContext>(opt =>
+{
   var cs = builder.Configuration.GetConnectionString("EvalutiaDb");
   opt.UseMySql(cs, ServerVersion.AutoDetect(cs));
 });
@@ -22,24 +25,29 @@ builder.Services.AddDbContextPool<EvalutiaDbContext>(opt => {
 builder.Services.Configure<JwtOptions>(builder.Configuration.GetSection("Jwt"));
 builder.Services.AddScoped<IJwtService, JwtService>();
 
-// DI Usuarios (sync)
+// DI Usuarios
 builder.Services.AddScoped<IUsuarioRepository, UsuarioRepository>();
 builder.Services.AddScoped<IAuthService, AuthService>();
 builder.Services.AddScoped<IUsuarioService, UsuarioService>();
+
+// DI Jobs
 builder.Services.AddScoped<IJobRepository, JobRepository>();
 builder.Services.AddScoped<IJobService, JobService>();
 
+// DI Ventas 👇
+builder.Services.AddScoped<IVentaRepository, VentaRepository>();
+builder.Services.AddScoped<IVentasService, VentasService>();
+
 builder.Services.AddControllers();
-// builder.Services.AddControllers(o => o.Filters.Add<ExceptionFilter>()); // <- cuando tengamos el exception filter
+// builder.Services.AddControllers(o => o.Filters.Add<ExceptionFilter>()); // <- cuando tengas ExceptionFilter
 
 builder.Services.AddEndpointsApiExplorer();
 
-// 🔒 Swagger con seguridad Bearer (reemplaza tu AddSwaggerGen() anterior)
+// 🔒 Swagger con seguridad Bearer
 builder.Services.AddSwaggerGen(c =>
 {
   c.SwaggerDoc("v1", new OpenApiInfo { Title = "Evalutia API", Version = "v1" });
 
-  // Definición del esquema Bearer
   c.AddSecurityDefinition("Bearer", new OpenApiSecurityScheme
   {
     Description = "JWT en el header Authorization. Ejemplo: **Bearer eyJhbGciOi...**",
@@ -50,24 +58,23 @@ builder.Services.AddSwaggerGen(c =>
     BearerFormat = "JWT"
   });
 
-  // Requisito global: aplica el esquema a todas las operaciones
   c.AddSecurityRequirement(new OpenApiSecurityRequirement
-  {
     {
-      new OpenApiSecurityScheme
-      {
-        Reference = new OpenApiReference
         {
-          Type = ReferenceType.SecurityScheme,
-          Id = "Bearer"
+            new OpenApiSecurityScheme
+            {
+                Reference = new OpenApiReference
+                {
+                    Type = ReferenceType.SecurityScheme,
+                    Id = "Bearer"
+                }
+            },
+            Array.Empty<string>()
         }
-      },
-      Array.Empty<string>()
-    }
-  });
+    });
 });
 
-// AuthN/AuthZ (si vas a proteger endpoints ahora)
+// AuthN/AuthZ
 var jwt = builder.Configuration.GetSection("Jwt").Get<JwtOptions>()!;
 builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
     .AddJwtBearer(o =>
@@ -87,11 +94,11 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
 builder.Services.AddAuthorization();
 
 var app = builder.Build();
-app.UseSwagger(); app.UseSwaggerUI();
+app.UseSwagger();
+app.UseSwaggerUI();
 
 app.UseHttpsRedirection();
 
-// Habilitá esto si vas a exigir JWT en endpoints
 app.UseAuthentication();
 app.UseAuthorization();
 
