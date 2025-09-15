@@ -1,7 +1,7 @@
 using Microsoft.AspNetCore.Mvc;
 using Services.Ventas;
 using WebApi.Controllers.Ventas.DTOs;
-using WebApi.Models;
+using Models.Validators;
 
 namespace WebApi.Controllers.Ventas
 {
@@ -16,51 +16,49 @@ namespace WebApi.Controllers.Ventas
       _ventasService = ventasService;
     }
 
-    // GET /api/ventas?sku=I0001&fechaDesde=2024-01-01&fechaHasta=2024-12-31&page=1&pageSize=50&modo=historico
+    // GET /api/ventas → histórico o agregado
     [HttpGet]
-    public ActionResult<object> Get(
-        [FromQuery] string? sku,
+    public ActionResult<PagedResultDto<object>> Get(
         [FromQuery] DateOnly? fechaDesde,
         [FromQuery] DateOnly? fechaHasta,
-        [FromQuery] string? modo = "historico",
+        [FromQuery] string? sku,
         [FromQuery] int page = 1,
         [FromQuery] int pageSize = 50,
-        [FromQuery] string periodo = "mensual"
-    )
+        [FromQuery] string? agregado = null)
     {
-      if (modo?.ToLower() == "agregado")
+      // ✅ Validación de parámetros
+      VentasQueryValidator.ValidarParametros(fechaDesde, fechaHasta, sku,
+          string.IsNullOrEmpty(agregado) ? "historico" : "agregado");
+
+      if (!string.IsNullOrWhiteSpace(agregado))
       {
-        var (items, total) = _ventasService.Aggregate(fechaDesde, fechaHasta, sku, periodo, page, pageSize);
-
-        var outItems = items.Select(i =>
-        {
-          dynamic g = i; // anónimo desde repo
-          return new VentaAgregadaOutDto(
-              sku: g.Sku,
-              anio: g.Anio,
-              mes: (g as IDictionary<string, object>).ContainsKey("Mes") ? g.Mes : null,
-              total: g.Total
-          );
-        });
-
+        var (items, total) = _ventasService.Aggregate(fechaDesde, fechaHasta, sku, agregado, page, pageSize);
+        var outItems = items.Select(v => new VentaAgregadaOutDto(v.Periodo, v.Sku, v.TotalCantidad));
         return Ok(new PagedResultDto<VentaAgregadaOutDto>(outItems, page, pageSize, total));
       }
       else
       {
         var (items, total) = _ventasService.Search(fechaDesde, fechaHasta, sku, page, pageSize);
-
-        var outItems = items.Select(v => new VentaOutDto(v));
-
+        var outItems = items.Select(v => new VentaOutDto(
+            id: (int)v.Id,
+            fecha: v.Fecha.ToString("yyyy-MM-dd"),
+            sku: v.Sku,
+            cantidad: (int)v.Cantidad,
+            fuente: v.Fuente ?? string.Empty
+        ));
         return Ok(new PagedResultDto<VentaOutDto>(outItems, page, pageSize, total));
       }
     }
 
-    // GET /api/ventas/distinct-skus?filtro=I00
+    // GET /api/ventas/distinct-skus → autocompletar
     [HttpGet("distinct-skus")]
-    public ActionResult<IEnumerable<SkuOutDto>> DistinctSkus([FromQuery] string? filtro = null)
+    public ActionResult<IReadOnlyList<string>> DistinctSkus([FromQuery] string? filtro = null)
     {
+      // ✅ Validación del filtro
+      SkusQueryValidator.ValidarFiltro(filtro);
+
       var skus = _ventasService.DistinctSkus(filtro);
-      return Ok(skus.Select(s => new SkuOutDto(s)));
+      return Ok(skus);
     }
   }
 }

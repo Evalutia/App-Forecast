@@ -6,24 +6,33 @@ namespace DataAccess.Repositories.VentaDataAccess
   public class VentaRepository : IVentaRepository
   {
     private readonly EvalutiaDbContext _db;
-    public VentaRepository(EvalutiaDbContext db) { _db = db; }
 
-    // Histórico de ventas con filtros + paginación
+    public VentaRepository(EvalutiaDbContext db)
+    {
+      _db = db;
+    }
+
+    // Histórico: registros crudos con filtros + paginación
     public (IReadOnlyList<VentaHistorica> Items, int Total) Search(
         DateOnly? fechaDesde,
         DateOnly? fechaHasta,
         string? sku,
         int page,
-        int pageSize
-    )
+        int pageSize)
     {
       var q = _db.VentasHistoricas.AsQueryable();
 
-      if (fechaDesde.HasValue) q = q.Where(v => v.Fecha >= fechaDesde.Value);
-      if (fechaHasta.HasValue) q = q.Where(v => v.Fecha <= fechaHasta.Value);
-      if (!string.IsNullOrWhiteSpace(sku)) q = q.Where(v => v.Sku == sku);
+      if (fechaDesde.HasValue)
+        q = q.Where(v => v.Fecha >= fechaDesde.Value);
+
+      if (fechaHasta.HasValue)
+        q = q.Where(v => v.Fecha <= fechaHasta.Value);
+
+      if (!string.IsNullOrWhiteSpace(sku))
+        q = q.Where(v => v.Sku == sku);
 
       var total = q.Count();
+
       var items = q.OrderBy(v => v.Fecha)
                    .Skip((page - 1) * pageSize)
                    .Take(pageSize)
@@ -32,65 +41,75 @@ namespace DataAccess.Repositories.VentaDataAccess
       return (items, total);
     }
 
-    // Ventas agregadas (ej. sumadas por mes o año)
-    public (IReadOnlyList<object> Items, int Total) Aggregate(
+    // Agregado: ventas agrupadas por período
+    public (IReadOnlyList<VentaAgregada> Items, int Total) Aggregate(
         DateOnly? fechaDesde,
         DateOnly? fechaHasta,
         string? sku,
         string periodo,
         int page,
-        int pageSize
-    )
+        int pageSize)
     {
       var q = _db.VentasHistoricas.AsQueryable();
 
-      if (fechaDesde.HasValue) q = q.Where(v => v.Fecha >= fechaDesde.Value);
-      if (fechaHasta.HasValue) q = q.Where(v => v.Fecha <= fechaHasta.Value);
-      if (!string.IsNullOrWhiteSpace(sku)) q = q.Where(v => v.Sku == sku);
+      if (fechaDesde.HasValue)
+        q = q.Where(v => v.Fecha >= fechaDesde.Value);
 
-      // agrupación simple por periodo
-      var grouped = periodo.ToLower() switch
+      if (fechaHasta.HasValue)
+        q = q.Where(v => v.Fecha <= fechaHasta.Value);
+
+      if (!string.IsNullOrWhiteSpace(sku))
+        q = q.Where(v => v.Sku == sku);
+
+      // Agrupamos por período dinámicamente
+      var agrupado = periodo?.ToLower() switch
       {
-        "mensual" => q.GroupBy(v => new { v.Sku, Mes = v.Fecha.Month, Anio = v.Fecha.Year })
-                      .Select(g => new {
-                        g.Key.Sku,
-                        g.Key.Anio,
-                        g.Key.Mes,
-                        Total = g.Sum(x => (int)x.Cantidad)
-                      }),
+        "mensual" => q.GroupBy(v => new { v.Sku, v.Fecha.Year, v.Fecha.Month })
+                       .Select(g => new VentaAgregada
+                       {
+                         Periodo = $"{g.Key.Year:D4}-{g.Key.Month:D2}",
+                         Sku = g.Key.Sku,
+                         TotalCantidad = (uint)g.Sum(x => x.Cantidad)
+                       }),
         "anual" => q.GroupBy(v => new { v.Sku, v.Fecha.Year })
-                    .Select(g => new {
-                      g.Key.Sku,
-                      Anio = g.Key.Year,
-                      Total = g.Sum(x => (int)x.Cantidad)
+                    .Select(g => new VentaAgregada
+                    {
+                      Periodo = $"{g.Key.Year:D4}",
+                      Sku = g.Key.Sku,
+                      TotalCantidad = (uint)g.Sum(x => x.Cantidad)
                     }),
         _ => q.GroupBy(v => new { v.Sku, v.Fecha })
-              .Select(g => new {
-                g.Key.Sku,
-                g.Key.Fecha,
-                Total = g.Sum(x => (int)x.Cantidad)
+              .Select(g => new VentaAgregada
+              {
+                Periodo = g.Key.Fecha.ToString("yyyy-MM-dd"),
+                Sku = g.Key.Sku,
+                TotalCantidad = (uint)g.Sum(x => x.Cantidad)
               })
       };
 
-      var total = grouped.Count();
-      var items = grouped
-                  .OrderBy(g => g.Sku)
-                  .Skip((page - 1) * pageSize)
-                  .Take(pageSize)
-                  .ToList<object>();
+      var total = agrupado.Count();
+
+      var items = agrupado.OrderBy(a => a.Periodo)
+                          .Skip((page - 1) * pageSize)
+                          .Take(pageSize)
+                          .ToList();
 
       return (items, total);
     }
 
-    // Lista de SKUs distintos
+    // Autocomplete de SKUs
     public IReadOnlyList<string> DistinctSkus(string? filtro)
     {
-      var q = _db.VentasHistoricas.Select(v => v.Sku).Distinct();
+      var q = _db.VentasHistoricas.AsQueryable();
 
       if (!string.IsNullOrWhiteSpace(filtro))
-        q = q.Where(s => s.Contains(filtro));
+        q = q.Where(v => v.Sku.Contains(filtro));
 
-      return q.OrderBy(s => s).ToList();
+      return q.Select(v => v.Sku)
+              .Distinct()
+              .OrderBy(s => s)
+              .Take(50) // límite para no devolver miles
+              .ToList();
     }
   }
 }
