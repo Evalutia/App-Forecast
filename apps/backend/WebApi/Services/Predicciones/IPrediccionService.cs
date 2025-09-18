@@ -6,7 +6,6 @@ namespace Services.Predicciones
   {
     IEnumerable<Prediccion> GetUltimasBySku();
     (IReadOnlyList<Prediccion> Items, int Total) Search(Prediccion p);
-    IReadOnlyList<Prediccion> Series(string sku, DateTime? desde, DateTime? hasta);
     IReadOnlyList<Prediccion> GetByJob(ulong jobId);
   }
 }

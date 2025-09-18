@@ -28,11 +28,6 @@ namespace Services.Predicciones
       );
     }
 
-    public IReadOnlyList<Prediccion> Series(string sku, DateTime? desde, DateTime? hasta)
-    {
-      return _repo.GetSeries(sku, desde, hasta);
-    }
-
     public IReadOnlyList<Prediccion> GetByJob(ulong jobId)
     {
       return _repo.GetByJob(jobId);

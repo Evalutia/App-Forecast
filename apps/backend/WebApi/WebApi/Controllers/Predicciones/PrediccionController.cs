@@ -46,21 +46,16 @@ namespace WebApi.Controllers.Predicciones
       return Ok(new { items, page, pageSize, total });
     }
 
-    [HttpGet("series")]
-    public ActionResult<IEnumerable<Prediccion>> Series(
-      [FromQuery] string sku,
-      [FromQuery] DateTime? desde = null,
-      [FromQuery] DateTime? hasta = null)
-    {
-      var series = _svc.Series(sku, desde, hasta);
-      return Ok(series);
-    }
-
     [HttpGet("jobs/{jobId:long}")]
     public ActionResult<IEnumerable<Prediccion>> GetByJob([FromRoute] ulong jobId)
     {
       var preds = _svc.GetByJob(jobId);
+
+      if (!preds.Any())
+        return NotFound($"No se encontraron predicciones para el Job ID {jobId}.");
+
       return Ok(preds);
     }
+
   }
 }

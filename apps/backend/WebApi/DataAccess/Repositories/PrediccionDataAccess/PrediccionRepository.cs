@@ -32,8 +32,8 @@ namespace DataAccess.Repositories.PrediccionDataAccess
     {
       var q = _db.Predicciones.AsQueryable();
 
-      if (!string.IsNullOrWhiteSpace(sku)) q = q.Where(p => p.Sku == sku);
-      if (!string.IsNullOrWhiteSpace(modelo)) q = q.Where(p => p.Modelo == modelo);
+      if (!string.IsNullOrWhiteSpace(sku)) q = q.Where(p => p.Sku.ToLower() == sku.ToLower());
+      if (!string.IsNullOrWhiteSpace(modelo)) q = q.Where(p => p.Modelo.ToLower() == modelo.ToLower());
       if (desde.HasValue) q = q.Where(p => p.FechaPredicha >= DateOnly.FromDateTime(desde.Value));
       if (hasta.HasValue) q = q.Where(p => p.FechaPredicha <= DateOnly.FromDateTime(hasta.Value));
 
@@ -44,16 +44,6 @@ namespace DataAccess.Repositories.PrediccionDataAccess
                    .ToList();
 
       return (items, total);
-    }
-
-    public IReadOnlyList<Prediccion> GetSeries(string sku, DateTime? desde, DateTime? hasta)
-    {
-      var q = _db.Predicciones.Where(p => p.Sku == sku);
-
-      if (desde.HasValue) q = q.Where(p => p.FechaPredicha >= DateOnly.FromDateTime(desde.Value));
-      if (hasta.HasValue) q = q.Where(p => p.FechaPredicha <= DateOnly.FromDateTime(hasta.Value));
-
-      return q.OrderBy(p => p.FechaPredicha).ToList();
     }
 
     public IReadOnlyList<Prediccion> GetByJob(ulong jobId)
