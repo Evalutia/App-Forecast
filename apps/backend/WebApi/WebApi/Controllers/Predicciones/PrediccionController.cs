@@ -34,17 +34,22 @@ namespace WebApi.Controllers.Predicciones
     [FromQuery] DateTime? desde = null,
     [FromQuery] DateTime? hasta = null)
     {
-      var (items, total) = _svc.Search(new Prediccion
-      {
-        Sku = sku ?? string.Empty,
-        Modelo = modelo ?? string.Empty,
-        FechaPredicha = desde.HasValue
-              ? DateOnly.FromDateTime(desde.Value)
-              : default
-      });
+      var (items, total) = _svc.Search(
+          new Prediccion
+          {
+            Sku = sku ?? string.Empty,
+            Modelo = modelo ?? string.Empty,
+            FechaPredicha = desde.HasValue
+                  ? DateOnly.FromDateTime(desde.Value)
+                  : default
+          },
+          page,
+          pageSize
+      );
 
       return Ok(new { items, page, pageSize, total });
     }
+
 
     [HttpGet("jobs/{jobId:long}")]
     public ActionResult<IEnumerable<Prediccion>> GetByJob([FromRoute] ulong jobId)

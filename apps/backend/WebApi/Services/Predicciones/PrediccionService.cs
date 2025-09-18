@@ -16,17 +16,18 @@ namespace Services.Predicciones
       return _repo.GetUltimasBySku();
     }
 
-    public (IReadOnlyList<Prediccion> Items, int Total) Search(Prediccion p)
+    public (IReadOnlyList<Prediccion> Items, int Total) Search(Prediccion p, int page = 1, int pageSize = 50)
     {
       return _repo.Search(
           sku: string.IsNullOrWhiteSpace(p.Sku) ? null : p.Sku,
           modelo: string.IsNullOrWhiteSpace(p.Modelo) ? null : p.Modelo,
           desde: p.FechaPredicha == default ? null : p.FechaPredicha.ToDateTime(TimeOnly.MinValue),
           hasta: p.FechaPredicha == default ? null : p.FechaPredicha.ToDateTime(TimeOnly.MaxValue),
-          page: 1,
-          pageSize: 50
+          page: page,
+          pageSize: pageSize
       );
     }
+
 
     public IReadOnlyList<Prediccion> GetByJob(ulong jobId)
     {
