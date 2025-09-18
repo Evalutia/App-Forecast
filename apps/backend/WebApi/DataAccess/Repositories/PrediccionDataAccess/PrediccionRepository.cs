@@ -11,12 +11,20 @@ namespace DataAccess.Repositories.PrediccionDataAccess
       _db = db;
     }
 
-    public Prediccion? GetUltimaBySku(string sku)
+    public IEnumerable<Prediccion> GetUltimasBySku()
     {
+      var ultimoJobId = _db.JobsHistoriales
+                           .OrderByDescending(j => j.Id)
+                           .Select(j => j.Id)
+                           .FirstOrDefault();
+
+      if (ultimoJobId == 0)
+        return Enumerable.Empty<Prediccion>();
+
       return _db.Predicciones
-                .Where(p => p.Sku == sku)
-                .OrderByDescending(p => p.TsGeneracion)
-                .FirstOrDefault();
+                .Where(p => p.JobId == ultimoJobId)
+                .OrderBy(p => p.Sku)
+                .ToList();
     }
 
     public (IReadOnlyList<Prediccion> Items, int Total) Search(

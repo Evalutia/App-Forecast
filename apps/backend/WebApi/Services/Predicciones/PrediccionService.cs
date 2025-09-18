@@ -11,15 +11,21 @@ namespace Services.Predicciones
       _repo = repo;
     }
 
-    public Prediccion? GetUltima(string sku)
+    public IEnumerable<Prediccion> GetUltimasBySku()
     {
-      return _repo.GetUltimaBySku(sku);
+      return _repo.GetUltimasBySku();
     }
 
-    public (IReadOnlyList<Prediccion> Items, int Total) Search(
-        string? sku, string? modelo, DateTime? desde, DateTime? hasta, int page, int pageSize)
+    public (IReadOnlyList<Prediccion> Items, int Total) Search(Prediccion p)
     {
-      return _repo.Search(sku, modelo, desde, hasta, page, pageSize);
+      return _repo.Search(
+          sku: string.IsNullOrWhiteSpace(p.Sku) ? null : p.Sku,
+          modelo: string.IsNullOrWhiteSpace(p.Modelo) ? null : p.Modelo,
+          desde: p.FechaPredicha == default ? null : p.FechaPredicha.ToDateTime(TimeOnly.MinValue),
+          hasta: p.FechaPredicha == default ? null : p.FechaPredicha.ToDateTime(TimeOnly.MaxValue),
+          page: 1,
+          pageSize: 50
+      );
     }
 
     public IReadOnlyList<Prediccion> Series(string sku, DateTime? desde, DateTime? hasta)

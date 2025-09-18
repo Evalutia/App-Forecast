@@ -14,24 +14,35 @@ namespace WebApi.Controllers.Predicciones
       _svc = svc;
     }
 
-    [HttpGet("ultima")]
-    public ActionResult<Prediccion?> GetUltima([FromQuery] string sku)
+    [HttpGet("ultimas")]
+    public ActionResult<IEnumerable<Prediccion>> GetUltimasBySku()
     {
-      var pred = _svc.GetUltima(sku);
-      if (pred == null) return NotFound();
-      return Ok(pred);
+      var predicciones = _svc.GetUltimasBySku();
+
+      if (!predicciones.Any())
+        return NotFound("No se encontraron predicciones para el último Job.");
+
+      return Ok(predicciones);
     }
 
     [HttpGet]
     public ActionResult<object> Search(
-      [FromQuery] string? sku = null,
-      [FromQuery] string? modelo = null,
-      [FromQuery] DateTime? desde = null,
-      [FromQuery] DateTime? hasta = null,
-      [FromQuery] int page = 1,
-      [FromQuery] int pageSize = 50)
+    [FromQuery] int page = 1,
+    [FromQuery] int pageSize = 50,
+    [FromQuery] string? sku = null,
+    [FromQuery] string? modelo = null,
+    [FromQuery] DateTime? desde = null,
+    [FromQuery] DateTime? hasta = null)
     {
-      var (items, total) = _svc.Search(sku, modelo, desde, hasta, page, pageSize);
+      var (items, total) = _svc.Search(new Prediccion
+      {
+        Sku = sku ?? string.Empty,
+        Modelo = modelo ?? string.Empty,
+        FechaPredicha = desde.HasValue
+              ? DateOnly.FromDateTime(desde.Value)
+              : default
+      });
+
       return Ok(new { items, page, pageSize, total });
     }
 
