@@ -1,95 +1,108 @@
-version: "3.9"
-
+name: evalutia
 services:
-  db:
-    image: mysql:8.4
-    container_name: ${PROJECT_NAME}-db
+  mysql:
+    image: mysql:8.0
+    container_name: evalutia-mysql
+    command: --default-authentication-plugin=mysql_native_password --character-set-server=utf8mb4 --collation-server=utf8mb4_unicode_ci
     environment:
-      MYSQL_ROOT_PASSWORD: ${DB_ROOT_PASSWORD}
-      MYSQL_DATABASE: ${DB_NAME}
-      MYSQL_USER: ${DB_USER}
-      MYSQL_PASSWORD: ${DB_PASSWORD}
+      MYSQL_DATABASE: ${MYSQL_DB}
+      MYSQL_USER: ${MYSQL_USER}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD}
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
+      TZ: ${TZ}
     ports:
-      - "${DB_PORT}:3306"
+      - "3307:3306"
     volumes:
       - mysql_data:/var/lib/mysql
+      - ./infra/sql:/docker-entrypoint-initdb.d:ro
     healthcheck:
-      test: ["CMD-SHELL", "mysqladmin ping -h localhost -p${DB_ROOT_PASSWORD} --silent"]
+      test: ["CMD-SHELL", 'mysqladmin ping -h 127.0.0.1 -u "$$MYSQL_USER" -p"$$MYSQL_PASSWORD" || exit 1']
       interval: 10s
       timeout: 5s
       retries: 10
-
-  redis:
-    image: redis:7
-    container_name: ${PROJECT_NAME}-redis
-    ports:
-      - "${REDIS_PORT}:6379"
+    networks:
+      - evalutia_net
+    restart: unless-stopped
 
   adminer:
-    image: adminer
-    container_name: ${PROJECT_NAME}-adminer
+    image: adminer:latest
+    container_name: evalutia-adminer
     depends_on:
-      - db
+      mysql:
+        condition: service_healthy
+    environment:
+      TZ: ${TZ}
     ports:
-      - "${ADMINER_PORT}:8080"
+      - "8082:8080"
+    networks:
+      - evalutia_net
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    container_name: evalutia-redis
+    command: ["redis-server", "--appendonly", "yes"]
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    networks:
+      - evalutia_net
+    restart: unless-stopped
 
   webapi:
-    build:
-      context: ./apps/webapi
-    container_name: ${PROJECT_NAME}-webapi
-    environment:
-      ASPNETCORE_ENVIRONMENT: ${ASPNETCORE_ENVIRONMENT}
-      ConnectionStrings__Default: "Server=db;Port=3306;Database=${DB_NAME};User=${DB_USER};Password=${DB_PASSWORD};"
-      CORS__Origins: ${CORS_ORIGINS}
-    ports:
-      - "${WEBAPI_PORT}:8080"
-    depends_on:
-      db:
-        condition: service_healthy
-
-  webapp:
-    build:
-      context: ./apps/webapp
-    container_name: ${PROJECT_NAME}-webapp
-    environment:
-      VITE_API_BASE_URL: ${VITE_API_BASE_URL}
-    ports:
-      - "${WEBAPP_PORT}:5173"
-    depends_on:
-      - webapi
+      build:
+        context: .
+        dockerfile: ./apps/backend/Dockerfile
+      container_name: evalutia-webapi
+      env_file:
+        - .env
+      environment:
+        ConnectionStrings__Default: "Server=mysql;Port=3306;Database=evalutia;User=evalutia;Password=evalutia;TreatTinyAsBoolean=false;AllowUserVariables=True;CharSet=utf8mb4;SslMode=None;AllowPublicKeyRetrieval=True"
+        JWT__Issuer: ${JWT_ISSUER}
+        JWT__Audience: ${JWT_AUDIENCE}
+        JWT__Secret: ${JWT_SECRET}
+        CORS__AllowedOrigins: ${CORS_ORIGINS}
+        TZ: ${TZ}
+      depends_on:
+        mysql:
+          condition: service_healthy
+      ports:
+        - "8081:8080"
+      healthcheck:
+        test: ["CMD-SHELL", "curl -fsS http://localhost:8080/swagger/index.html || exit 1"]
+        interval: 15s
+        timeout: 5s
+        retries: 20
+      networks:
+        - evalutia_net
+      restart: unless-stopped
 
   python-worker:
-    build:
-      context: ./services/python-worker
-    container_name: ${PROJECT_NAME}-python-worker
-    environment:
-      DB_HOST: ${DB_HOST}
-      DB_PORT: ${DB_PORT}
-      DB_NAME: ${DB_NAME}
-      DB_USER: ${DB_USER}
-      DB_PASSWORD: ${DB_PASSWORD}
-      REDIS_HOST: ${REDIS_HOST}
-      REDIS_PORT: ${REDIS_PORT}
-    volumes:
-      - ./data:/app/data
-    depends_on:
-      - db
-      - redis
+      build:
+        context: .
+        dockerfile: ./services/python-worker/Dockerfile
+      container_name: evalutia-python-worker
+      env_file:
+        - .env
+      environment:
+        # Opción B para evitar el bug de la variable en predict.py:
+        # Descomenta si NO vas a pasar --mysql-pass en el comando
+        # MYSQL_PASS: ${MYSQL_PASSWORD}
+        TZ: ${TZ}
+      depends_on:
+        mysql:
+          condition: service_healthy
+      networks:
+        - evalutia_net
+      restart: unless-stopped
 
-  etl:
-    build:
-      context: ./services/etl
-    container_name: ${PROJECT_NAME}-etl
-    environment:
-      DB_HOST: ${DB_HOST}
-      DB_PORT: ${DB_PORT}
-      DB_NAME: ${DB_NAME}
-      DB_USER: ${DB_USER}
-      DB_PASSWORD: ${DB_PASSWORD}
-    volumes:
-      - ./data:/app/data
-    depends_on:
-      - db
+
+networks:
+  evalutia_net:
 
 volumes:
   mysql_data:

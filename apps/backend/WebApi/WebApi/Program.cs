@@ -15,9 +15,11 @@ using WebApi.Data;
 var builder = WebApplication.CreateBuilder(args);
 
 // DbContext (Pomelo MySQL)
-builder.Services.AddDbContextPool<EvalutiaDbContext>(opt => {
-  var cs = builder.Configuration.GetConnectionString("EvalutiaDb");
-  opt.UseMySql(cs, ServerVersion.AutoDetect(cs));
+builder.Services.AddDbContextPool<EvalutiaDbContext>(opt =>
+{
+    var cs = builder.Configuration.GetConnectionString("Default");
+    var serverVersion = new MySqlServerVersion(new Version(8, 0, 36));
+    opt.UseMySql(cs, serverVersion, x => x.EnableRetryOnFailure(3));
 });
 
 // JWT

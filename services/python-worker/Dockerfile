@@ -1,31 +1,21 @@
+# Imagen base
 FROM python:3.11-slim
 
-ENV PYTHONDONTWRITEBYTECODE=1 \
-    PYTHONUNBUFFERED=1 \
-    PIP_NO_CACHE_DIR=1 \
-    PIP_DISABLE_PIP_VERSION_CHECK=1
-
+# Dependencias del sistema (xgboost usa libgomp)
 RUN apt-get update && apt-get install -y --no-install-recommends \
     libgomp1 \
-    && rm -rf /var/lib/apt/lists/*
+ && rm -rf /var/lib/apt/lists/*
 
+# Workdir
 WORKDIR /app
 
-COPY services/python-worker/requirements.txt ./services/python-worker/requirements.txt
+# Requisitos Python (ajustá si ya tenés un requirements.txt del proyecto)
+# Incluí lo que uses realmente: pandas, numpy, statsmodels, scikit-learn, xgboost, SQLAlchemy, pymysql, etc.
+COPY services/python-worker/requirements.txt /app/requirements.txt
+RUN pip install --no-cache-dir -r requirements.txt
 
-RUN python -m pip install --upgrade pip setuptools wheel && \
-    pip install --no-cache-dir -r services/python-worker/requirements.txt
+# Copiá el código del worker (incluyendo predict.py y los paquetes ioworker, ml, utils, etc.)
+COPY services/python-worker/ /app/
 
-COPY services/python-worker ./services/python-worker
-
-RUN useradd -m -u 10001 appuser && chown -R appuser:appuser /app
-USER appuser
-
-ENV MYSQL_HOST=localhost \
-    MYSQL_PORT=3306 \
-    MYSQL_DB=evalutia \
-    MYSQL_USER=evalutia \
-    MYSQL_PASS=evalutia1234-
-
-ENTRYPOINT ["python", "/app/services/python-worker/predict.py"]
-CMD ["--help"]
+# Entrypoint por defecto: no hace nada (dejamos el contenedor en “idle” hasta que lo llames)
+CMD ["sleep", "infinity"]
