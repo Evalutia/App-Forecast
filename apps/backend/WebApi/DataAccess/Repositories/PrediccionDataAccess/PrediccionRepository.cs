@@ -32,7 +32,7 @@ namespace DataAccess.Repositories.PrediccionDataAccess
     {
       var q = _db.Predicciones.AsQueryable();
 
-      if (!string.IsNullOrWhiteSpace(sku)) q = q.Where(p => p.Sku.ToLower() == sku.ToLower());
+      if (!string.IsNullOrWhiteSpace(sku)) q = q.Where(p => p.Sku.ToLower().StartsWith(sku.ToLower()));
       if (!string.IsNullOrWhiteSpace(modelo)) q = q.Where(p => p.Modelo.ToLower() == modelo.ToLower());
       if (desde.HasValue) q = q.Where(p => p.FechaPredicha >= DateOnly.FromDateTime(desde.Value));
       if (hasta.HasValue) q = q.Where(p => p.FechaPredicha <= DateOnly.FromDateTime(hasta.Value));
