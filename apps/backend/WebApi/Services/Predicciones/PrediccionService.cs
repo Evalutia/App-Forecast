@@ -30,7 +30,13 @@ namespace Services.Predicciones
 
     public IReadOnlyList<Prediccion> GetByJob(ulong jobId)
     {
-      return _repo.GetByJob(jobId);
+      var preds = _repo.GetByJob(jobId);
+
+      if (!preds.Any())
+        throw new KeyNotFoundException($"No se encontraron predicciones para el Job ID {jobId}.");
+
+      return preds;
     }
+
   }
 }

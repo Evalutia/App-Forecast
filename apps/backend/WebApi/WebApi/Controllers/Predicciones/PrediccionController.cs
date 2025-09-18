@@ -50,12 +50,7 @@ namespace WebApi.Controllers.Predicciones
     public ActionResult<IEnumerable<Prediccion>> GetByJob([FromRoute] ulong jobId)
     {
       var preds = _svc.GetByJob(jobId);
-
-      if (!preds.Any())
-        return NotFound($"No se encontraron predicciones para el Job ID {jobId}.");
-
       return Ok(preds);
     }
-
   }
 }
