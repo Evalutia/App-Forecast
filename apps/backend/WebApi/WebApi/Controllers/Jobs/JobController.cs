@@ -13,23 +13,28 @@ namespace WebApi.Controllers.Jobs
 
     [HttpGet]
     public ActionResult<object> Search(
-      [FromQuery] int page = 1,
-      [FromQuery] int pageSize = 50,
-      [FromQuery] string? tipo = null,
-      [FromQuery] string? estado = null,
-      [FromQuery] DateTime? desde = null,
-      [FromQuery] DateTime? hasta = null)
+    [FromQuery] int page = 1,
+    [FromQuery] int pageSize = 50,
+    [FromQuery] string? tipo = null,
+    [FromQuery] string? estado = null,
+    [FromQuery] DateTime? desde = null,
+    [FromQuery] DateTime? hasta = null)
     {
-      var (items, total) = _svc.Search(new JobHistorial
-      {
-        TipoJob = tipo ?? string.Empty,
-        Estado = estado ?? string.Empty,
-        FechaInicio = desde ?? default,
-        FechaFin = hasta
-      });
+      var (items, total) = _svc.Search(
+          new JobHistorial
+          {
+            TipoJob = tipo ?? string.Empty,
+            Estado = estado ?? string.Empty,
+            FechaInicio = desde ?? default,
+            FechaFin = hasta
+          },
+          page,
+          pageSize
+      );
 
       return Ok(new { items, page, pageSize, total });
     }
+
 
     [HttpGet("{id:long}")]
     public ActionResult<JobHistorial> GetById([FromRoute] ulong id)
