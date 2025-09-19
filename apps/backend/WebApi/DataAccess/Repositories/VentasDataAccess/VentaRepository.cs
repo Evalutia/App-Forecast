@@ -12,7 +12,6 @@ namespace DataAccess.Repositories.VentaDataAccess
       _db = db;
     }
 
-    // Histórico: registros crudos con filtros + paginación
     public (IReadOnlyList<VentaHistorica> Items, int Total) Search(
         DateOnly? fechaDesde,
         DateOnly? fechaHasta,
@@ -41,7 +40,6 @@ namespace DataAccess.Repositories.VentaDataAccess
       return (items, total);
     }
 
-    // Agregado: ventas agrupadas por período
     public (IReadOnlyList<VentaAgregada> Items, int Total) Aggregate(
         DateOnly? fechaDesde,
         DateOnly? fechaHasta,
@@ -61,7 +59,6 @@ namespace DataAccess.Repositories.VentaDataAccess
       if (!string.IsNullOrWhiteSpace(sku))
         q = q.Where(v => v.Sku == sku);
 
-      // Agrupamos por período dinámicamente
       var agrupado = periodo?.ToLower() switch
       {
         "mensual" => q.GroupBy(v => new { v.Sku, v.Fecha.Year, v.Fecha.Month })
@@ -97,7 +94,6 @@ namespace DataAccess.Repositories.VentaDataAccess
       return (items, total);
     }
 
-    // Autocomplete de SKUs
     public IReadOnlyList<string> DistinctSkus(string? filtro)
     {
       var q = _db.VentasHistoricas.AsQueryable();
@@ -108,7 +104,7 @@ namespace DataAccess.Repositories.VentaDataAccess
       return q.Select(v => v.Sku)
               .Distinct()
               .OrderBy(s => s)
-              .Take(50) // límite para no devolver miles
+              .Take(50)
               .ToList();
     }
   }

@@ -16,7 +16,6 @@ namespace WebApi.Controllers.Ventas
       _ventasService = ventasService;
     }
 
-    // GET /api/ventas → histórico o agregado
     [HttpGet]
     public ActionResult<PagedResultDto<object>> Get(
         [FromQuery] DateOnly? fechaDesde,
@@ -26,7 +25,6 @@ namespace WebApi.Controllers.Ventas
         [FromQuery] int pageSize = 50,
         [FromQuery] string? agregado = null)
     {
-      // ✅ Validación de parámetros
       VentasQueryValidator.ValidarParametros(fechaDesde, fechaHasta, sku,
           string.IsNullOrEmpty(agregado) ? "historico" : "agregado");
 
@@ -50,11 +48,9 @@ namespace WebApi.Controllers.Ventas
       }
     }
 
-    // GET /api/ventas/distinct-skus → autocompletar
     [HttpGet("distinct-skus")]
     public ActionResult<IReadOnlyList<string>> DistinctSkus([FromQuery] string? filtro = null)
     {
-      // ✅ Validación del filtro
       SkusQueryValidator.ValidarFiltro(filtro);
 
       var skus = _ventasService.DistinctSkus(filtro);

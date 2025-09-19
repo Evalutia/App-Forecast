@@ -1,6 +1,5 @@
 namespace WebApi.Controllers.Ventas.DTOs
 {
-  // DTO para ventas históricas (crudas)
   public sealed class VentaOutDto
   {
     public int Id { get; init; }
@@ -19,10 +18,9 @@ namespace WebApi.Controllers.Ventas.DTOs
     }
   }
 
-  // DTO para ventas agregadas (mensual, anual o por fecha)
   public sealed class VentaAgregadaOutDto
   {
-    public string Periodo { get; init; } = string.Empty; // "2025-01", "2025" o "2025-01-15"
+    public string Periodo { get; init; } = string.Empty;
     public string Sku { get; init; } = string.Empty;
     public uint TotalCantidad { get; init; }
 
@@ -34,7 +32,6 @@ namespace WebApi.Controllers.Ventas.DTOs
     }
   }
 
-  // DTO genérico de paginación
   public sealed class PagedResultDto<T>
   {
     public IEnumerable<T> Items { get; init; } = Enumerable.Empty<T>();
