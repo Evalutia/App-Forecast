@@ -1,6 +1,7 @@
 using DataAccess.Repositories.JobDataAccess;
 using DataAccess.Repositories.PrediccionDataAccess;
 using DataAccess.Repositories.UsuarioDataAccess;
+using DataAccess.Repositories.VentaDataAccess;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
@@ -9,10 +10,10 @@ using Services.Jobs;
 using Services.Predicciones;
 using Services.Security.Auth;
 using Services.Usuarios;
+using Services.Ventas;
 using System.Text;
 using WebApi.Data;
-using Services.Ventas;
-using DataAccess.Repositories.VentaDataAccess;
+using WebApi.Filters;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -39,13 +40,15 @@ builder.Services.AddScoped<IPrediccionService, PrediccionService>();
 builder.Services.AddScoped<IVentaRepository, VentaRepository>();
 builder.Services.AddScoped<IVentasService, VentasService>();
 
-
-builder.Services.AddControllers();
-// builder.Services.AddControllers(o => o.Filters.Add<ExceptionFilter>()); // <- cuando tengamos el exception filter
+// 🚨 Agregamos ExceptionFilter como filtro global
+builder.Services.AddControllers(o =>
+{
+  o.Filters.Add<ExceptionFilter>();
+});
 
 builder.Services.AddEndpointsApiExplorer();
 
-// 🔒 Swagger con seguridad Bearer (reemplaza tu AddSwaggerGen() anterior)
+// 🔒 Swagger con seguridad Bearer
 builder.Services.AddSwaggerGen(c =>
 {
   c.SwaggerDoc("v1", new OpenApiInfo { Title = "Evalutia API", Version = "v1" });
@@ -61,24 +64,24 @@ builder.Services.AddSwaggerGen(c =>
     BearerFormat = "JWT"
   });
 
-  // Requisito global: aplica el esquema a todas las operaciones
+  // Requisito global
   c.AddSecurityRequirement(new OpenApiSecurityRequirement
-  {
     {
-      new OpenApiSecurityScheme
-      {
-        Reference = new OpenApiReference
         {
-          Type = ReferenceType.SecurityScheme,
-          Id = "Bearer"
+            new OpenApiSecurityScheme
+            {
+                Reference = new OpenApiReference
+                {
+                    Type = ReferenceType.SecurityScheme,
+                    Id = "Bearer"
+                }
+            },
+            Array.Empty<string>()
         }
-      },
-      Array.Empty<string>()
-    }
-  });
+    });
 });
 
-// AuthN/AuthZ (si vas a proteger endpoints ahora)
+// AuthN/AuthZ
 var jwt = builder.Configuration.GetSection("Jwt").Get<JwtOptions>()!;
 builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
     .AddJwtBearer(o =>
@@ -98,11 +101,11 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
 builder.Services.AddAuthorization();
 
 var app = builder.Build();
-app.UseSwagger(); app.UseSwaggerUI();
+app.UseSwagger();
+app.UseSwaggerUI();
 
 app.UseHttpsRedirection();
 
-// Habilitá esto si vas a exigir JWT en endpoints
 app.UseAuthentication();
 app.UseAuthorization();
 
