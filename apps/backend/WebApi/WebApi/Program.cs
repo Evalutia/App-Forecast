@@ -1,9 +1,14 @@
+using DataAccess.Repositories.JobDataAccess;
+using DataAccess.Repositories.PrediccionDataAccess;
 using DataAccess.Repositories.UsuarioDataAccess;
 using DataAccess.Repositories.JobDataAccess;
 using DataAccess.Repositories.VentaDataAccess;   // 👈 agregado
+using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
-using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.OpenApi.Models;
+using Services.Jobs;
+using Services.Predicciones;
 using Services.Security.Auth;
 using Services.Usuarios;
 using Services.Jobs;
@@ -11,12 +16,19 @@ using Services.Ventas;                           // 👈 agregado
 using System.Text;
 using WebApi.Data;
 using Microsoft.OpenApi.Models;
-
+using DataAccess.Repositories.JobDataAccess;
+using Services.Jobs;
+using DataAccess.Repositories.JobDataAccess;
+using Services.Jobs;
+builder.Services.AddDbContextPool<EvalutiaDbContext>(opt =>
+{
+    var cs = builder.Configuration.GetConnectionString("Default");
+    var serverVersion = new MySqlServerVersion(new Version(8, 0, 36));
+    opt.UseMySql(cs, serverVersion, x => x.EnableRetryOnFailure(3));
 var builder = WebApplication.CreateBuilder(args);
 
 // DbContext (Pomelo MySQL)
-builder.Services.AddDbContextPool<EvalutiaDbContext>(opt =>
-{
+builder.Services.AddDbContextPool<EvalutiaDbContext>(opt => {
   var cs = builder.Configuration.GetConnectionString("EvalutiaDb");
   opt.UseMySql(cs, ServerVersion.AutoDetect(cs));
 });
@@ -33,6 +45,9 @@ builder.Services.AddScoped<IUsuarioService, UsuarioService>();
 // DI Jobs
 builder.Services.AddScoped<IJobRepository, JobRepository>();
 builder.Services.AddScoped<IJobService, JobService>();
+builder.Services.AddScoped<IPrediccionRepository, PrediccionRepository>();
+builder.Services.AddScoped<IPrediccionService, PrediccionService>();
+
 
 // DI Ventas 👇
 builder.Services.AddScoped<IVentaRepository, VentaRepository>();
