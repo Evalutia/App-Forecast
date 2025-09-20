@@ -30,6 +30,8 @@ namespace Models.Validators
 
     private static void EsRolValido(string rol)
     {
+      if(string.IsNullOrEmpty(rol)) throw new InvalidOperationException("Rol inválido");
+
       var ok = new[] { "administrador", "duenoDeEmpresa" }.Contains(rol, StringComparer.OrdinalIgnoreCase);
       if (!ok) throw new InvalidOperationException("Rol inválido");
     }

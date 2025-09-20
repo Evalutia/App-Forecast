@@ -45,30 +45,16 @@ namespace Services.Usuarios
 
     public Usuario Update(int id, Usuario cambios)
     {
-      if (id <= 0)
-      {
-        throw new ArgumentException("Id inválido");
-      }
-
       ArgumentNullException.ThrowIfNull(cambios);
 
       Usuario current = _repo.GetById(id) ?? throw new KeyNotFoundException("Usuario no encontrado");
 
-      if (!string.IsNullOrWhiteSpace(cambios.HashPassword))
-      {
-        var tmp = new Usuario { Correo = current.Correo, HashPassword = cambios.HashPassword, Rol = current.Rol };
-        UsuarioValidator.Validacion(tmp);
+      var tmp = new Usuario { Correo = current.Correo, HashPassword = cambios.HashPassword, Rol = cambios.Rol };
 
-        current.HashPassword = PasswordHasher.Hash(cambios.HashPassword);
-      }
+      UsuarioValidator.Validacion(tmp);
 
-      if (!string.IsNullOrWhiteSpace(cambios.Rol))
-      {
-        var tmp = new Usuario { Correo = current.Correo, HashPassword = current.HashPassword, Rol = cambios.Rol };
-        UsuarioValidator.Validacion(tmp);
-
-        current.Rol = cambios.Rol;
-      }
+      current.HashPassword = PasswordHasher.Hash(cambios.HashPassword);
+      current.Rol = cambios.Rol;
 
       _repo.Update(current);
       return current;
