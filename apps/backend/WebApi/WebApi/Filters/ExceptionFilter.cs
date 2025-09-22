@@ -25,8 +25,8 @@ namespace WebApi.Filters
           context.HttpContext.Response.StatusCode = (int)HttpStatusCode.BadRequest; // 400
           break;
 
-        case UnauthorizedAccessException:
-          response.Mensaje = "Acceso no autorizado.";
+        case UnauthorizedAccessException ex:
+          response.Mensaje = "Acceso no autorizado: " + ex.Message;
           context.HttpContext.Response.StatusCode = (int)HttpStatusCode.Unauthorized; // 401
           break;
 

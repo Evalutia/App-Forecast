@@ -44,5 +44,13 @@ namespace Services.Usuarios
 
       return (token, user);
     }
+
+    public void noHayLogueado(string unMail, string unRol)
+    {
+      if (string.IsNullOrWhiteSpace(unMail) || string.IsNullOrWhiteSpace(unRol))
+      {
+        throw new UnauthorizedAccessException("No hay usuario logueado");
+      }
+    }
   }
 }

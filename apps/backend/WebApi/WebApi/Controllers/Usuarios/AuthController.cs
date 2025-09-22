@@ -30,8 +30,7 @@ public  class AuthController : ControllerBase
     var mail = User.FindFirst(System.Security.Claims.ClaimTypes.Email)?.Value;
     var rol = User.FindFirst(System.Security.Claims.ClaimTypes.Role)?.Value;
 
-    if (string.IsNullOrWhiteSpace(mail) || string.IsNullOrWhiteSpace(rol))
-      return Unauthorized();
+    _auth.noHayLogueado(mail, rol);
 
     var id = int.TryParse(idStr, out var i) ? i : 0;
     return new UsuarioOutDto(id, mail, rol);
