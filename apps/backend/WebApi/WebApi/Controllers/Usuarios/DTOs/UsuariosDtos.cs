@@ -2,20 +2,20 @@ namespace WebApi.Controllers.Usuarios.DTOs
 {
   public sealed class LoginDto
   {
-    public string Correo { get; set; } = string.Empty;
-    public string Contrasena { get; set; } = string.Empty;
+    public string? Correo { get; set; } = string.Empty;
+    public string? Contrasena { get; set; } = string.Empty;
   }
 
   public sealed class CrearAdministradorDto
   {
-    public string Correo { get; set; } = string.Empty;
-    public string Contrasena { get; set; } = string.Empty;
+    public string? Correo { get; set; } = string.Empty;
+    public string? Contrasena { get; set; } = string.Empty;
   }
 
   public sealed class CrearDuenoEmpresaDto
   {
-    public string Correo { get; set; } = string.Empty;
-    public string Contrasena { get; set; } = string.Empty;
+    public string? Correo { get; set; } = string.Empty;
+    public string? Contrasena { get; set; } = string.Empty;
   }
 
   public sealed class UpdateUsuarioDto
