@@ -18,25 +18,25 @@ namespace WebApi.Controllers.Ventas
 
     [HttpGet]
     public ActionResult<PagedResultDto<object>> Get(
-        [FromQuery] DateOnly? fechaDesde,
-        [FromQuery] DateOnly? fechaHasta,
-        [FromQuery] string? sku,
-        [FromQuery] int page = 1,
-        [FromQuery] int pageSize = 50,
-        [FromQuery] string? agregado = null)
+    [FromQuery] DateTime? fechaDesde,
+    [FromQuery] DateTime? fechaHasta,
+    [FromQuery] string? sku,
+    [FromQuery] int page = 1,
+    [FromQuery] int pageSize = 50,
+    [FromQuery] string? agregado = null)
     {
-      VentasQueryValidator.ValidarParametros(fechaDesde, fechaHasta, sku,
-          string.IsNullOrEmpty(agregado) ? "historico" : "agregado");
+      DateOnly? desde = fechaDesde.HasValue ? DateOnly.FromDateTime(fechaDesde.Value.Date) : (DateOnly?)null;
+      DateOnly? hasta = fechaHasta.HasValue ? DateOnly.FromDateTime(fechaHasta.Value.Date) : (DateOnly?)null;
 
       if (!string.IsNullOrWhiteSpace(agregado))
       {
-        var (items, total) = _ventasService.Aggregate(fechaDesde, fechaHasta, sku, agregado, page, pageSize);
+        var (items, total) = _ventasService.Aggregate(desde, hasta, sku, agregado, page, pageSize);
         var outItems = items.Select(v => new VentaAgregadaOutDto(v.Periodo, v.Sku, v.TotalCantidad));
         return Ok(new PagedResultDto<VentaAgregadaOutDto>(outItems, page, pageSize, total));
       }
       else
       {
-        var (items, total) = _ventasService.Search(fechaDesde, fechaHasta, sku, page, pageSize);
+        var (items, total) = _ventasService.Search(desde, hasta, sku, page, pageSize);
         var outItems = items.Select(v => new VentaOutDto(
             id: (int)v.Id,
             fecha: v.Fecha.ToString("yyyy-MM-dd"),
@@ -47,6 +47,7 @@ namespace WebApi.Controllers.Ventas
         return Ok(new PagedResultDto<VentaOutDto>(outItems, page, pageSize, total));
       }
     }
+
 
     [HttpGet("distinct-skus")]
     public ActionResult<IReadOnlyList<string>> DistinctSkus([FromQuery] string? filtro = null)
