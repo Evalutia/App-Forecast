@@ -19,9 +19,6 @@ namespace WebApi.Controllers.Predicciones
     {
       var predicciones = _svc.GetUltimasBySku();
 
-      if (!predicciones.Any())
-        return NotFound("No se encontraron predicciones para el último Job.");
-
       return Ok(predicciones);
     }
 

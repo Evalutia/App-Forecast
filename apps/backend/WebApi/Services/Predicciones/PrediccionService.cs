@@ -11,9 +11,14 @@ namespace Services.Predicciones
       _repo = repo;
     }
 
-    public IEnumerable<Prediccion> GetUltimasBySku()
+    public IReadOnlyList<Prediccion> GetUltimasBySku()
     {
-      return _repo.GetUltimasBySku();
+      var items = _repo.GetUltimasBySku()?.ToList() ?? new List<Prediccion>();
+
+      if (items.Count == 0)
+        throw new KeyNotFoundException("No se encontraron predicciones para el último Job.");
+
+      return items;
     }
 
     public (IReadOnlyList<Prediccion> Items, int Total) Search(Prediccion p, int page = 1, int pageSize = 50)
