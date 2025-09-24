@@ -2,6 +2,7 @@ using Microsoft.AspNetCore.Mvc;
 using Services.Usuarios;
 using System.Linq;
 using WebApi.Controllers.Usuarios.DTOs;
+using WebApi.Filters;
 using WebApi.Models;
 
 namespace WebApi.Controllers.Usuarios
@@ -18,7 +19,6 @@ namespace WebApi.Controllers.Usuarios
     }
 
     [HttpPost("crear-administrador")]
-    //[AuthorizationFilter("administrador")]
     public AdministradorOutDto CrearAdministrador([FromBody] CrearAdministradorDto adminDto)
     {
       var administrador = new Usuario
@@ -34,7 +34,7 @@ namespace WebApi.Controllers.Usuarios
     }
 
     [HttpDelete("borrar-administrador/{correo}")]
-    //[AuthorizationFilter("administrador")]
+    [AuthorizationFilter("administrador")]
     public IActionResult BorrarAdministrador(string correo)
     {
       var user = _usuarioService.GetPorCorreo(correo);
@@ -45,7 +45,7 @@ namespace WebApi.Controllers.Usuarios
     }
 
     [HttpPost("crear-dueno-empresa")]
-    //[AuthorizationFilter("administrador")]
+    [AuthorizationFilter("administrador")]
     public DuenoDeEmpresaOutDto CrearDuenoEmpresa([FromBody] CrearDuenoEmpresaDto dto)
     {
       var dueno = new Usuario
@@ -90,7 +90,7 @@ namespace WebApi.Controllers.Usuarios
     }
 
     [HttpPut("{id:int}")]
-    //[AuthorizationFilter("administrador")]
+    [AuthorizationFilter("administrador")]
     public ActionResult<UsuarioOutDto> Update([FromRoute] int id, [FromBody] UpdateUsuarioDto dto)
     {
       var cambios = new WebApi.Models.Usuario

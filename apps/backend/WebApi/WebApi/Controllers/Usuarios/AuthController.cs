@@ -1,7 +1,8 @@
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Services.Usuarios;
 using WebApi.Controllers.Usuarios.DTOs;
 using WebApi.Models;
-using Services.Usuarios;
 
 namespace WebApi.Controllers.Usuarios;
 
