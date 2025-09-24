@@ -54,52 +54,51 @@ services:
     restart: unless-stopped
 
   webapi:
-      build:
-        context: .
-        dockerfile: ./apps/backend/Dockerfile
-      container_name: evalutia-webapi
-      env_file:
-        - .env
-      environment:
-        ConnectionStrings__Default: "Server=mysql;Port=3306;Database=evalutia;User=evalutia;Password=evalutia;TreatTinyAsBoolean=false;AllowUserVariables=True;CharSet=utf8mb4;SslMode=None;AllowPublicKeyRetrieval=True"
-        JWT__Issuer: ${JWT_ISSUER}
-        JWT__Audience: ${JWT_AUDIENCE}
-        JWT__Secret: ${JWT_SECRET}
-        CORS__AllowedOrigins: ${CORS_ORIGINS}
-        TZ: ${TZ}
-      depends_on:
-        mysql:
-          condition: service_healthy
-      ports:
-        - "8081:8080"
-      healthcheck:
-        test: ["CMD-SHELL", "curl -fsS http://localhost:8080/swagger/index.html || exit 1"]
-        interval: 15s
-        timeout: 5s
-        retries: 20
-      networks:
-        - evalutia_net
-      restart: unless-stopped
+    build:
+      context: .
+      dockerfile: ./apps/backend/Dockerfile
+    container_name: evalutia-webapi
+    # Quité env_file para evitar que pise los valores
+    environment:
+      ASPNETCORE_ENVIRONMENT: Development
+      ConnectionStrings__Default: "Server=mysql;Port=3306;Database=evalutia;User=evalutia;Password=evalutia;TreatTinyAsBoolean=false;AllowUserVariables=True;CharSet=utf8mb4;SslMode=None;AllowPublicKeyRetrieval=True"
+      Jwt__Issuer: evalutia
+      Jwt__Audience: evalutia.clients
+      Jwt__Secret: 8p7KfC0nQO9T2bKxZ1aR4vM6yH8J2qLp
+      CORS__AllowedOrigins: http://localhost:5173
+      TZ: ${TZ}
+    depends_on:
+      mysql:
+        condition: service_healthy
+    ports:
+      - "8081:8080"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:8080/swagger/index.html || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 20
+    networks:
+      - evalutia_net
+    restart: unless-stopped
 
   python-worker:
-      build:
-        context: .
-        dockerfile: ./services/python-worker/Dockerfile
-      container_name: evalutia-python-worker
-      env_file:
-        - .env
-      environment:
-        # Opción B para evitar el bug de la variable en predict.py:
-        # Descomenta si NO vas a pasar --mysql-pass en el comando
-        # MYSQL_PASS: ${MYSQL_PASSWORD}
-        TZ: ${TZ}
-      depends_on:
-        mysql:
-          condition: service_healthy
-      networks:
-        - evalutia_net
-      restart: unless-stopped
-
+    build:
+      context: .
+      dockerfile: ./services/python-worker/Dockerfile
+    container_name: evalutia-python-worker
+    env_file:
+      - .env
+    environment:
+      # Opción B para evitar el bug de la variable en predict.py:
+      # Descomenta si NO vas a pasar --mysql-pass en el comando
+      # MYSQL_PASS: ${MYSQL_PASSWORD}
+      TZ: ${TZ}
+    depends_on:
+      mysql:
+        condition: service_healthy
+    networks:
+      - evalutia_net
+    restart: unless-stopped
 
 networks:
   evalutia_net:

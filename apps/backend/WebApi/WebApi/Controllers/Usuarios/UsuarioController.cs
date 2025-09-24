@@ -19,6 +19,7 @@ namespace WebApi.Controllers.Usuarios
     }
 
     [HttpPost("crear-administrador")]
+    [AuthorizationFilter("administrador")]
     public AdministradorOutDto CrearAdministrador([FromBody] CrearAdministradorDto adminDto)
     {
       var administrador = new Usuario
