@@ -1,4 +1,4 @@
-export type Role = 'administrador' | 'duenoDeEmpresa' | 'persona' | string;
+export type Role = 'administrador' | 'duenoDeEmpresa'| string;
 
 export interface LoginRequest {
   email: string;
