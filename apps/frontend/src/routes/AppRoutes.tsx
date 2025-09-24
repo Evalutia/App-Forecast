@@ -8,9 +8,17 @@ const queryClient = new QueryClient();
 
 function Dashboard() {
   return (
-    <div className="p-6">
-      <h1 className="text-xl font-semibold">Dashboard</h1>
-      <p className="text-gray-600">Bienvenido al portal Evalutia.</p>
+    <div className="min-h-dvh bg-gradient-to-br from-emerald-950 via-emerald-900 to-emerald-950 px-6 py-16">
+      <div className="mx-auto flex max-w-2xl flex-col items-center justify-center gap-6 text-center">
+        <span className="rounded-full border border-white/10 bg-white/10 px-4 py-1 text-xs font-medium uppercase tracking-[0.3em] text-emerald-100">
+          Panel principal
+        </span>
+        <h1 className="text-4xl font-semibold text-white sm:text-5xl">Bienvenido al portal Evalutia</h1>
+        <p className="text-lg leading-relaxed text-emerald-100/90">
+          Gestiona y visualiza tus métricas clave en un entorno claro, moderno y enfocado
+          en lo que realmente importa.
+        </p>
+      </div>
     </div>
   );
 }
