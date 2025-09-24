@@ -62,6 +62,7 @@ namespace WebApi.Controllers.Usuarios
     }
 
     [HttpGet]
+    [AuthorizationFilter("administrador")]
     public ActionResult<PagedResultDto<UsuarioOutDto>> List(
         [FromQuery] int page = 1,
         [FromQuery] int pageSize = 50,
@@ -80,6 +81,7 @@ namespace WebApi.Controllers.Usuarios
     }
 
     [HttpGet("{id:int}")]
+    [AuthorizationFilter("administrador")]
     public ActionResult<UsuarioOutDto> GetById([FromRoute] int id)
     {
       var u = _usuarioService.GetById(id);

@@ -1,5 +1,6 @@
 using Microsoft.AspNetCore.Mvc;
 using Services.Jobs;
+using WebApi.Filters;
 using WebApi.Models;
 
 namespace WebApi.Controllers.Jobs
@@ -12,6 +13,7 @@ namespace WebApi.Controllers.Jobs
     public JobsController(IJobService svc) { _svc = svc; }
 
     [HttpGet]
+    [AuthorizationFilter("administrador")]
     public ActionResult<object> Search(
     [FromQuery] int page = 1,
     [FromQuery] int pageSize = 50,
@@ -37,6 +39,7 @@ namespace WebApi.Controllers.Jobs
 
 
     [HttpGet("{id:long}")]
+    [AuthorizationFilter("administrador")]
     public ActionResult<JobHistorial> GetById([FromRoute] ulong id)
     {
       var j = _svc.GetById(id);
@@ -44,6 +47,7 @@ namespace WebApi.Controllers.Jobs
     }
 
     [HttpGet("{id:long}/predicciones")]
+    [AuthorizationFilter("administrador")]
     public ActionResult<IEnumerable<Prediccion>> GetPredicciones([FromRoute] ulong id)
     {
       var preds = _svc.GetPredicciones(id);
