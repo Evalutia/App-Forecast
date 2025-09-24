@@ -42,28 +42,24 @@ export default function LoginForm() {
           </label>
           <input
             type="email"
-            className="w-full rounded-xl border border-emerald-200/60 bg-white px-4 py-3 text-emerald-950 shadow-sm transition focus:border-emerald-500 focus:outline-none focus:ring-2 focus:ring-emerald-400/50"
-            placeholder="tucorreo@dominio.com"
+            className="w-full rounded-xl border border-emerald-200/60 bg-white px-4 py-3 text-emerald-950 shadow-sm transition focus:border-emerald-500 focus:outline-none focus:ring-2 focus:ring-emerald-400/50"            placeholder="tucorreo@dominio.com"
             {...register('email')}
           />
-          {errors.email && <p className="text-sm text-red-600">{errors.email.message}</p>}
+          {errors.email && <p className="text-sm text-red-600 mt-1">{errors.email.message}</p>}
         </div>
-        <div className="space-y-2">
-          <label className="block text-sm font-medium uppercase tracking-wide text-emerald-900/80">
-            Contraseña
-          </label>
+        <div>
+          <label className="block text-sm font-medium mb-1">Contraseña</label>
           <input
             type="password"
-            className="w-full rounded-xl border border-emerald-200/60 bg-white px-4 py-3 text-emerald-950 shadow-sm transition focus:border-emerald-500 focus:outline-none focus:ring-2 focus:ring-emerald-400/50"
-            placeholder="••••••••"
+            className="w-full border rounded px-3 py-2"
             {...register('password')}
           />
-          {errors.password && <p className="text-sm text-red-600">{errors.password.message}</p>}
+          {errors.password && <p className="text-sm text-red-600 mt-1">{errors.password.message}</p>}
         </div>
         <button
           type="submit"
           disabled={isPending}
-          className="w-full rounded-xl bg-emerald-900 px-4 py-3 text-sm font-semibold uppercase tracking-wide text-white transition hover:bg-emerald-800 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:ring-offset-2 focus:ring-offset-white disabled:cursor-not-allowed disabled:opacity-60"
+          className="w-full py-2 rounded bg-black text-white disabled:opacity-50"
         >
           {isPending ? 'Ingresando…' : 'Ingresar'}
         </button>
