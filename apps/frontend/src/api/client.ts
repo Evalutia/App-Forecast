@@ -18,8 +18,34 @@ api.interceptors.response.use(
   (res) => res,
   (error) => {
     const data = error?.response?.data;
-    error.normalizedMessage = data?.message || data?.title || data?.detail || error.message || 'Error desconocido';
-    error.status = error?.response?.status;
+    const status = error?.response?.status;
+
+    let msg =
+      data?.mensaje ??                
+      data?.Mensaje ??                
+      data?.message ??                
+      data?.title ??                  
+      data?.detail ??                 
+      (status === 401
+        ? 'Sesión expirada. Iniciá sesión de nuevo.'
+        : status === 403
+        ? 'No tenés permisos para esta acción.'
+        : status
+        ? `Error ${status}`
+        : 'No se pudo conectar con el servidor');
+
+    const errs = data?.errores || data?.errors;
+    if (errs && typeof errs === 'object') {
+      const detalles = Object.entries(errs)
+        .flatMap(([k, arr]) => (Array.isArray(arr) ? arr : [arr]).map((x: any) => `${k}: ${String(x)}`))
+        .join(' · ');
+      if (detalles) msg = `${msg}\n${detalles}`;
+    }
+
+    error.status = status;
+    error.normalizedMessage = msg;
+    error.message = msg; 
+
     return Promise.reject(error);
   }
 );
