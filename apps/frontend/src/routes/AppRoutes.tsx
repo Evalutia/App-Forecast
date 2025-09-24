@@ -1,6 +1,7 @@
 import { BrowserRouter, Routes, Route } from 'react-router-dom';
 import RequireAuth from './RequireAuth';
 import LoginPage from '../features/auth/pages/LoginPage';
+import LogoutButton from '../features/auth/components/LogoutButton';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { Toaster } from 'sonner';
 
@@ -8,8 +9,15 @@ const queryClient = new QueryClient();
 
 function Dashboard() {
   return (
-    <div className="min-h-dvh bg-gradient-to-br from-emerald-950 via-emerald-900 to-emerald-950 px-6 py-16">
-      <div className="mx-auto flex max-w-2xl flex-col items-center justify-center gap-6 text-center">
+    <div className="min-h-dvh bg-gradient-to-br from-emerald-950 via-emerald-900 to-emerald-950 px-6 py-6">
+      {/* Header */}
+      <div className="mx-auto flex max-w-5xl items-center justify-between">
+        <span className="text-sm text-emerald-100/80">Evalutia</span>
+        <LogoutButton />
+      </div>
+
+      {/* Hero */}
+      <div className="mx-auto mt-10 flex max-w-2xl flex-col items-center justify-center gap-6 text-center">
         <span className="rounded-full border border-white/10 bg-white/10 px-4 py-1 text-xs font-medium uppercase tracking-[0.3em] text-emerald-100">
           Panel principal
         </span>
