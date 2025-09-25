@@ -1,7 +1,9 @@
 import { BrowserRouter, Routes, Route } from 'react-router-dom';
 import RequireAuth from './RequireAuth';
 import LoginPage from '../features/auth/pages/LoginPage';
+import UsersPage from '../features/users/pages/UsersPage';
 import LogoutButton from '../features/auth/components/LogoutButton';
+import AdminUsersButton from '../features/auth/components/AdminUsersButton';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { Toaster } from 'sonner';
 
@@ -13,7 +15,10 @@ function Dashboard() {
       {/* Header */}
       <div className="mx-auto flex max-w-5xl items-center justify-between">
         <span className="text-sm text-emerald-100/80">Evalutia</span>
-        <LogoutButton />
+        <div className="flex items-center gap-2">
+          <AdminUsersButton />
+          <LogoutButton />
+        </div>
       </div>
 
       {/* Hero */}
@@ -23,7 +28,7 @@ function Dashboard() {
         </span>
         <h1 className="text-4xl font-semibold text-white sm:text-5xl">Bienvenido al portal Evalutia</h1>
         <p className="text-lg leading-relaxed text-emerald-100/90">
-          Gestiona y visualiza tus métricas clave en un entorno claro, moderno y enfocado
+          Gestioná y visualizá tus métricas clave en un entorno claro, moderno y enfocado
           en lo que realmente importa.
         </p>
       </div>
@@ -41,6 +46,7 @@ export default function AppRoutes() {
           {/* privadas */}
           <Route element={<RequireAuth />}>
             <Route path="/" element={<Dashboard />} />
+            <Route path="/usuarios" element={<UsersPage />} /> {/* <-- NUEVA */}
           </Route>
           {/* fallback */}
           <Route path="*" element={<LoginPage />} />
