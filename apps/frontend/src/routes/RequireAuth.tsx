@@ -1,13 +1,8 @@
-import { Navigate, Outlet, useLocation } from 'react-router-dom';
-import { getToken, clearAuth, isTokenExpired } from '../features/auth/utils/authStorage';
+import { Navigate, Outlet } from 'react-router-dom';
+import { useAuthUser } from '../features/auth/hooks/useAuthUser';
 
 export default function RequireAuth() {
-  const token = getToken();
-  const location = useLocation();
-
-  if (!token || isTokenExpired(token)) {
-    clearAuth();
-    return <Navigate to="/login" replace state={{ from: location }} />;
-  }
-  return <Outlet />;
+  const { user, isLoading } = useAuthUser();
+  if (isLoading) return null; 
+  return user ? <Outlet /> : <Navigate to="/login" replace />;
 }

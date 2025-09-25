@@ -9,7 +9,7 @@ export function useLogin() {
     mutationFn: (payload) => login(payload),
     onSuccess: (data) => {
       saveAuth(data.token, data.user);
-      qc.invalidateQueries({ queryKey: ['auth','me'] });
+      qc.invalidateQueries({ queryKey: ['auth'] });
     },
   });
 }
