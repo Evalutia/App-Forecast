@@ -1,4 +1,6 @@
 import axios from 'axios';
+import { toast } from 'sonner';
+import { clearAuth } from '../features/auth/utils/authStorage';
 
 const api = axios.create({
   baseURL: import.meta.env.VITE_API_BASE_URL?.replace(/\/+$/, '') ?? 'http://localhost:8081',
@@ -14,6 +16,9 @@ api.interceptors.request.use((config) => {
   return config;
 });
 
+let lastMsg = '';
+let lastAt = 0;
+
 api.interceptors.response.use(
   (res) => res,
   (error) => {
@@ -21,11 +26,11 @@ api.interceptors.response.use(
     const status = error?.response?.status;
 
     let msg =
-      data?.mensaje ??                
-      data?.Mensaje ??                
-      data?.message ??                
-      data?.title ??                  
-      data?.detail ??                 
+      data?.mensaje ??
+      data?.Mensaje ??
+      data?.message ??
+      data?.title ??
+      data?.detail ??
       (status === 401
         ? 'Sesión expirada. Iniciá sesión de nuevo.'
         : status === 403
@@ -42,9 +47,23 @@ api.interceptors.response.use(
       if (detalles) msg = `${msg}\n${detalles}`;
     }
 
+    // toast centralizado (evitar duplicados muy seguidos)
+    const now = Date.now();
+    if (msg !== lastMsg || now - lastAt > 1200) {
+      toast.error(msg);
+      lastMsg = msg;
+      lastAt = now;
+    }
+
+    // manejar 401 (opcional): limpiar sesión y mandar a /login
+    if (status === 401) {
+      clearAuth();
+      // si querés: window.location.assign('/login');
+    }
+
     error.status = status;
     error.normalizedMessage = msg;
-    error.message = msg; 
+    error.message = msg;
 
     return Promise.reject(error);
   }

@@ -5,6 +5,7 @@ import Pagination from '../components/Pagination';
 import AddAdminModal from '../components/AddAdminModal';
 import AddOwnerModal from '../components/AddOwnerModal';
 import EditUserModal from '../components/EditUserModal';
+import BackToDashboardButton from '../components/BackToDashboardButton';
 
 export default function UsersPage() {
   const [page, setPage] = useState(1);
@@ -31,23 +32,24 @@ export default function UsersPage() {
 
   return (
     <div className="mx-auto max-w-6xl p-6">
-      <div className="mb-6 flex items-center justify-between">
-        <h1 className="text-2xl font-semibold text-white">Administración de usuarios</h1>
-        <div className="flex gap-2">
-          <button
-            onClick={() => setShowAddAdmin(true)}
-            className="rounded-lg bg-emerald-700 px-3 py-2 text-sm font-medium text-white hover:bg-emerald-600"
-          >
-            Agregar Administrador
-          </button>
-          <button
-            onClick={() => setShowAddOwner(true)}
-            className="rounded-lg bg-emerald-700 px-3 py-2 text-sm font-medium text-white hover:bg-emerald-600"
-          >
-            Agregar Dueño de Empresa
-          </button>
+        <div className="mb-6 flex items-center justify-between">
+            <h1 className="text-2xl font-semibold text-white">Administración de usuarios</h1>
+            <div className="flex items-center gap-2">
+                <BackToDashboardButton />
+                <button
+                    onClick={() => setShowAddAdmin(true)}
+                    className="rounded-lg bg-emerald-700 px-3 py-2 text-sm font-medium text-white hover:bg-emerald-600"
+                >
+                    Agregar Administrador
+                </button>
+                <button
+                    onClick={() => setShowAddOwner(true)}
+                    className="rounded-lg bg-emerald-700 px-3 py-2 text-sm font-medium text-white hover:bg-emerald-600"
+                >
+                    Agregar Dueño de Empresa
+                </button>
+            </div>
         </div>
-      </div>
 
       {/* Filtros */}
       <div className="mb-4 grid grid-cols-1 gap-3 sm:grid-cols-3">
