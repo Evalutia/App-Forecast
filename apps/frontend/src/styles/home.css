@@ -1,0 +1,180 @@
+/* ===========================
+   Home / Dashboard Styles
+   (reemplaza por completo este archivo)
+   =========================== */
+
+/* --- Paleta/vars --- */
+:root{
+  --emerald-50:  #ecfdf5;
+  --emerald-100: #d1fae5;
+  --emerald-200: #a7f3d0;
+  --emerald-600: #059669;
+  --emerald-900: #064e3b;
+  --emerald-950: #022c22;         /* color base del fondo/brand */
+  --white: #ffffff;
+
+  /* Dorados */
+  --gold-500: #d4af37;            /* oro elegante */
+  --gold-600: #c49b1f;
+
+  --shadow-strong: 0 6px 18px rgba(0,0,0,.12);
+  --shadow-soft-inset: 0 1px 0 rgba(255,255,255,.06) inset;
+}
+
+html, body, #root { height: 100%; }
+
+/* === Página === */
+.home-page{
+  min-height: 100dvh;
+  background: linear-gradient(135deg, var(--emerald-950), var(--emerald-900), var(--emerald-950));
+  color: var(--white);
+  padding: 0 0 1.5rem;
+  display: block;
+}
+
+/* =========================================
+   HEADER: barra blanca a todo el ancho
+   ========================================= */
+.home-header{
+  width: 100%;
+  margin: 0;
+  padding: .75rem 1rem;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+
+  background: var(--white);
+  /* Borde inferior dorado MUY sutil */
+  border-bottom: 1px solid rgba(196,155,31,.35); /* ≈ var(--gold-600) a baja opacidad */
+  border-radius: 0;
+  box-shadow: var(--shadow-strong);
+}
+
+/* ====== BRAND: SOLO TEXTO con link ====== */
+.home-brand{
+  background: none;
+  border: 0;
+  border-radius: 0;
+  padding: 0;
+
+  color: var(--emerald-950);
+  font-size: 1.25rem;
+  font-weight: 900;
+  letter-spacing: .18em;
+  text-transform: uppercase;
+  line-height: 1.05;
+
+  text-decoration: none;
+  cursor: pointer;
+}
+.home-brand:hover{ color: var(--emerald-900); }
+
+/* Acciones a la derecha */
+.home-actions{
+  display: flex;
+  align-items: center;
+  gap: .5rem;
+}
+
+/* =========================
+   HERO
+   ========================= */
+.home-hero{
+  width: 100%;
+  max-width: 42rem;
+  margin: 7rem auto 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1.25rem;
+  text-align: center;
+}
+
+/* === Título con contorno dorado ULTRA sutil === */
+.home-title{
+  margin: 0;
+  font-weight: 700;
+  font-size: clamp(2rem, 3.5vw + 1rem, 3.125rem);
+  color: var(--white);
+
+  /* contorno hiper fino (WebKit/Blink) */
+  -webkit-text-stroke: 0.4px var(--gold-500);
+
+  /* fallback Firefox: micro-sombras para borde apenas visible */
+  text-shadow:
+    0 0 0.18px var(--gold-500),
+    0.18px 0 0 var(--gold-600),
+   -0.18px 0 0 var(--gold-600),
+    0 0.18px 0 var(--gold-600),
+    0 -0.18px 0 var(--gold-600);
+}
+
+/* === Subtítulo: casi imperceptible (pero está) === */
+.home-subtitle{
+  margin: .25rem 0 0 0;
+  font-size: 1.25rem;
+  line-height: 1.75;
+  font-weight: 600;
+  color: var(--white);
+  letter-spacing: .01em;
+  max-width: 72ch;
+  text-wrap: balance;
+
+  /* borde extra-hiper fino */
+  -webkit-text-stroke: 0.15px var(--gold-500);
+  text-shadow:
+    0 0 0.12px var(--gold-500),
+    0.12px 0 0 var(--gold-600),
+   -0.12px 0 0 var(--gold-600),
+    0 0.12px 0 var(--gold-600),
+    0 -0.12px 0 var(--gold-600);
+}
+
+/* ====================
+   Botones reutilizables
+   ==================== */
+.btn{
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: .5rem;
+  padding: .5rem 1rem;
+  border-radius: .5rem;
+
+  background: rgba(2, 44, 34, .92);        /* ≈ var(--emerald-950) */
+  border: 1px solid rgba(2, 44, 34, 1);
+  color: var(--white);
+
+  font-size: .9rem;
+  font-weight: 700;
+  text-decoration: none;
+  transition: background .15s ease, transform .06s ease, box-shadow .15s ease;
+  box-shadow: var(--shadow-soft-inset), 0 6px 14px rgba(0,0,0,.12);
+  cursor: pointer;
+
+  /* ——— contorno dorado sutil en TODO texto blanco de botones ——— */
+  -webkit-text-stroke: 0.18px var(--gold-500);
+  text-shadow:
+    0 0 0.1px var(--gold-500),
+    0.1px 0 0 var(--gold-600),
+   -0.1px 0 0 var(--gold-600),
+    0 0.1px 0 var(--gold-600),
+    0 -0.1px 0 var(--gold-600);
+}
+.btn:hover{ background: var(--emerald-900); }
+.btn:active{ transform: translateY(1px); }
+.btn:disabled{ opacity:.6; cursor:not-allowed; }
+
+/* Variante compacta para el header */
+.btn--sm{
+  padding: .375rem .75rem;
+  font-size: .85rem;
+}
+
+/* ===== CTA del HERO más grande ===== */
+.home-hero .btn{
+  font-size: 1.05rem;
+  padding: .7rem 1.25rem;
+  border-radius: .6rem;
+  box-shadow: var(--shadow-soft-inset), 0 10px 18px rgba(0,0,0,.16);
+}

@@ -7,16 +7,13 @@ export default function LogoutButton() {
 
   const handleLogout = () => {
     localStorage.removeItem('auth.token');
-    localStorage.removeItem('auth.user'); 
+    localStorage.removeItem('auth.user');
     qc.clear();
     navigate('/login', { replace: true });
   };
 
   return (
-    <button
-      onClick={handleLogout}
-      className="rounded-lg bg-emerald-700/70 px-3 py-1.5 text-sm font-medium text-white hover:bg-emerald-700"
-    >
+    <button onClick={handleLogout} className="btn btn--sm">
       Cerrar sesión
     </button>
   );

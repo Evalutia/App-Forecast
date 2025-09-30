@@ -8,10 +8,7 @@ export default function AdminUsersButton() {
   if (!user || user.role !== 'administrador') return null;
 
   return (
-    <button
-      onClick={() => navigate('/usuarios')}
-      className="rounded-lg bg-emerald-700/80 px-3 py-1.5 text-sm font-medium text-white hover:bg-emerald-700"
-    >
+    <button onClick={() => navigate('/usuarios')} className="btn btn--sm">
       Administrar usuarios
     </button>
   );

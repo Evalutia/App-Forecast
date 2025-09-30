@@ -12,34 +12,29 @@ const queryClient = new QueryClient();
 
 function Dashboard() {
   return (
-    <div className="min-h-dvh bg-gradient-to-br from-emerald-950 via-emerald-900 to-emerald-950 px-6 py-6">
+    <div className="home-page">
       {/* Header */}
-      <div className="mx-auto flex max-w-5xl items-center justify-between">
-        <span className="text-sm text-emerald-100/80">Evalutia</span>
-        <div className="flex items-center gap-2">
+      <div className="home-header">
+        {/* Evalutia ahora es link a /home */}
+        <a href="/home" className="home-brand">Evalutia</a>
+        <div className="home-actions">
           <AdminUsersButton />
           <LogoutButton />
         </div>
       </div>
 
       {/* Hero */}
-      <div className="mx-auto mt-10 flex max-w-2xl flex-col items-center justify-center gap-6 text-center">
-        <span className="rounded-full border border-white/10 bg-white/10 px-4 py-1 text-xs font-medium uppercase tracking-[0.3em] text-emerald-100">
-          Panel principal
-        </span>
-        <h1 className="text-4xl font-semibold text-white sm:text-5xl">Bienvenido al portal Evalutia</h1>
-        <p className="text-lg leading-relaxed text-emerald-100/90">
+      <div className="home-hero">
+        <h1 className="home-title">Bienvenido al portal Evalutia</h1>
+        <p className="home-subtitle">
           Gestioná y visualizá tus métricas clave en un entorno claro, moderno y enfocado
           en lo que realmente importa.
         </p>
 
-        {/* Botón "Ver predicciones" */}
-        <div className="mt-4">
-          <a
-            href="/predicciones"
-            className="rounded-lg bg-emerald-600/90 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-600"
-          >
-            Ver predicciones
+        {/* CTA */}
+        <div>
+          <a href="/predicciones" className="btn">
+            Ver mis predicciones
           </a>
         </div>
       </div>
@@ -57,8 +52,10 @@ export default function AppRoutes() {
           {/* privadas */}
           <Route element={<RequireAuth />}>
             <Route path="/" element={<Dashboard />} />
+            {/* alias /home apunta al mismo Dashboard */}
+            <Route path="/home" element={<Dashboard />} />
             <Route path="/usuarios" element={<UsersPage />} />
-            <Route path="/predicciones" element={<PrediccionesPage />} /> 
+            <Route path="/predicciones" element={<PrediccionesPage />} />
           </Route>
           {/* fallback */}
           <Route path="*" element={<LoginPage />} />

@@ -7,6 +7,10 @@
   --emerald-950: #022c22;
   --white: #ffffff;
   --black: #000000;
+
+  /* Dorados (mismos que Home) */
+  --gold-500: #d4af37;
+  --gold-600: #c49b1f;
 }
 
 html,body,#root{height:100%}
@@ -42,7 +46,8 @@ body{
 /* --- Encabezado / “logo” pill --- */
 .login-badge{
   display:inline-block;
-  border: 1px solid rgba(255,255,255,.1);
+  /* borde dorado sutil en el contenedor blanco/translúcido */
+  border: 1px solid rgba(196,155,31,.35); /* ≈ var(--gold-600) */
   background: rgba(255,255,255,.08);
   padding: .25rem 1rem;
   border-radius: 9999px;
@@ -56,22 +61,44 @@ body{
   margin: .5rem 0 0;
   font-weight: 600;
   font-size: clamp(2rem, 3.5vw + 1rem, 3.125rem); /* ~text-4xl -> 5xl */
+  color: var(--white);
+
+  /* contorno dorado MUY fino (igual home-title) */
+  -webkit-text-stroke: 0.4px var(--gold-500);
+  text-shadow:
+    0 0 0.18px var(--gold-500),
+    0.18px 0 0 var(--gold-600),
+   -0.18px 0 0 var(--gold-600),
+    0 0.18px 0 var(--gold-600),
+    0 -0.18px 0 var(--gold-600);
 }
 
 .login-subtitle{
   margin: .5rem auto 0;
   max-width: 60ch;
-  color: rgba(236, 253, 245, .9); /* emerald-100/90 */
+  color: rgba(255,255,255, .95);
   font-size: 1.125rem;
+  font-weight: 600;                /* mismo grosor que home */
+
+  /* contorno dorado ultra-sutil (igual home-subtitle) */
+  -webkit-text-stroke: 0.15px var(--gold-500);
+  text-shadow:
+    0 0 0.12px var(--gold-500),
+    0.12px 0 0 var(--gold-600),
+   -0.12px 0 0 var(--gold-600),
+    0 0.12px 0 var(--gold-600),
+    0 -0.12px 0 var(--gold-600);
 }
 
-/* --- Tarjeta del formulario --- */
+/* --- Tarjeta del formulario (blanco) --- */
 .card{
   width: 100%;
   max-width: 28rem; /* ~max-w-md */
   background: rgba(255,255,255,.96);
   color: var(--emerald-950);
-  border: 1px solid rgba(209, 250, 229, .4); /* emerald-100/40 */
+
+  /* borde dorado sutil para todo blanco */
+  border: 1px solid rgba(196,155,31,.35); /* ≈ var(--gold-600) */
   border-radius: 1.5rem; /* ~rounded-3xl */
   padding: 2rem; /* p-8 */
   box-shadow: 0 25px 40px rgba(2, 44, 34, .2); /* shadow-emerald-950/20 */
@@ -109,15 +136,20 @@ body{
   width:100%;
   padding: .75rem 1rem;
   border-radius: .875rem; /* ~rounded-xl */
+
+  /* borde base con toque brand */
   border: 1px solid rgba(16,185,129,.25); /* emerald-500/25 aprox */
   background: var(--white);
   color: var(--black);
   outline: none;
   box-shadow: 0 1px 2px rgba(0,0,0,.04) inset;
 }
+/* foco: mantenemos brand, pero sumamos halo dorado ultra-sutil */
 .input:focus{
-  border-color: #10b981;           /* emerald-500 */
-  box-shadow: 0 0 0 3px rgba(52,211,153,.35); /* focus ring */
+  border-color: #10b981;                  /* emerald-500 */
+  box-shadow:
+    0 0 0 3px rgba(52,211,153,.35),       /* focus ring brand */
+    0 0 0 3.8px rgba(196,155,31,.18);     /* halo dorado finito */
 }
 
 .error{
@@ -126,6 +158,7 @@ body{
   font-size: .85rem;
 }
 
+/* Botón con texto blanco -> contorno dorado sutil */
 .button{
   width:100%;
   padding: .75rem 1rem;
@@ -138,6 +171,14 @@ body{
   text-transform: uppercase;
   letter-spacing: .06em;
   cursor: pointer;
+
+  -webkit-text-stroke: 0.18px var(--gold-500);
+  text-shadow:
+    0 0 0.1px var(--gold-500),
+    0.1px 0 0 var(--gold-600),
+   -0.1px 0 0 var(--gold-600),
+    0 0.1px 0 var(--gold-600),
+    0 -0.1px 0 var(--gold-600);
 }
 .button:hover{ background: #065f46; } /* emerald-800 */
 .button:disabled{ opacity:.6; cursor:not-allowed; }
