@@ -41,3 +41,31 @@ export function groupAvgByModelo(preds: Prediccion[]) {
     rmseAvg: v.rmseCnt ? v.rmseSum / v.rmseCnt : null,
   }));
 }
+
+export function toYearMonth(d: string): string {
+  return d.slice(0, 7); // "YYYY-MM"
+}
+
+export function pickMonthlyProjection(
+  items: Prediccion[],
+  preferModelo: string | null = 'COMBINADA'
+) {
+  const byYm = new Map<string, Prediccion>();
+
+  const isBetter = (curr: Prediccion | undefined, cand: Prediccion) => {
+    if (!curr) return true;
+    if (preferModelo && cand.modelo === preferModelo && curr.modelo !== preferModelo) return true;
+    if (preferModelo && curr.modelo === preferModelo && cand.modelo !== preferModelo) return false;
+    return (cand.tsGeneracion ?? '') > (curr.tsGeneracion ?? '');
+  };
+
+  for (const p of items) {
+    const ym = toYearMonth(p.fechaPredicha);
+    const curr = byYm.get(ym);
+    if (isBetter(curr, p)) byYm.set(ym, p);
+  }
+
+  const labels = Array.from(byYm.keys()).sort();
+  const values = labels.map((ym) => byYm.get(ym)!.cantidadPredicha);
+  return { labels, values };
+}

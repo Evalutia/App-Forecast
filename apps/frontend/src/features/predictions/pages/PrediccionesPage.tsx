@@ -118,11 +118,6 @@ export default function PrediccionesPage() {
 
         {/* Datos extra: placeholder para las gráficas (lo integramos en el próximo paso) */}
         <div className="rounded-xl border border-white/10 bg-white/5 p-4">
-          <h3 className="text-lg font-semibold text-white">Datos extra (gráficas)</h3>
-          <p className="mt-1 text-emerald-100/80">
-            Seleccioná un SKU en el historial para ver su serie histórica vs. predicción.
-          </p>
-          {/* Próximo paso: gráfico con react-chartjs-2 y selector de SKU */}
           <DatosExtra />
         </div>
       </div>
