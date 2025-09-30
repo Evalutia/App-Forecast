@@ -43,27 +43,31 @@ body{
   padding: 0 1rem;
 }
 
-/* --- Encabezado / “logo” pill --- */
-.login-badge{
-  display:inline-block;
-  /* borde dorado sutil en el contenedor blanco/translúcido */
-  border: 1px solid rgba(196,155,31,.35); /* ≈ var(--gold-600) */
-  background: rgba(255,255,255,.08);
-  padding: .25rem 1rem;
-  border-radius: 9999px;
+/* --- Marca arriba (EVALUTIA) --- */
+.login-brand{
+  display: inline-block;
+  margin: 0 0 4.4rem 0;        /* separación hacia el resto */
+
+  font-weight: 900;
+  letter-spacing: .22em;
   text-transform: uppercase;
-  letter-spacing: .3em;
-  font-size: .75rem;
-  color: var(--emerald-100);
+  font-size: clamp(2rem, 2.4vw + 1.2rem, 3.75rem);
+  line-height: 1.05;
+
+  /* <<< pedido: color sólido verde oscuro >>> */
+  color: #022c22;
+
+  /* leve relieve opcional */
+  text-shadow: 0 1px 0 rgba(0,0,0,.08);
 }
 
+/* --- Título y subtítulo con contorno dorado fino (como Home) --- */
 .login-title{
-  margin: .5rem 0 0;
+  margin: .25rem 0 0;
   font-weight: 600;
-  font-size: clamp(2rem, 3.5vw + 1rem, 3.125rem); /* ~text-4xl -> 5xl */
+  font-size: clamp(2rem, 3.5vw + 1rem, 3.125rem);
   color: var(--white);
 
-  /* contorno dorado MUY fino (igual home-title) */
   -webkit-text-stroke: 0.4px var(--gold-500);
   text-shadow:
     0 0 0.18px var(--gold-500),
@@ -74,13 +78,12 @@ body{
 }
 
 .login-subtitle{
-  margin: .5rem auto 0;
+  margin: .6rem auto 0;
   max-width: 60ch;
   color: rgba(255,255,255, .95);
   font-size: 1.125rem;
-  font-weight: 600;                /* mismo grosor que home */
+  font-weight: 600;
 
-  /* contorno dorado ultra-sutil (igual home-subtitle) */
   -webkit-text-stroke: 0.15px var(--gold-500);
   text-shadow:
     0 0 0.12px var(--gold-500),
@@ -93,15 +96,14 @@ body{
 /* --- Tarjeta del formulario (blanco) --- */
 .card{
   width: 100%;
-  max-width: 28rem; /* ~max-w-md */
+  max-width: 28rem;
   background: rgba(255,255,255,.96);
   color: var(--emerald-950);
 
-  /* borde dorado sutil para todo blanco */
-  border: 1px solid rgba(196,155,31,.35); /* ≈ var(--gold-600) */
-  border-radius: 1.5rem; /* ~rounded-3xl */
-  padding: 2rem; /* p-8 */
-  box-shadow: 0 25px 40px rgba(2, 44, 34, .2); /* shadow-emerald-950/20 */
+  border: 1px solid rgba(196,155,31,.35);
+  border-radius: 1.5rem;
+  padding: 2rem;
+  box-shadow: 0 25px 40px rgba(2, 44, 34, .2);
   backdrop-filter: blur(6px);
 }
 
@@ -117,8 +119,9 @@ body{
 }
 .card-subtitle{
   margin: 0;
-  font-size: .9rem;
-  color: rgba(6, 78, 59, .7); /* emerald-900/70 */
+  font-size: 1rem;        /* más grande para que se note */
+  font-weight: 700;
+  color: rgba(6, 78, 59, .7);
 }
 
 /* --- Form --- */
@@ -135,26 +138,24 @@ body{
 .input{
   width:100%;
   padding: .75rem 1rem;
-  border-radius: .875rem; /* ~rounded-xl */
+  border-radius: .875rem;
 
-  /* borde base con toque brand */
-  border: 1px solid rgba(16,185,129,.25); /* emerald-500/25 aprox */
+  border: 1px solid rgba(16,185,129,.25);
   background: var(--white);
   color: var(--black);
   outline: none;
   box-shadow: 0 1px 2px rgba(0,0,0,.04) inset;
 }
-/* foco: mantenemos brand, pero sumamos halo dorado ultra-sutil */
 .input:focus{
-  border-color: #10b981;                  /* emerald-500 */
+  border-color: #10b981;
   box-shadow:
-    0 0 0 3px rgba(52,211,153,.35),       /* focus ring brand */
-    0 0 0 3.8px rgba(196,155,31,.18);     /* halo dorado finito */
+    0 0 0 3px rgba(52,211,153,.35),
+    0 0 0 3.8px rgba(196,155,31,.18);
 }
 
 .error{
   margin:.35rem 0 0;
-  color:#dc2626; /* red-600 */
+  color:#dc2626;
   font-size: .85rem;
 }
 
@@ -180,11 +181,11 @@ body{
     0 0.1px 0 var(--gold-600),
     0 -0.1px 0 var(--gold-600);
 }
-.button:hover{ background: #065f46; } /* emerald-800 */
+.button:hover{ background: #065f46; }
 .button:disabled{ opacity:.6; cursor:not-allowed; }
 
 /* --- Responsivo sutil --- */
 @media (min-width: 640px){
   .login-page{ padding: 4rem 1.5rem; }
-  .card{ padding: 2.5rem; } /* ~p-10 */
+  .card{ padding: 2.5rem; }
 }
