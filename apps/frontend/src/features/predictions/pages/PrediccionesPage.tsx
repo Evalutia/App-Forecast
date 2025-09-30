@@ -4,6 +4,7 @@ import BackToDashboardButton from '../../users/components/BackToDashboardButton'
 import PrediccionesFilters from '../components/PrediccionesFilters';
 import UltimasPredicciones from '../components/UltimasPredicciones';
 import PrediccionesTable from '../components/PrediccionesTable';
+import DatosExtra from '../components/DatosExtra';
 import { usePrediccionesByJob } from '../hooks/usePredicciones';
 
 function getInt(sp: URLSearchParams, k: string): number | null {
@@ -122,6 +123,7 @@ export default function PrediccionesPage() {
             Seleccioná un SKU en el historial para ver su serie histórica vs. predicción.
           </p>
           {/* Próximo paso: gráfico con react-chartjs-2 y selector de SKU */}
+          <DatosExtra />
         </div>
       </div>
     </div>
