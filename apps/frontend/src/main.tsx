@@ -4,6 +4,7 @@ import AppRoutes from './routes/AppRoutes';
 import './index.css';
 import './styles/login.css';
 import './styles/home.css';
+import './styles/sales.css';
 
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>

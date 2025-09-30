@@ -1,5 +1,6 @@
 import { useMemo } from "react";
-import type { VentasQuery, Venta } from "../types/ventas";
+import type { VentasQuery } from "../types/ventas";
+import type { Venta } from "../types/ventas";
 import { useVentasDetalle, selectDetalleRows, getPaging } from "../hooks/useVentas";
 
 type Props = {
@@ -21,59 +22,41 @@ export default function TablaVentas({ query, onPageChange, onRowClick }: Props) 
   );
 
   if (isError) {
-    return (
-      <div className="rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-700">
-        Ocurrió un error al cargar ventas. {(error as any)?.message ?? ""}
-      </div>
-    );
+    return <div className="alert">Ocurrió un error al cargar ventas. {(error as any)?.message ?? ""}</div>;
   }
 
   return (
-    <div className="w-full rounded-2xl border border-gray-200 bg-white p-4 shadow-sm">
-      <div className="mb-3 flex items-center justify-between">
-        <div className="text-sm text-gray-600">
-          {isFetching ? "Actualizando..." : "Listado de ventas (detalle)"}
-        </div>
-        <div className="text-xs text-gray-500">
-          Total: <span className="font-semibold">{paging.total}</span>
-        </div>
+    <section className="card table-card">
+      <div style={{ marginBottom: ".5rem", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+        <div className="muted">{isFetching ? "Actualizando..." : "Listado de ventas (detalle)"}</div>
+        <div className="muted">Total: <strong>{paging.total}</strong></div>
       </div>
 
-      <div className="overflow-x-auto">
-        <table className="min-w-full text-left text-sm">
-          <thead className="sticky top-0 bg-gray-50 text-xs uppercase text-gray-500">
+      <div className="table-wrap">
+        <table className="table">
+          <thead>
             <tr>
-              <th className="px-3 py-2">Fecha</th>
-              <th className="px-3 py-2">SKU</th>
-              <th className="px-3 py-2">Cantidad</th>
-              <th className="px-3 py-2">Fuente</th>
-              <th className="px-3 py-2">ID</th>
+              <th>Fecha</th>
+              <th>SKU</th>
+              <th>Cantidad</th>
+              <th>Fuente</th>
+              <th>ID</th>
             </tr>
           </thead>
-          <tbody className="divide-y divide-gray-100">
+          <tbody>
             {isLoading ? (
               Array.from({ length: 8 }).map((_, i) => (
-                <tr key={i} className="animate-pulse">
-                  <td className="px-3 py-2">
-                    <div className="h-3 w-20 rounded bg-gray-200" />
-                  </td>
-                  <td className="px-3 py-2">
-                    <div className="h-3 w-24 rounded bg-gray-200" />
-                  </td>
-                  <td className="px-3 py-2">
-                    <div className="h-3 w-12 rounded bg-gray-200" />
-                  </td>
-                  <td className="px-3 py-2">
-                    <div className="h-3 w-24 rounded bg-gray-200" />
-                  </td>
-                  <td className="px-3 py-2">
-                    <div className="h-3 w-10 rounded bg-gray-200" />
-                  </td>
+                <tr key={i}>
+                  <td><span className="skeleton skel-20" /></td>
+                  <td><span className="skeleton skel-28" /></td>
+                  <td><span className="skeleton skel-12" /></td>
+                  <td><span className="skeleton skel-24" /></td>
+                  <td><span className="skeleton skel-10" /></td>
                 </tr>
               ))
             ) : rows.length === 0 ? (
               <tr>
-                <td colSpan={5} className="px-3 py-6 text-center text-sm text-gray-500">
+                <td colSpan={5} className="muted" style={{ textAlign: "center", padding: "1.2rem 0" }}>
                   No hay resultados para los filtros aplicados.
                 </td>
               </tr>
@@ -81,14 +64,14 @@ export default function TablaVentas({ query, onPageChange, onRowClick }: Props) 
               rows.map((r) => (
                 <tr
                   key={r.id}
-                  className={onRowClick ? "cursor-pointer hover:bg-gray-50" : ""}
+                  style={onRowClick ? { cursor: "pointer" } : undefined}
                   onClick={() => onRowClick?.(r)}
                 >
-                  <td className="px-3 py-2">{r.fecha}</td>
-                  <td className="px-3 py-2 font-mono">{r.sku}</td>
-                  <td className="px-3 py-2">{r.cantidad}</td>
-                  <td className="px-3 py-2">{r.fuente || "-"}</td>
-                  <td className="px-3 py-2 text-gray-500">{r.id}</td>
+                  <td>{r.fecha}</td>
+                  <td className="mono">{r.sku}</td>
+                  <td>{r.cantidad}</td>
+                  <td>{r.fuente || "-"}</td>
+                  <td className="muted">{r.id}</td>
                 </tr>
               ))
             )}
@@ -96,21 +79,18 @@ export default function TablaVentas({ query, onPageChange, onRowClick }: Props) 
         </table>
       </div>
 
-      {/* Paginación */}
-      <div className="mt-4 flex items-center justify-between">
-        <div className="text-xs text-gray-500">
-          Página {paging.page} de {totalPages}
-        </div>
-        <div className="flex items-center gap-2">
+      <div className="pager">
+        <div>Página {paging.page} de {totalPages}</div>
+        <div className="pager-buttons">
           <button
-            className="rounded-lg border px-3 py-1 text-sm disabled:opacity-50"
+            className="pager-btn"
             disabled={paging.page <= 1}
             onClick={() => onPageChange(paging.page - 1)}
           >
             Anterior
           </button>
           <button
-            className="rounded-lg border px-3 py-1 text-sm disabled:opacity-50"
+            className="pager-btn"
             disabled={paging.page >= totalPages}
             onClick={() => onPageChange(paging.page + 1)}
           >
@@ -118,6 +98,6 @@ export default function TablaVentas({ query, onPageChange, onRowClick }: Props) 
           </button>
         </div>
       </div>
-    </div>
+    </section>
   );
 }
