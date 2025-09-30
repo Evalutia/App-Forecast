@@ -36,6 +36,8 @@ function Dashboard() {
           <a href="/predicciones" className="btn">
             Ver mis predicciones
           </a>
+        </div>
+        <div>
           <a href="/ventas" className="btn">
             Ver las ventas cargadas
           </a>

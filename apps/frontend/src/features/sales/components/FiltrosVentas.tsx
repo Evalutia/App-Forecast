@@ -6,44 +6,34 @@ type Props = {
   initial?: VentasQuery;
   onApply: (q: VentasQuery) => void;
   onClear?: () => void;
-  showAgregado?: boolean;
 };
 
-export default function FiltrosVentas({
-  initial,
-  onApply,
-  onClear,
-  showAgregado = true,
-}: Props) {
+export default function FiltrosVentas({ initial, onApply, onClear }: Props) {
   const [fechaDesde, setFechaDesde] = useState(initial?.fechaDesde ?? "");
   const [fechaHasta, setFechaHasta] = useState(initial?.fechaHasta ?? "");
   const [sku, setSku] = useState(initial?.sku ?? "");
-  const [agregado, setAgregado] = useState(initial?.agregado ?? "");
   const [pageSize, setPageSize] = useState<number>(initial?.pageSize ?? 50);
 
   const skuFiltro = useDebouncedValue(sku, 250);
   const { data: skuOptions, isLoading: skusLoading } = useDistinctSkus(skuFiltro, {
-    enabled: skuFiltro.trim().length >= 1, 
+    enabled: skuFiltro.trim().length >= 1,
   });
-
   const skuList = useMemo(() => skuOptions ?? [], [skuOptions]);
 
   useEffect(() => {
     setFechaDesde(initial?.fechaDesde ?? "");
     setFechaHasta(initial?.fechaHasta ?? "");
     setSku(initial?.sku ?? "");
-    setAgregado(initial?.agregado ?? "");
     setPageSize(initial?.pageSize ?? 50);
-  }, [initial?.fechaDesde, initial?.fechaHasta, initial?.sku, initial?.agregado, initial?.pageSize]);
+  }, [initial?.fechaDesde, initial?.fechaHasta, initial?.sku, initial?.pageSize]);
 
   const handleApply = () => {
     onApply({
       fechaDesde: fechaDesde || undefined,
       fechaHasta: fechaHasta || undefined,
       sku: sku?.trim() || undefined,
-      page: 1, 
+      page: 1,
       pageSize,
-      agregado: showAgregado && agregado?.trim() ? agregado.trim() : undefined,
     });
   };
 
@@ -51,14 +41,13 @@ export default function FiltrosVentas({
     setFechaDesde("");
     setFechaHasta("");
     setSku("");
-    setAgregado("");
     setPageSize(50);
     onClear?.();
   };
 
   return (
     <div className="w-full rounded-2xl border border-gray-200 bg-white p-4 shadow-sm">
-      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-6">
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-5">
         <div className="flex flex-col">
           <label className="text-sm font-medium text-gray-700">Desde</label>
           <input
@@ -94,21 +83,6 @@ export default function FiltrosVentas({
             ))}
           </datalist>
         </div>
-
-        {showAgregado && (
-          <div className="flex flex-col">
-            <label className="text-sm font-medium text-gray-700">Agregado</label>
-            <select
-              value={agregado}
-              onChange={(e) => setAgregado(e.target.value)}
-              className="mt-1 rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring"
-            >
-              <option value="">(sin agregado)</option>
-              <option value="mes">Mes</option>
-              <option value="dia">Día</option>
-            </select>
-          </div>
-        )}
 
         <div className="flex flex-col">
           <label className="text-sm font-medium text-gray-700">Filas por página</label>
