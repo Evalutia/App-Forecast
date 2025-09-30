@@ -24,7 +24,7 @@ export function usePrediccionesByJob(jobId: number | null | undefined) {
   return useQuery<Prediccion[], Error>({
     queryKey: ['predicciones', 'byJob', jobId],
     queryFn: () => fetchPrediccionesByJob(jobId as number),
-    enabled: typeof jobId === 'number' && Number.isFinite(jobId),
+    enabled: typeof jobId === 'number' && Number.isFinite(jobId) && jobId > 0, 
     staleTime: 60_000,
     gcTime: 10 * 60_000,
   });

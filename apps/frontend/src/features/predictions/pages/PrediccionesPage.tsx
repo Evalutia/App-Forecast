@@ -7,7 +7,9 @@ import PrediccionesTable from '../components/PrediccionesTable';
 import { usePrediccionesByJob } from '../hooks/usePredicciones';
 
 function getInt(sp: URLSearchParams, k: string): number | null {
-  const n = Number(sp.get(k));
+  const raw = sp.get(k);
+  if (raw === null || raw === '') return null;   
+  const n = Number(raw);
   return Number.isFinite(n) ? n : null;
 }
 
@@ -46,6 +48,9 @@ export default function PrediccionesPage() {
 
         {/* Filtros */}
         <PrediccionesFilters />
+
+        {/* Historial paginado (respeta filtros de la URL) */}
+        <PrediccionesTable />
 
         {/* Si hay jobId en la URL, mostramos bloque especial */}
         {typeof jobId === 'number' && (
@@ -109,9 +114,6 @@ export default function PrediccionesPage() {
             )}
           </div>
         )}
-
-        {/* Historial paginado (respeta filtros de la URL) */}
-        <PrediccionesTable />
 
         {/* Datos extra: placeholder para las gráficas (lo integramos en el próximo paso) */}
         <div className="rounded-xl border border-white/10 bg-white/5 p-4">
