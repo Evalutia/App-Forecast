@@ -1,237 +1,39 @@
-/* ===== Variables ===== */
-:root{
-  --emerald-50:  #ecfdf5;
-  --emerald-100: #d1fae5;
-  --emerald-200: #a7f3d0;
-  --emerald-900: #064e3b;
-  --emerald-950: #022c22;
-  --white: #ffffff;
-  --black: #000000;
+/* ====== Fuentes ====== */
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Montserrat:wght@700;800;900&display=swap');
 
-  --border: rgba(209, 250, 229, .4);
-  --shadow: 0 25px 40px rgba(2, 44, 34, .18);
-  --muted: rgba(6, 78, 59, .72);
+/* ====== Tailwind (v4) ====== */
+@source "../index.html";
+@source "./**/*.{ts,tsx}";
+@source "./tw-scan-hints.ts";
 
-  --content-max: 80rem;  
-}
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
 
-/* ===== Página ===== */
-.ventas-page{
-  min-height: 100dvh;
-  padding: 1.5rem 1rem;
-  display: grid;
-  justify-items: center;      
-}
+/* ====== Base de la app ====== */
+html, body, #root { height: 100%; }
 
-/* Contenedor */
-.ventas-container{
-  width: 100%;
-  max-width: var(--content-max);
-  margin: 0 auto;              
-  display: flex;
-  flex-direction: column;
-  align-items: center;         
-  gap: 1rem;
-}
-
-/* Topbar */
-.ventas-topbar{
-  width: 100%;
-  max-width: var(--content-max);
-  margin: 0 auto;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  color: rgba(236, 253, 245, .9);
-}
-.brand-badge{
-  font-size: .9rem;
-  color: rgba(236,253,245,.86);
-}
-
-/* ===== Encabezado de sección ===== */
-.section-head{
-  width: 100%;
-  max-width: var(--content-max);
-  margin: 0 auto 1.25rem;
-}
-.section-title{
+body {
   margin: 0;
-  font-weight: 900;
-  font-size: clamp(2rem, 1.4vw + 1.6rem, 2.75rem); 
-  color: var(--white);
-  letter-spacing: .01em;
-}
-.section-subtitle{
-  margin: .4rem 0 0;
-  color: rgba(255,255,255,.95);
-  font-size: 1.05rem;
-  font-weight: 600;
+  /* Fuente global por defecto */
+  font-family: 'Inter', ui-sans-serif, system-ui, -apple-system, "Segoe UI",
+               Roboto, Helvetica, Arial, "Apple Color Emoji", "Segoe UI Emoji", sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
 }
 
-/* ===== Tarjeta base ===== */
-.card{
-  width: 100%;                
-  background: rgba(255,255,255,.96);
-  color: var(--emerald-950);
-  border: 1px solid var(--border);
-  border-radius: 1.5rem;
-  padding: 1rem;
-  box-shadow: var(--shadow);
-  backdrop-filter: blur(6px);
+/* Titulares principales en Montserrat (login/home y cualquier h1/h2) */
+h1, h2,
+.home-title,
+.login-title,
+.home-brand,
+.login-brand {
+  font-family: 'Montserrat', sans-serif;
 }
 
-.ventas-container section.card{
-  width: 100%;
-  max-width: var(--content-max);  
-  margin: 0 auto;
+/* Opcional: tipografía mono para <code>/<pre> */
+code, pre {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono",
+               "Courier New", monospace;
 }
-
-/* ===== Filtros ===== */
-.filters-card{
-  padding: 1.25rem;
-}
-.filters-grid{
-  display: grid;
-  grid-template-columns: 1fr 1fr 2fr 1fr;  
-  gap: .9rem;
-}
-@media (max-width: 1200px){
-  .filters-grid{ grid-template-columns: 1fr 1fr 1fr 1fr; }
-}
-@media (max-width: 900px){
-  .filters-grid{ grid-template-columns: 1fr 1fr; }
-}
-@media (max-width: 640px){
-  .filters-grid{ grid-template-columns: 1fr; }
-}
-.form-row{ display: flex; flex-direction: column; }
-.label{
-  display:block;
-  font-size: .8rem;
-  font-weight: 800;
-  text-transform: uppercase;
-  letter-spacing: .06em;
-  color: var(--muted);
-  margin-bottom: .4rem;
-}
-.input{
-  width:100%;
-  padding: .8rem 1rem;
-  border-radius: .9rem;
-  border: 1px solid rgba(16,185,129,.25);
-  background: var(--white);
-  color: var(--black);
-  outline: none;
-  box-shadow: 0 1px 2px rgba(0,0,0,.04) inset;
-}
-.input:focus{
-  border-color: #10b981;
-  box-shadow: 0 0 0 3px rgba(52,211,153,.35);
-}
-.select{
-  width:100%;
-  padding: .8rem 1rem;
-  border-radius: .9rem;
-  border: 1px solid rgba(16,185,129,.25);
-  background: var(--white);
-  color: var(--black);
-}
-.filters-actions{
-  margin-top: 1rem;
-  display: flex;
-  align-items: center;
-  gap: .7rem;
-}
-
-/* Botones */
-.button{
-  padding: .8rem 1.2rem;
-  border: 0;
-  border-radius: 1rem;
-  background: var(--emerald-900);
-  color: var(--white);
-  font-size: .95rem;
-  font-weight: 900;
-  text-transform: uppercase;
-  letter-spacing: .06em;
-  cursor: pointer;
-}
-.button:hover{ background: #065f46; }
-.button:disabled{ opacity:.6; cursor:not-allowed; }
-.button-ghost{
-  background: transparent;
-  border: 1px solid rgba(16,185,129,.35);
-  color: var(--emerald-950);
-}
-.button-ghost:hover{
-  background: rgba(236,253,245,.75);
-}
-
-/* ===== Tabla ===== */
-.table-card{
-  padding: 1rem;
-  margin-top: 1rem;
-}
-.table-wrap{
-  width: 100%;
-  overflow-x: auto;
-}
-.table{
-  width: 100%;
-  border-collapse: separate;
-  border-spacing: 0;
-  font-size: .95rem;
-}
-.table thead th{
-  position: sticky;
-  top: 0;
-  background: #f7faf9;
-  color: #56756b;
-  text-transform: uppercase;
-  letter-spacing: .06em;
-  font-size: .8rem;
-  padding: .8rem .95rem;
-  border-bottom: 1px solid rgba(16,185,129,.22);
-}
-.table tbody td{
-  padding: .85rem .95rem;
-  border-bottom: 1px solid rgba(16,185,129,.14);
-}
-.table tbody tr:hover{
-  background: #f8fffc;
-}
-.mono{ font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono","Courier New", monospace; }
-.muted{ color: #6b7280; }
-
-/* Estado/alertas */
-.alert{
-  border: 1px solid #fecaca;
-  background: #fff1f2;
-  color: #991b1b;
-  border-radius: 1rem;
-  padding: .9rem 1rem;
-  font-size: .92rem;
-}
-
-/* Skeleton */
-.skeleton{ display: inline-block; height: .9rem; border-radius: .45rem; background: #e5f5ee; }
-.skel-20{ width: 5rem; } .skel-24{ width: 6rem; } .skel-28{ width: 7rem; } .skel-12{ width: 3rem; } .skel-10{ width: 2.5rem; }
-
-/* Paginador */
-.pager{
-  margin-top: 1rem;
-  display:flex; align-items:center; justify-content:space-between;
-  font-size: .9rem; color: #6b7280;
-}
-.pager-buttons{ display:flex; gap:.6rem; }
-.pager-btn{
-  border: 1px solid rgba(16,185,129,.28);
-  background: #fff;
-  color: var(--emerald-950);
-  padding: .55rem .95rem;
-  border-radius: .9rem;
-  cursor: pointer;
-}
-.pager-btn:disabled{ opacity:.5; cursor:not-allowed; }
-.pager-btn:hover{ background: #f3faf7; }
