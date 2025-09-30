@@ -7,21 +7,16 @@
   --emerald-950: #022c22;
   --white: #ffffff;
   --black: #000000;
-
-  /* Dorados (mismos que Home) */
-  --gold-500: #d4af37;
-  --gold-600: #c49b1f;
 }
 
 html,body,#root{height:100%}
 *{box-sizing:border-box}
 body{
   margin:0;
-  font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, "Apple Color Emoji","Segoe UI Emoji";
-  -webkit-font-smoothing: antialiased;
-  -moz-osx-font-smoothing: grayscale;
   color: var(--white);
   background: linear-gradient(135deg, var(--emerald-950), var(--emerald-900), var(--emerald-950));
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
 }
 
 /* --- Layout de la página --- */
@@ -34,7 +29,7 @@ body{
 
 .login-wrapper{
   width: 100%;
-  max-width: 72rem; /* ~max-w-5xl */
+  max-width: 72rem;
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -46,35 +41,22 @@ body{
 /* --- Marca arriba (EVALUTIA) --- */
 .login-brand{
   display: inline-block;
-  margin: 0 0 4.4rem 0;        /* separación hacia el resto */
-
+  margin: 0 0 4.4rem 0;
   font-weight: 900;
   letter-spacing: .22em;
   text-transform: uppercase;
   font-size: clamp(2rem, 2.4vw + 1.2rem, 3.75rem);
   line-height: 1.05;
-
-  /* <<< pedido: color sólido verde oscuro >>> */
   color: #022c22;
-
-  /* leve relieve opcional */
-  text-shadow: 0 1px 0 rgba(0,0,0,.08);
+  text-shadow: none;
 }
 
-/* --- Título y subtítulo con contorno dorado fino (como Home) --- */
+/* --- Título y subtítulo SIN contorno dorado --- */
 .login-title{
   margin: .25rem 0 0;
   font-weight: 600;
   font-size: clamp(2rem, 3.5vw + 1rem, 3.125rem);
   color: var(--white);
-
-  -webkit-text-stroke: 0.4px var(--gold-500);
-  text-shadow:
-    0 0 0.18px var(--gold-500),
-    0.18px 0 0 var(--gold-600),
-   -0.18px 0 0 var(--gold-600),
-    0 0.18px 0 var(--gold-600),
-    0 -0.18px 0 var(--gold-600);
 }
 
 .login-subtitle{
@@ -83,14 +65,6 @@ body{
   color: rgba(255,255,255, .95);
   font-size: 1.125rem;
   font-weight: 600;
-
-  -webkit-text-stroke: 0.15px var(--gold-500);
-  text-shadow:
-    0 0 0.12px var(--gold-500),
-    0.12px 0 0 var(--gold-600),
-   -0.12px 0 0 var(--gold-600),
-    0 0.12px 0 var(--gold-600),
-    0 -0.12px 0 var(--gold-600);
 }
 
 /* --- Tarjeta del formulario (blanco) --- */
@@ -100,7 +74,7 @@ body{
   background: rgba(255,255,255,.96);
   color: var(--emerald-950);
 
-  border: 1px solid rgba(196,155,31,.35);
+  border: 1px solid rgba(209, 250, 229, .4); /* borde neutro/verde suave */
   border-radius: 1.5rem;
   padding: 2rem;
   box-shadow: 0 25px 40px rgba(2, 44, 34, .2);
@@ -119,7 +93,7 @@ body{
 }
 .card-subtitle{
   margin: 0;
-  font-size: 1rem;        /* más grande para que se note */
+  font-size: 1rem;
   font-weight: 700;
   color: rgba(6, 78, 59, .7);
 }
@@ -148,9 +122,8 @@ body{
 }
 .input:focus{
   border-color: #10b981;
-  box-shadow:
-    0 0 0 3px rgba(52,211,153,.35),
-    0 0 0 3.8px rgba(196,155,31,.18);
+  /* sin halo dorado extra */
+  box-shadow: 0 0 0 3px rgba(52,211,153,.35);
 }
 
 .error{
@@ -159,7 +132,7 @@ body{
   font-size: .85rem;
 }
 
-/* Botón con texto blanco -> contorno dorado sutil */
+/* Botón (sin contorno dorado en el texto) */
 .button{
   width:100%;
   padding: .75rem 1rem;
@@ -172,14 +145,6 @@ body{
   text-transform: uppercase;
   letter-spacing: .06em;
   cursor: pointer;
-
-  -webkit-text-stroke: 0.18px var(--gold-500);
-  text-shadow:
-    0 0 0.1px var(--gold-500),
-    0.1px 0 0 var(--gold-600),
-   -0.1px 0 0 var(--gold-600),
-    0 0.1px 0 var(--gold-600),
-    0 -0.1px 0 var(--gold-600);
 }
 .button:hover{ background: #065f46; }
 .button:disabled{ opacity:.6; cursor:not-allowed; }

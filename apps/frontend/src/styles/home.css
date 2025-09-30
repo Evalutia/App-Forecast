@@ -1,6 +1,5 @@
 /* ===========================
    Home / Dashboard Styles
-   (reemplaza por completo este archivo)
    =========================== */
 
 /* --- Paleta/vars --- */
@@ -10,12 +9,8 @@
   --emerald-200: #a7f3d0;
   --emerald-600: #059669;
   --emerald-900: #064e3b;
-  --emerald-950: #022c22;         /* color base del fondo/brand */
+  --emerald-950: #022c22;
   --white: #ffffff;
-
-  /* Dorados */
-  --gold-500: #d4af37;            /* oro elegante */
-  --gold-600: #c49b1f;
 
   --shadow-strong: 0 6px 18px rgba(0,0,0,.12);
   --shadow-soft-inset: 0 1px 0 rgba(255,255,255,.06) inset;
@@ -44,8 +39,7 @@ html, body, #root { height: 100%; }
   justify-content: space-between;
 
   background: var(--white);
-  /* Borde inferior dorado MUY sutil */
-  border-bottom: 1px solid rgba(196,155,31,.35); /* ≈ var(--gold-600) a baja opacidad */
+  border-bottom: 1px solid rgba(0,0,0,.06); /* ← sin dorado */
   border-radius: 0;
   box-shadow: var(--shadow-strong);
 }
@@ -90,26 +84,15 @@ html, body, #root { height: 100%; }
   text-align: center;
 }
 
-/* === Título con contorno dorado ULTRA sutil === */
+/* === Título sin contorno dorado === */
 .home-title{
   margin: 0;
   font-weight: 700;
   font-size: clamp(2rem, 3.5vw + 1rem, 3.125rem);
   color: var(--white);
-
-  /* contorno hiper fino (WebKit/Blink) */
-  -webkit-text-stroke: 0.4px var(--gold-500);
-
-  /* fallback Firefox: micro-sombras para borde apenas visible */
-  text-shadow:
-    0 0 0.18px var(--gold-500),
-    0.18px 0 0 var(--gold-600),
-   -0.18px 0 0 var(--gold-600),
-    0 0.18px 0 var(--gold-600),
-    0 -0.18px 0 var(--gold-600);
 }
 
-/* === Subtítulo: casi imperceptible (pero está) === */
+/* === Subtítulo sin contorno dorado === */
 .home-subtitle{
   margin: .25rem 0 0 0;
   font-size: 1.25rem;
@@ -119,15 +102,6 @@ html, body, #root { height: 100%; }
   letter-spacing: .01em;
   max-width: 72ch;
   text-wrap: balance;
-
-  /* borde extra-hiper fino */
-  -webkit-text-stroke: 0.15px var(--gold-500);
-  text-shadow:
-    0 0 0.12px var(--gold-500),
-    0.12px 0 0 var(--gold-600),
-   -0.12px 0 0 var(--gold-600),
-    0 0.12px 0 var(--gold-600),
-    0 -0.12px 0 var(--gold-600);
 }
 
 /* ====================
@@ -141,7 +115,7 @@ html, body, #root { height: 100%; }
   padding: .5rem 1rem;
   border-radius: .5rem;
 
-  background: rgba(2, 44, 34, .92);        /* ≈ var(--emerald-950) */
+  background: rgba(2, 44, 34, .92);
   border: 1px solid rgba(2, 44, 34, 1);
   color: var(--white);
 
@@ -151,15 +125,6 @@ html, body, #root { height: 100%; }
   transition: background .15s ease, transform .06s ease, box-shadow .15s ease;
   box-shadow: var(--shadow-soft-inset), 0 6px 14px rgba(0,0,0,.12);
   cursor: pointer;
-
-  /* ——— contorno dorado sutil en TODO texto blanco de botones ——— */
-  -webkit-text-stroke: 0.18px var(--gold-500);
-  text-shadow:
-    0 0 0.1px var(--gold-500),
-    0.1px 0 0 var(--gold-600),
-   -0.1px 0 0 var(--gold-600),
-    0 0.1px 0 var(--gold-600),
-    0 -0.1px 0 var(--gold-600);
 }
 .btn:hover{ background: var(--emerald-900); }
 .btn:active{ transform: translateY(1px); }
@@ -171,7 +136,7 @@ html, body, #root { height: 100%; }
   font-size: .85rem;
 }
 
-/* ===== CTA del HERO más grande ===== */
+/* CTA del HERO más grande */
 .home-hero .btn{
   font-size: 1.05rem;
   padding: .7rem 1.25rem;

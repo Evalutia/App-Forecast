@@ -25,10 +25,9 @@ function Dashboard() {
 
       {/* Hero */}
       <div className="home-hero">
-        <h1 className="home-title">Bienvenido al portal Evalutia</h1>
+        <h1 className="home-title">Tu negocio, gestionado con inteligencia.</h1>
         <p className="home-subtitle">
-          Gestioná y visualizá tus métricas clave en un entorno claro, moderno y enfocado
-          en lo que realmente importa.
+          Visualizá métricas clave, obtené predicciones confiables y optimizá la eficiencia de tu empresa en un solo lugar.
         </p>
 
         {/* CTA */}
