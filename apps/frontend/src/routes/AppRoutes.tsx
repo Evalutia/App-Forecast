@@ -3,6 +3,7 @@ import RequireAuth from './RequireAuth';
 import LoginPage from '../features/auth/pages/LoginPage';
 import UsersPage from '../features/users/pages/UsersPage';
 import PrediccionesPage from '../features/predictions/pages/PrediccionesPage';
+import VentasPage from "../features/sales/pages/VentasPage";
 import LogoutButton from '../features/auth/components/LogoutButton';
 import AdminUsersButton from '../features/auth/components/AdminUsersButton';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
@@ -35,6 +36,9 @@ function Dashboard() {
           <a href="/predicciones" className="btn">
             Ver mis predicciones
           </a>
+          <a href="/ventas" className="btn">
+            Ver las ventas cargadas
+          </a>
         </div>
       </div>
     </div>
@@ -55,6 +59,7 @@ export default function AppRoutes() {
             <Route path="/home" element={<Dashboard />} />
             <Route path="/usuarios" element={<UsersPage />} />
             <Route path="/predicciones" element={<PrediccionesPage />} />
+            <Route path="/ventas" element={<VentasPage />} />
           </Route>
           {/* fallback */}
           <Route path="*" element={<LoginPage />} />
