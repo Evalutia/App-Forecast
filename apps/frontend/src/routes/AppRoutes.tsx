@@ -2,6 +2,7 @@ import { BrowserRouter, Routes, Route } from 'react-router-dom';
 import RequireAuth from './RequireAuth';
 import LoginPage from '../features/auth/pages/LoginPage';
 import UsersPage from '../features/users/pages/UsersPage';
+import PrediccionesPage from '../features/predictions/pages/PrediccionesPage';
 import LogoutButton from '../features/auth/components/LogoutButton';
 import AdminUsersButton from '../features/auth/components/AdminUsersButton';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
@@ -31,6 +32,16 @@ function Dashboard() {
           Gestioná y visualizá tus métricas clave en un entorno claro, moderno y enfocado
           en lo que realmente importa.
         </p>
+
+        {/* Botón "Ver predicciones" */}
+        <div className="mt-4">
+          <a
+            href="/predicciones"
+            className="rounded-lg bg-emerald-600/90 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-600"
+          >
+            Ver predicciones
+          </a>
+        </div>
       </div>
     </div>
   );
@@ -46,7 +57,8 @@ export default function AppRoutes() {
           {/* privadas */}
           <Route element={<RequireAuth />}>
             <Route path="/" element={<Dashboard />} />
-            <Route path="/usuarios" element={<UsersPage />} /> {/* <-- NUEVA */}
+            <Route path="/usuarios" element={<UsersPage />} />
+            <Route path="/predicciones" element={<PrediccionesPage />} /> 
           </Route>
           {/* fallback */}
           <Route path="*" element={<LoginPage />} />
