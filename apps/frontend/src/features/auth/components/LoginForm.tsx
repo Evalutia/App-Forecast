@@ -30,41 +30,36 @@ export default function LoginForm() {
   };
 
   return (
-    <div className="w-full max-w-md rounded-3xl border border-emerald-100/40 bg-white/95 p-10 shadow-2xl shadow-emerald-950/20 backdrop-blur">
-      <div className="mb-8 space-y-2 text-center">
-        <h2 className="text-3xl font-semibold text-emerald-950">Inicia sesión</h2>
-        <p className="text-sm text-emerald-900/70">Accede con tus credenciales corporativas.</p>
+    <div className="card">
+      <div className="card-header">
+        <h2 className="card-title">Inicia sesión</h2>
+        <p className="card-subtitle">Accede con tus credenciales corporativas.</p>
       </div>
-      <form onSubmit={handleSubmit(onSubmit)} className="space-y-6">
-        <div className="space-y-2">
-          <label className="block text-sm font-medium uppercase tracking-wide text-emerald-900/80">
-            Correo
-          </label>
+
+      <form onSubmit={handleSubmit(onSubmit)}>
+        <div className="form-group">
+          <label className="label">Correo</label>
           <input
             type="email"
-            className="w-full rounded-xl border border-emerald-200/60 bg-white px-4 py-3 text-emerald-950 shadow-sm transition focus:border-emerald-500 focus:outline-none focus:ring-2 focus:ring-emerald-400/50"
+            className="input"
             placeholder="tucorreo@dominio.com"
             {...register('email')}
           />
-          {errors.email && <p className="text-sm text-red-600">{errors.email.message}</p>}
+          {errors.email && <p className="error">{errors.email.message}</p>}
         </div>
-        <div className="space-y-2">
-          <label className="block text-sm font-medium uppercase tracking-wide text-emerald-900/80">
-            Contraseña
-          </label>
+
+        <div className="form-group">
+          <label className="label">Contraseña</label>
           <input
             type="password"
-            className="w-full rounded-xl border border-emerald-200/60 bg-white px-4 py-3 text-emerald-950 shadow-sm transition focus:border-emerald-500 focus:outline-none focus:ring-2 focus:ring-emerald-400/50"
+            className="input"
             placeholder="••••••••"
             {...register('password')}
           />
-          {errors.password && <p className="text-sm text-red-600">{errors.password.message}</p>}
+          {errors.password && <p className="error">{errors.password.message}</p>}
         </div>
-        <button
-          type="submit"
-          disabled={isPending}
-          className="w-full rounded-xl bg-emerald-900 px-4 py-3 text-sm font-semibold uppercase tracking-wide text-white transition hover:bg-emerald-800 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:ring-offset-2 focus:ring-offset-white disabled:cursor-not-allowed disabled:opacity-60"
-        >
+
+        <button type="submit" disabled={isPending} className="button">
           {isPending ? 'Ingresando…' : 'Ingresar'}
         </button>
       </form>
