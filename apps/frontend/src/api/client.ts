@@ -24,6 +24,15 @@ api.interceptors.response.use(
   (error) => {
     const data = error?.response?.data;
     const status = error?.response?.status;
+    const isCanceled =
+          axios.isCancel?.(error) ||
+          error?.code === 'ERR_CANCELED' ||
+          error?.name === 'CanceledError' ||
+          /aborted|canceled/i.test(String(error?.message));
+
+    if (isCanceled) {
+      return Promise.reject(error);
+    }
 
     let msg =
       data?.mensaje ??

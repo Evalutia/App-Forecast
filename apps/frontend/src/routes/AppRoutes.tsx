@@ -44,6 +44,11 @@ function Dashboard() {
             Ver las ventas cargadas
           </a>
         </div>
+        <div>
+          <a href="/jobs" className="btn">
+            Ver historial de ejecuciones 
+          </a>
+        </div>
       </div>
     </div>
   );
