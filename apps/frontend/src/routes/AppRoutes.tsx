@@ -4,6 +4,8 @@ import LoginPage from '../features/auth/pages/LoginPage';
 import UsersPage from '../features/users/pages/UsersPage';
 import PrediccionesPage from '../features/predictions/pages/PrediccionesPage';
 import VentasPage from "../features/sales/pages/VentasPage";
+import JobsPage from '../features/jobs/pages/JobsPage';
+import JobDetailPage from '../features/jobs/pages/JobDetailPage';
 import LogoutButton from '../features/auth/components/LogoutButton';
 import AdminUsersButton from '../features/auth/components/AdminUsersButton';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
@@ -62,6 +64,8 @@ export default function AppRoutes() {
             <Route path="/usuarios" element={<UsersPage />} />
             <Route path="/predicciones" element={<PrediccionesPage />} />
             <Route path="/ventas" element={<VentasPage />} />
+            <Route path="/jobs" element={<JobsPage />} />
+            <Route path="/jobs/:id" element={<JobDetailPage />} />
           </Route>
           {/* fallback */}
           <Route path="*" element={<LoginPage />} />
