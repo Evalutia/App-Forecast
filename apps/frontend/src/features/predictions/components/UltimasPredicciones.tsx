@@ -42,14 +42,15 @@ export default function UltimasPredicciones() {
       ) : (
         <ul className="divide-y divide-white/10">
           {items.map((p) => (
-            <li key={`${p.sku}-${p.fechaPredicha}`} className="py-3 flex items-center justify-between gap-3">
+            <li key={p.id ?? `${p.sku}-${p.fechaPredicha}-${p.modelo}-${p.horizonte}-${p.versionModelo ?? ''}-${p.tsGeneracion ?? ''}`} 
+            className="py-3 flex items-center justify-between gap-3">
               <div className="min-w-0">
                 <div className="flex items-center gap-2">
                   <span className="inline-flex items-center rounded bg-white/10 px-2 py-0.5 text-xs text-emerald-100">
                     {p.sku}
                   </span>
                   <span className="text-sm text-emerald-100/90">
-                    {p.fechaPredicha} → <span className="font-medium">{p.cantidadPredicha}</span>
+                     {' - ' + p.fechaPredicha} → <span className="font-medium">{p.cantidadPredicha}</span>
                   </span>
                 </div>
                 <div className="mt-0.5 text-xs text-emerald-100/70">
