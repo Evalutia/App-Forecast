@@ -5,6 +5,7 @@ import './index.css';
 import './styles/login.css';
 import './styles/home.css';
 import './styles/sales.css';
+import './styles/jobs.css';
 
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>

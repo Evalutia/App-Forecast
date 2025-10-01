@@ -2,14 +2,6 @@ import React from 'react';
 import { Link } from 'react-router-dom';
 import { useJobs, usePrefetchNextJobsPage } from '../hooks/useJobs';
 import type { JobsQuery, JobItem } from '../types/jobs';
-import JobEstadoBadge from './JobEstadoBadge';
-import JobPrediccionesLink from './JobPrediccionesLink';
-
-type Props = {
-  query: JobsQuery;
-  onQueryChange: (next: JobsQuery) => void;
-  className?: string;
-};
 
 function formatDateTime(iso?: string | null) {
   if (!iso) return '—';
@@ -20,7 +12,20 @@ function formatDateTime(iso?: string | null) {
   return `${dd} ${hh}`;
 }
 
-export default function TablaJobs({ query, onQueryChange, className = '' }: Props) {
+function EstadoBadge({ estado }: { estado: string }) {
+  const k = (estado || 'desconocido').toLowerCase();
+  const map: Record<string, string> = {
+    pendiente: 'badge badge-pendiente',
+    ejecutando: 'badge badge-ejecutando',
+    exitoso: 'badge badge-exitoso',
+    fallido: 'badge badge-fallido',
+    cancelado: 'badge badge-cancelado',
+  };
+  const cls = map[k] ?? 'badge badge-default';
+  return <span className={cls}>{estado || 'desconocido'}</span>;
+}
+
+export default function TablaJobs({ query, onQueryChange }: { query: JobsQuery; onQueryChange: (q: JobsQuery) => void; }) {
   const { data, isLoading, isFetching } = useJobs(query);
   const prefetchNext = usePrefetchNextJobsPage(query);
 
@@ -33,107 +38,75 @@ export default function TablaJobs({ query, onQueryChange, className = '' }: Prop
   const canPrev = page > 1;
   const canNext = page < totalPages;
 
-  React.useEffect(() => {
-    prefetchNext(items.length).catch(() => {});
-  }, [items.length, page, pageSize]);
+  React.useEffect(() => { prefetchNext(items.length).catch(() => {}); }, [items.length]);
 
-  const goPage = (p: number) => {
-    onQueryChange({ ...query, page: Math.min(Math.max(1, p), totalPages) });
-  };
+  const goPage = (p: number) => onQueryChange({ ...query, page: Math.min(Math.max(1, p), totalPages) });
 
   return (
-    <div className={`w-full ${className}`}>
-      <div className="flex items-center justify-between mb-3">
-        <h3 className="text-lg font-semibold">Historial de jobs</h3>
-        <div className="text-sm text-slate-500">
-          {isFetching ? 'Actualizando…' : `Total: ${total}`}
-        </div>
+    <section className="card table-card">
+      <div style={{ marginBottom: '.5rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <div className="muted">{isFetching ? 'Actualizando…' : 'Historial de jobs'}</div>
+        <div className="muted">Total: <strong>{total}</strong></div>
       </div>
 
-      <div className="overflow-x-auto rounded-xl ring-1 ring-slate-200">
-        <table className="min-w-full divide-y divide-slate-200">
-          <thead className="bg-slate-50">
+      <div className="table-wrap">
+        <table className="table">
+          <thead>
             <tr>
-              <Th>ID</Th>
-              <Th>Tipo</Th>
-              <Th>Estado</Th>
-              <Th>Inicio</Th>
-              <Th>Fin</Th>
-              <Th className="text-right">Acciones</Th>
+              <th>ID</th>
+              <th>Tipo</th>
+              <th>Estado</th>
+              <th>Inicio</th>
+              <th>Fin</th>
+              <th style={{ textAlign: 'right' }}>Acciones</th>
             </tr>
           </thead>
-          <tbody className="divide-y divide-slate-100 bg-white">
+          <tbody>
             {isLoading && items.length === 0 ? (
-              <tr>
-                <td colSpan={6} className="p-6 text-center text-slate-500">Cargando…</td>
-              </tr>
+              Array.from({ length: 8 }).map((_, i) => (
+                <tr key={i}>
+                  <td><span className="skeleton skel-12" /></td>
+                  <td><span className="skeleton skel-24" /></td>
+                  <td><span className="skeleton skel-20" /></td>
+                  <td><span className="skeleton skel-24" /></td>
+                  <td><span className="skeleton skel-24" /></td>
+                  <td><span className="skeleton skel-20" /></td>
+                </tr>
+              ))
             ) : items.length === 0 ? (
               <tr>
-                <td colSpan={6} className="p-6 text-center text-slate-500">Sin resultados</td>
+                <td colSpan={6} className="muted" style={{ textAlign: 'center', padding: '1.2rem 0' }}>
+                  No hay resultados para los filtros aplicados.
+                </td>
               </tr>
             ) : (
-              items.map((j) => <Row key={j.id} job={j} />)
+              items.map((j: JobItem) => (
+                <tr key={j.id}>
+                  <td className="mono">#{j.id}</td>
+                  <td>{j.tipoJob}</td>
+                  <td><EstadoBadge estado={j.estado} /></td>
+                  <td>{formatDateTime(j.fechaInicio)}</td>
+                  <td>{formatDateTime(j.fechaFin)}</td>
+                  <td style={{ textAlign: 'right' }}>
+                    <div style={{ display:'inline-flex', gap:'.8rem' }}>
+                      <Link to={`/jobs/${j.id}`}>Detalle</Link>
+                      <Link to={`/predicciones?jobId=${j.id}&page=1`}>Ver predicciones</Link>
+                    </div>
+                  </td>
+                </tr>
+              ))
             )}
           </tbody>
         </table>
       </div>
 
-      <div className="mt-4 flex items-center justify-between gap-3">
-        <div className="text-sm text-slate-500">
-          Página <span className="font-medium">{page}</span> de <span className="font-medium">{totalPages}</span>
-        </div>
-        <div className="flex items-center gap-2">
-          <button
-            className="px-3 py-1.5 rounded-lg ring-1 ring-slate-300 text-slate-700 disabled:opacity-40"
-            onClick={() => goPage(page - 1)}
-            disabled={!canPrev}
-          >
-            Anterior
-          </button>
-          <button
-            className="px-3 py-1.5 rounded-lg ring-1 ring-slate-300 text-slate-700 disabled:opacity-40"
-            onClick={() => goPage(page + 1)}
-            disabled={!canNext}
-          >
-            Siguiente
-          </button>
+      <div className="pager">
+        <div>Página {page} de {totalPages}</div>
+        <div className="pager-buttons">
+          <button className="pager-btn" disabled={!canPrev} onClick={() => goPage(page - 1)}>Anterior</button>
+          <button className="pager-btn" disabled={!canNext} onClick={() => goPage(page + 1)}>Siguiente</button>
         </div>
       </div>
-    </div>
-  );
-}
-
-function Th({ children, className = '' }: React.PropsWithChildren<{ className?: string }>) {
-  return (
-    <th className={`px-3 py-2 text-left text-xs font-semibold uppercase tracking-wide text-slate-600 ${className}`}>
-      {children}
-    </th>
-  );
-}
-
-function Td({ children, className = '' }: React.PropsWithChildren<{ className?: string }>) {
-  return <td className={`px-3 py-2 text-sm text-slate-700 ${className}`}>{children}</td>;
-}
-
-function Row({ job }: { job: JobItem }) {
-  return (
-    <tr>
-      <Td className="whitespace-nowrap">#{job.id}</Td>
-      <Td className="whitespace-nowrap">{job.tipoJob}</Td>
-      <Td><JobEstadoBadge estado={job.estado} /></Td>
-      <Td className="whitespace-nowrap">{formatDateTime(job.fechaInicio)}</Td>
-      <Td className="whitespace-nowrap">{formatDateTime(job.fechaFin)}</Td>
-      <Td className="text-right">
-        <div className="inline-flex items-center gap-3">
-          <Link
-            to={`/jobs/${job.id}`}
-            className="text-slate-700 hover:text-slate-900 hover:underline"
-          >
-            Detalle
-          </Link>
-          <JobPrediccionesLink jobId={job.id} />
-        </div>
-      </Td>
-    </tr>
+    </section>
   );
 }

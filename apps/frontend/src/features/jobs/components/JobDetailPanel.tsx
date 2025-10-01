@@ -1,66 +1,48 @@
-import React from 'react';
 import { useJob } from '../hooks/useJobs';
-import JobEstadoBadge from './JobEstadoBadge';
-
-type Props = { jobId: number };
 
 function formatDateTime(iso?: string | null) {
   if (!iso) return '—';
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return '—';
-  const dd = d.toLocaleDateString(undefined, { day: '2-digit', month: '2-digit', year: 'numeric' });
-  const hh = d.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' });
+  const dd = d.toLocaleDateString(undefined, { day:'2-digit', month:'2-digit', year:'numeric' });
+  const hh = d.toLocaleTimeString(undefined, { hour:'2-digit', minute:'2-digit' });
   return `${dd} ${hh}`;
 }
 
-export default function JobDetailPanel({ jobId }: Props) {
-  const { data: job, isLoading, isFetching } = useJob(jobId);
+export default function JobDetailPanel({ jobId }: { jobId: number }) {
+  const { data: job, isLoading } = useJob(jobId);
 
-  if (isLoading && !job) {
-    return <div className="p-6 text-slate-500">Cargando…</div>;
-  }
-  if (!job) {
-    return <div className="p-6 text-slate-500">No se encontró el job.</div>;
-  }
+  if (isLoading && !job) return <section className="card"><div className="muted">Cargando…</div></section>;
+  if (!job) return <section className="card"><div className="muted">No se encontró el job.</div></section>;
 
   return (
-    <div className="rounded-xl ring-1 ring-slate-200 bg-white">
-      <div className="p-4 flex items-start justify-between border-b border-slate-100">
+    <section className="card" style={{ marginTop: '1rem' }}>
+      <div style={{ display:'flex', justifyContent:'space-between', alignItems:'flex-start', borderBottom:'1px solid rgba(16,185,129,.14)', paddingBottom:'.75rem' }}>
         <div>
-          <h4 className="text-base font-semibold">Job #{job.id}</h4>
-          <div className="mt-1 text-sm text-slate-600">
-            Tipo: <span className="font-medium">{job.tipoJob}</span>
-          </div>
+          <h4 style={{ margin:0, fontWeight:800 }}>Job #{job.id}</h4>
+          <div className="muted" style={{ marginTop: '.25rem' }}>Tipo: <strong>{job.tipoJob}</strong></div>
         </div>
-        <div className="flex items-center gap-2">
-          <JobEstadoBadge estado={job.estado} />
-          <span className="text-xs text-slate-500">
-            {isFetching ? 'Actualizando…' : null}
-          </span>
-        </div>
+        <span className="badge badge-default">{job.estado}</span>
       </div>
 
-      <div className="p-4 grid grid-cols-1 md:grid-cols-2 gap-4">
-        <Info label="Inicio" value={formatDateTime(job.fechaInicio)} />
-        <Info label="Fin" value={formatDateTime(job.fechaFin)} />
-        {job.detalle ? (
-          <div className="md:col-span-2">
-            <div className="text-xs font-semibold text-slate-500 uppercase">Detalle / Warnings</div>
-            <pre className="mt-1 whitespace-pre-wrap text-sm text-slate-800 bg-slate-50 p-3 rounded-lg ring-1 ring-slate-200">
+      <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:'1rem', marginTop:'1rem' }}>
+        <div>
+          <div className="label" style={{ marginBottom:'.25rem' }}>Inicio</div>
+          <div>{formatDateTime(job.fechaInicio)}</div>
+        </div>
+        <div>
+          <div className="label" style={{ marginBottom:'.25rem' }}>Fin</div>
+          <div>{formatDateTime(job.fechaFin)}</div>
+        </div>
+        {job.detalle && (
+          <div style={{ gridColumn:'1 / -1' }}>
+            <div className="label" style={{ marginBottom:'.25rem' }}>Detalle / Warnings</div>
+            <pre style={{ whiteSpace:'pre-wrap', background:'#f7faf9', padding:'0.75rem', borderRadius:'0.75rem', border:'1px solid rgba(16,185,129,.14)' }}>
               {job.detalle}
             </pre>
           </div>
-        ) : null}
+        )}
       </div>
-    </div>
-  );
-}
-
-function Info({ label, value }: { label: string; value: React.ReactNode }) {
-  return (
-    <div>
-      <div className="text-xs font-semibold text-slate-500 uppercase">{label}</div>
-      <div className="mt-1 text-sm text-slate-800">{value}</div>
-    </div>
+    </section>
   );
 }
