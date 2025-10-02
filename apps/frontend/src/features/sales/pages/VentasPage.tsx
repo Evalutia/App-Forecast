@@ -13,12 +13,15 @@ export default function VentasPage() {
 
   return (
     <div className="ventas-page">
-      <div className="ventas-container">
-        <div className="ventas-topbar">
-          <span className="brand-badge">Evalutia</span>
+      <div className="ventas-header">
+        <a href="/home" className="ventas-brand">Evalutia</a>
+
+        <div className="ventas-actions">
           <BackToDashboardButton />
         </div>
+      </div>
 
+      <div className="ventas-container">
         <header className="section-head">
           <h1 className="section-title">Ventas</h1>
           <p className="section-subtitle">Explorá el historial de ventas en detalle.</p>
@@ -26,7 +29,7 @@ export default function VentasPage() {
 
         <FiltrosVentas initial={query} onApply={handleApply} onClear={handleClear} />
 
-        <div style={{ marginTop: "1rem" }}>
+        <div style={{ marginTop: "1rem", width: "100%" }}>
           <TablaVentas query={query} onPageChange={handlePageChange} />
         </div>
       </div>

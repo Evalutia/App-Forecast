@@ -1,4 +1,3 @@
-/* ===== Variables ===== */
 :root{
   --emerald-50:  #ecfdf5;
   --emerald-100: #d1fae5;
@@ -12,44 +11,92 @@
   --shadow: 0 25px 40px rgba(2, 44, 34, .18);
   --muted: rgba(6, 78, 59, .72);
 
-  --content-max: 80rem;  
+  --content-max: 80rem;
+  --shadow-strong: 0 6px 18px rgba(0,0,0,.12);
+  --shadow-soft-inset: 0 1px 0 rgba(255,255,255,.06) inset;
 }
 
-/* ===== Página ===== */
 .ventas-page{
   min-height: 100dvh;
-  padding: 1.5rem 1rem;
-  display: grid;
-  justify-items: center;      
+  background: linear-gradient(135deg, var(--emerald-950), var(--emerald-900), var(--emerald-950));
+  background-attachment: fixed;
+  background-repeat: no-repeat;
+  background-size: cover;
 }
 
-/* Contenedor */
-.ventas-container{
+.ventas-header{
   width: 100%;
-  max-width: var(--content-max);
-  margin: 0 auto;              
-  display: flex;
-  flex-direction: column;
-  align-items: center;         
-  gap: 1rem;
-}
-
-/* Topbar */
-.ventas-topbar{
-  width: 100%;
-  max-width: var(--content-max);
-  margin: 0 auto;
+  margin: 0;
+  padding: .75rem 1rem;
   display: flex;
   align-items: center;
   justify-content: space-between;
-  color: rgba(236, 253, 245, .9);
-}
-.brand-badge{
-  font-size: .9rem;
-  color: rgba(236,253,245,.86);
+
+  background: var(--white);
+  border-bottom: 1px solid rgba(0,0,0,.06);
+  border-radius: 0;
+  box-shadow: var(--shadow-strong);
 }
 
-/* ===== Encabezado de sección ===== */
+.ventas-brand{
+  background: none;
+  border: 0;
+  border-radius: 0;
+  padding: 0;
+
+  color: var(--emerald-950);
+  font-family: 'Montserrat', sans-serif;
+  font-size: 1.25rem;
+  font-weight: 900;
+  letter-spacing: .18em;
+  text-transform: uppercase;
+  line-height: 1.05;
+
+  text-decoration: none;
+  cursor: pointer;
+}
+.ventas-brand:hover{ color: var(--emerald-900); }
+
+.ventas-actions{
+  display: flex;
+  align-items: center;
+  gap: .5rem;
+}
+
+.ventas-actions :where(a, button){
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: .5rem;
+  padding: .375rem .75rem;
+  border-radius: .5rem;
+
+  background: rgba(2, 44, 34, .92);
+  border: 1px solid rgba(2, 44, 34, 1);
+  color: var(--white);
+
+  font-size: .85rem;
+  font-weight: 700;
+  text-decoration: none;
+  transition: background .15s ease, transform .06s ease, box-shadow .15s ease;
+  box-shadow: var(--shadow-soft-inset), 0 6px 14px rgba(0,0,0,.12);
+  cursor: pointer;
+}
+.ventas-actions :where(a, button):hover{ background: var(--emerald-900); }
+.ventas-actions :where(a, button):active{ transform: translateY(1px); }
+.ventas-actions :where(a[disabled], button:disabled){ opacity:.6; cursor:not-allowed; }
+
+.ventas-container{
+  width: 100%;
+  max-width: var(--content-max);
+  margin: 0 auto;
+  padding: 1.5rem 1rem;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1rem;
+}
+
 .section-head{
   width: 100%;
   max-width: var(--content-max);
@@ -58,7 +105,7 @@
 .section-title{
   margin: 0;
   font-weight: 900;
-  font-size: clamp(2rem, 1.4vw + 1.6rem, 2.75rem); 
+  font-size: clamp(2rem, 1.4vw + 1.6rem, 2.75rem);
   color: var(--white);
   letter-spacing: .01em;
 }
@@ -69,9 +116,8 @@
   font-weight: 600;
 }
 
-/* ===== Tarjeta base ===== */
 .card{
-  width: 100%;                
+  width: 100%;
   background: rgba(255,255,255,.96);
   color: var(--emerald-950);
   border: 1px solid var(--border);
@@ -83,19 +129,57 @@
 
 .ventas-container section.card{
   width: 100%;
-  max-width: var(--content-max);  
+  max-width: var(--content-max);
   margin: 0 auto;
 }
 
-/* ===== Filtros ===== */
-.filters-card{
-  padding: 1.25rem;
-}
+/* ---------- Filtros (centrado de títulos + campos) ---------- */
+
+/* Grid base: mantiene 4 columnas, centra cada columna */
 .filters-grid{
   display: grid;
-  grid-template-columns: 1fr 1fr 2fr 1fr;  
+  grid-template-columns: 1fr 1fr 2fr 1fr;
   gap: .9rem;
+  align-items: start;          /* evita que el input empuje el label */
+  justify-items: center;       /* centra cada columna dentro del grid */
 }
+
+/* Tu “estirado” especial del grid dentro de la tarjeta */
+.filters-card .filters-grid{
+  width: 1510px;
+  width: 125.5%;
+  margin-left: auto;
+  margin-right: auto;
+}
+
+/* Cada bloque (label + control) en columna y centrado */
+.form-row{
+  display: flex;
+  flex-direction: column;
+  align-items: center;         /* centra el label respecto al control */
+  width: 100%;
+}
+
+/* Label centrado */
+.label{
+  display: block;
+  width: 100%;
+  text-align: center;          /* <<< centrado del texto */
+  font-size: .8rem;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: .06em;
+  color: var(--muted);
+  margin-bottom: .4rem;
+}
+
+/* Campos ocupan todo el ancho del form-row */
+.form-row .input,
+.form-row .select{
+  width: 100%;
+}
+
+/* ---------- Responsivo ---------- */
 @media (max-width: 1200px){
   .filters-grid{ grid-template-columns: 1fr 1fr 1fr 1fr; }
 }
@@ -105,18 +189,9 @@
 @media (max-width: 640px){
   .filters-grid{ grid-template-columns: 1fr; }
 }
-.form-row{ display: flex; flex-direction: column; }
-.label{
-  display:block;
-  font-size: .8rem;
-  font-weight: 800;
-  text-transform: uppercase;
-  letter-spacing: .06em;
-  color: var(--muted);
-  margin-bottom: .4rem;
-}
+
+/* ---------- Inputs genéricos ---------- */
 .input{
-  width:100%;
   padding: .8rem 1rem;
   border-radius: .9rem;
   border: 1px solid rgba(16,185,129,.25);
@@ -130,13 +205,13 @@
   box-shadow: 0 0 0 3px rgba(52,211,153,.35);
 }
 .select{
-  width:100%;
   padding: .8rem 1rem;
   border-radius: .9rem;
   border: 1px solid rgba(16,185,129,.25);
   background: var(--white);
   color: var(--black);
 }
+
 .filters-actions{
   margin-top: 1rem;
   display: flex;
@@ -144,31 +219,7 @@
   gap: .7rem;
 }
 
-/* Botones */
-.button{
-  padding: .8rem 1.2rem;
-  border: 0;
-  border-radius: 1rem;
-  background: var(--emerald-900);
-  color: var(--white);
-  font-size: .95rem;
-  font-weight: 900;
-  text-transform: uppercase;
-  letter-spacing: .06em;
-  cursor: pointer;
-}
-.button:hover{ background: #065f46; }
-.button:disabled{ opacity:.6; cursor:not-allowed; }
-.button-ghost{
-  background: transparent;
-  border: 1px solid rgba(16,185,129,.35);
-  color: var(--emerald-950);
-}
-.button-ghost:hover{
-  background: rgba(236,253,245,.75);
-}
-
-/* ===== Tabla ===== */
+/* ---------- Tabla ---------- */
 .table-card{
   padding: 1rem;
   margin-top: 1rem;
@@ -193,18 +244,17 @@
   font-size: .8rem;
   padding: .8rem .95rem;
   border-bottom: 1px solid rgba(16,185,129,.22);
+  text-align: left;
 }
 .table tbody td{
   padding: .85rem .95rem;
   border-bottom: 1px solid rgba(16,185,129,.14);
 }
-.table tbody tr:hover{
-  background: #f8fffc;
-}
+.table tbody tr:hover{ background: #f8fffc; }
 .mono{ font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono","Courier New", monospace; }
 .muted{ color: #6b7280; }
 
-/* Estado/alertas */
+/* ---------- Varias ---------- */
 .alert{
   border: 1px solid #fecaca;
   background: #fff1f2;
@@ -214,11 +264,9 @@
   font-size: .92rem;
 }
 
-/* Skeleton */
 .skeleton{ display: inline-block; height: .9rem; border-radius: .45rem; background: #e5f5ee; }
 .skel-20{ width: 5rem; } .skel-24{ width: 6rem; } .skel-28{ width: 7rem; } .skel-12{ width: 3rem; } .skel-10{ width: 2.5rem; }
 
-/* Paginador */
 .pager{
   margin-top: 1rem;
   display:flex; align-items:center; justify-content:space-between;
