@@ -9,7 +9,7 @@ import { usePrediccionesByJob } from '../hooks/usePredicciones';
 
 function getInt(sp: URLSearchParams, k: string): number | null {
   const raw = sp.get(k);
-  if (raw === null || raw === '') return null;   
+  if (raw === null || raw === '') return null;
   const n = Number(raw);
   return Number.isFinite(n) ? n : null;
 }
@@ -28,22 +28,25 @@ export default function PrediccionesPage() {
   };
 
   return (
-    <div className="min-h-dvh bg-gradient-to-br from-emerald-950 via-emerald-900 to-emerald-950 px-6 py-6">
-      {/* Header */}
-      <div className="mx-auto flex max-w-5xl items-center justify-between">
-        <span className="text-sm text-emerald-100/80">Evalutia</span>
-        <BackToDashboardButton />
+    <div className="predicciones-page">
+      {/* ===== Header (clon 1:1 de Ventas) ===== */}
+      <div className="predicciones-header">
+        <a href="/home" className="predicciones-brand">Evalutia</a>
+
+        <div className="predicciones-actions">
+          <BackToDashboardButton />
+        </div>
       </div>
 
-      {/* Título */}
-      <div className="mx-auto mt-8 max-w-5xl">
-        <h1 className="text-3xl font-semibold text-white">Predicciones</h1>
-        <p className="mt-1 text-emerald-100/80">
-          Consultá las últimas corridas, buscá por SKU/fechas y explorá los datos extra.
-        </p>
-      </div>
+      {/* ===== Contenido ===== */}
+      <div className="predicciones-container">
+        <header className="section-head">
+          <h1 className="section-title">Predicciones</h1>
+          <p className="section-subtitle">
+            Consultá las últimas corridas, buscá por SKU/fechas y explorá los datos extra.
+          </p>
+        </header>
 
-      <div className="mx-auto mt-6 grid max-w-5xl gap-6">
         {/* Últimas predicciones */}
         <UltimasPredicciones />
 
@@ -55,7 +58,7 @@ export default function PrediccionesPage() {
 
         {/* Si hay jobId en la URL, mostramos bloque especial */}
         {typeof jobId === 'number' && (
-          <div className="rounded-xl border border-white/10 bg-white/5 p-4">
+          <div className="predicciones-job rounded-xl border border-white/10 bg-white/5 p-4">
             <div className="mb-3 flex items-center justify-between">
               <h3 className="text-lg font-semibold text-white">
                 Predicciones del Job #{jobId}
@@ -116,7 +119,7 @@ export default function PrediccionesPage() {
           </div>
         )}
 
-        {/* Datos extra: placeholder para las gráficas (lo integramos en el próximo paso) */}
+        {/* Datos extra: gráficas */}
         <div className="rounded-xl border border-white/10 bg-white/5 p-4">
           <DatosExtra />
         </div>

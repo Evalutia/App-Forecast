@@ -1,11 +1,10 @@
+// apps/frontend/src/apps/predicciones/components/PrediccionesTable.tsx
 import { useMemo } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { usePrediccionesSearch } from '../hooks/usePredicciones';
 import type { PrediccionSearchParams } from '../types/predicciones';
 
-type Props = {
-  className?: string;
-};
+type Props = { className?: string };
 
 function getParam(sp: URLSearchParams, k: string) {
   const v = sp.get(k);
@@ -19,18 +18,16 @@ function getInt(sp: URLSearchParams, k: string, def: number) {
 export default function PrediccionesTable({ className }: Props) {
   const [sp, setSp] = useSearchParams();
 
-  const params: PrediccionSearchParams = useMemo(() => {
-    return {
-      sku: getParam(sp, 'sku'),
-      modelo: getParam(sp, 'modelo'),
-      desde: getParam(sp, 'desde'),
-      hasta: getParam(sp, 'hasta'),
-      page: getInt(sp, 'page', 1),
-      pageSize: getInt(sp, 'pageSize', 20),
-    };
-  }, [sp]);
+  const params: PrediccionSearchParams = useMemo(() => ({
+    sku: getParam(sp, 'sku'),
+    modelo: getParam(sp, 'modelo'),
+    desde: getParam(sp, 'desde'),
+    hasta: getParam(sp, 'hasta'),
+    page: getInt(sp, 'page', 1),
+    pageSize: getInt(sp, 'pageSize', 20),
+  }), [sp]);
 
-  const { data, isLoading, isError } = usePrediccionesSearch(params);
+  const { data, isLoading, isFetching, isError, error } = usePrediccionesSearch(params);
   const page = params.page ?? 1;
   const pageSize = params.pageSize ?? 20;
   const total = data?.total ?? 0;
@@ -49,132 +46,109 @@ export default function PrediccionesTable({ className }: Props) {
     setSp(next, { replace: true });
   };
 
+  if (isError) {
+    return <div className="alert">Ocurrió un error al cargar el historial. {(error as any)?.message ?? ''}</div>;
+  }
+
   return (
-    <div className={['rounded-xl border border-white/10 bg-white/5 p-4', className].filter(Boolean).join(' ')}>
-      <div className="mb-3 flex items-center justify-between">
-        <h3 className="text-lg font-semibold text-white">Historial de predicciones</h3>
-        <div className="flex items-center gap-2 text-xs text-emerald-100/70">
-          <span>Total: {total}</span>
-          <span>·</span>
-          <span>Página {page} de {totalPages}</span>
+    <section className={['card table-card', className].filter(Boolean).join(' ')}>
+      <div style={{ marginBottom: '.5rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <div className="muted">{isFetching ? 'Actualizando…' : 'Historial de predicciones'}</div>
+        <div className="muted">Total: <strong>{total}</strong></div>
+      </div>
+
+      <div className="table-wrap">
+        <table className="table">
+          <thead>
+            <tr>
+              <th>SKU</th>
+              <th>Fecha</th>
+              <th style={{ textAlign: 'right' }}>Cantidad</th>
+              <th>Modelo</th>
+              <th>Versión</th>
+              <th style={{ textAlign: 'right' }}>h</th>
+              <th style={{ textAlign: 'right' }}>R²</th>
+              <th style={{ textAlign: 'right' }}>RMSE</th>
+              <th>Generación</th>
+              <th>Job</th>
+            </tr>
+          </thead>
+          <tbody>
+            {isLoading ? (
+              Array.from({ length: 8 }).map((_, i) => (
+                <tr key={i}>
+                  <td><span className="skeleton skel-28" /></td>
+                  <td><span className="skeleton skel-24" /></td>
+                  <td><span className="skeleton skel-12" /></td>
+                  <td><span className="skeleton skel-24" /></td>
+                  <td><span className="skeleton skel-20" /></td>
+                  <td><span className="skeleton skel-10" /></td>
+                  <td><span className="skeleton skel-12" /></td>
+                  <td><span className="skeleton skel-12" /></td>
+                  <td><span className="skeleton skel-24" /></td>
+                  <td><span className="skeleton skel-12" /></td>
+                </tr>
+              ))
+            ) : (data?.items?.length ?? 0) === 0 ? (
+              <tr>
+                <td colSpan={10} className="muted" style={{ textAlign: 'center', padding: '1.2rem 0' }}>
+                  No se encontraron predicciones para los filtros seleccionados.
+                </td>
+              </tr>
+            ) : (
+              (data?.items ?? []).map((p) => (
+                <tr key={p.id}>
+                  <td className="mono">{p.sku}</td>
+                  <td>{p.fechaPredicha}</td>
+                  <td style={{ textAlign: 'right' }}>{p.cantidadPredicha}</td>
+                  <td>{p.modelo}</td>
+                  <td>{p.versionModelo}</td>
+                  <td style={{ textAlign: 'right' }}>{p.horizonte}</td>
+                  <td style={{ textAlign: 'right' }}>{p.r2 ?? '-'}</td>
+                  <td style={{ textAlign: 'right' }}>{p.rmse ?? '-'}</td>
+                  <td>{p.tsGeneracion}</td>
+                  <td>
+                    {typeof p.jobId === 'number' ? (
+                      <Link to={`/predicciones?jobId=${p.jobId}&page=1`} title="Ver predicciones de este job">
+                        #{p.jobId}
+                      </Link>
+                    ) : <span className="muted">—</span>}
+                  </td>
+                </tr>
+              ))
+            )}
+          </tbody>
+        </table>
+      </div>
+
+      {/* Paginador igual a Ventas */}
+      <div className="pager">
+        <div>Página {page} de {totalPages}</div>
+        <div className="pager-buttons">
+          <button
+            className="pager-btn"
+            disabled={page <= 1}
+            onClick={() => setPage(page - 1)}
+          >
+            Anterior
+          </button>
+          <button
+            className="pager-btn"
+            disabled={page >= totalPages}
+            onClick={() => setPage(page + 1)}
+          >
+            Siguiente
+          </button>
         </div>
       </div>
 
-      {isLoading ? (
-        <div className="text-emerald-100/80">Cargando…</div>
-      ) : isError ? (
-        <div className="rounded-lg border border-rose-400/20 bg-rose-400/10 p-3 text-rose-100">
-          Error cargando el historial.
-        </div>
-      ) : (
-        <>
-          <div className="overflow-x-auto -mx-2 sm:mx-0">
-            <table className="min-w-full text-sm">
-              <thead>
-                <tr className="border-b border-white/10 text-emerald-100/70">
-                  <th className="px-2 py-2 text-left">SKU</th>
-                  <th className="px-2 py-2 text-left">Fecha</th>
-                  <th className="px-2 py-2 text-right">Cantidad</th>
-                  <th className="px-2 py-2 text-left">Modelo</th>
-                  <th className="px-2 py-2 text-left">Versión</th>
-                  <th className="px-2 py-2 text-right">h</th>
-                  <th className="px-2 py-2 text-right">R²</th>
-                  <th className="px-2 py-2 text-right">RMSE</th>
-                  <th className="px-2 py-2 text-left">Generación</th>
-                  <th className="px-2 py-2 text-left">Job</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-white/10 text-emerald-100/90">
-                {(data?.items ?? []).map((p) => (
-                  <tr key={p.id}>
-                    <td className="px-2 py-2">
-                      <span className="inline-flex rounded bg-white/10 px-2 py-0.5 text-xs">{p.sku}</span>
-                    </td>
-                    <td className="px-2 py-2">{p.fechaPredicha}</td>
-                    <td className="px-2 py-2 text-right">{p.cantidadPredicha}</td>
-                    <td className="px-2 py-2">{p.modelo}</td>
-                    <td className="px-2 py-2">{p.versionModelo}</td>
-                    <td className="px-2 py-2 text-right">{p.horizonte}</td>
-                    <td className="px-2 py-2 text-right">{p.r2 ?? '-'}</td>
-                    <td className="px-2 py-2 text-right">{p.rmse ?? '-'}</td>
-                    <td className="px-2 py-2">{p.tsGeneracion}</td>
-                    <td className="px-2 py-2">
-                      {typeof p.jobId === 'number' ? (
-                        <Link
-                          to={`/predicciones?jobId=${p.jobId}&page=1`}
-                          className="text-emerald-200 hover:underline"
-                          title="Ver predicciones de este job"
-                        >
-                          #{p.jobId}
-                        </Link>
-                      ) : (
-                        <span className="text-emerald-100/60">—</span>
-                      )}
-                    </td>
-                  </tr>
-                ))}
-                {(data?.items?.length ?? 0) === 0 && (
-                  <tr>
-                    <td className="px-2 py-6 text-center text-emerald-100/70" colSpan={10}>
-                      No se encontraron predicciones para los filtros seleccionados.
-                    </td>
-                  </tr>
-                )}
-              </tbody>
-            </table>
-          </div>
-
-          {/* Paginación simple local (podés reemplazar por tu Pagination reusado si ya lo tenés) */}
-          <div className="mt-3 flex items-center justify-between">
-            <div className="flex items-center gap-2 text-sm text-emerald-100/80">
-              <span>Filas por página:</span>
-              <select
-                className="rounded border border-white/15 bg-white/10 px-2 py-1 text-emerald-100/90 outline-none"
-                value={pageSize}
-                onChange={(e) => setPageSize(Number(e.target.value))}
-              >
-                {[10, 20, 50, 100].map((n) => (
-                  <option key={n} value={n}>{n}</option>
-                ))}
-              </select>
-            </div>
-            <div className="flex items-center gap-2">
-              <button
-                type="button"
-                onClick={() => setPage(1)}
-                disabled={page <= 1}
-                className="rounded border border-white/15 px-2 py-1 text-sm text-emerald-100/80 disabled:opacity-40"
-              >
-                « Primero
-              </button>
-              <button
-                type="button"
-                onClick={() => setPage(page - 1)}
-                disabled={page <= 1}
-                className="rounded border border-white/15 px-2 py-1 text-sm text-emerald-100/80 disabled:opacity-40"
-              >
-                ‹ Anterior
-              </button>
-              <button
-                type="button"
-                onClick={() => setPage(page + 1)}
-                disabled={page >= totalPages}
-                className="rounded border border-white/15 px-2 py-1 text-sm text-emerald-100/80 disabled:opacity-40"
-              >
-                Siguiente ›
-              </button>
-              <button
-                type="button"
-                onClick={() => setPage(totalPages)}
-                disabled={page >= totalPages}
-                className="rounded border border-white/15 px-2 py-1 text-sm text-emerald-100/80 disabled:opacity-40"
-              >
-                Último »
-              </button>
-            </div>
-          </div>
-        </>
-      )}
-    </div>
+      {/* selector de tamaño como en tu versión anterior (si lo querés dejar) */}
+      {/* <div style={{ marginTop: '.5rem' }} className="muted">
+        Filas por página:&nbsp;
+        <select value={pageSize} onChange={(e) => setPageSize(Number(e.target.value))}>
+          {[10,20,50,100].map(n => <option key={n} value={n}>{n}</option>)}
+        </select>
+      </div> */}
+    </section>
   );
 }

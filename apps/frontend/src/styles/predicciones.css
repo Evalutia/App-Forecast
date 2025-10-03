@@ -1,0 +1,277 @@
+/* ==========================================================================
+   /predicciones — hoja de estilos específica
+   Clona la barra superior de Ventas en píxel-perfect.
+   ========================================================================== */
+
+/* Las CSS variables ya existen gracias a ./styles/sales.css importado globalmente */
+
+/* ---- Página (mismo fondo que Ventas) ---- */
+.predicciones-page{
+  min-height: 100dvh;
+  background: linear-gradient(135deg, var(--emerald-950), var(--emerald-900), var(--emerald-950));
+  background-attachment: fixed;
+  background-repeat: no-repeat;
+  background-size: cover;
+}
+
+/* ---- HEADER: clon 1:1 de .ventas-header ---- */
+.predicciones-header{
+  width: 100%;
+  margin: 0;
+  padding: .75rem 1rem;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+
+  background: var(--white);
+  border-bottom: 1px solid rgba(0,0,0,.06);
+  border-radius: 0;
+  box-shadow: var(--shadow-strong);
+}
+
+/* ---- BRAND: clon 1:1 de .ventas-brand ---- */
+.predicciones-brand{
+  background: none;
+  border: 0;
+  border-radius: 0;
+  padding: 0;
+
+  color: var(--emerald-950);
+  font-family: 'Montserrat', sans-serif;
+  font-size: 1.25rem;
+  font-weight: 900;
+  letter-spacing: .18em;
+  text-transform: uppercase;
+  line-height: 1.05;
+
+  text-decoration: none;
+  cursor: pointer;
+}
+.predicciones-brand:hover{ color: var(--emerald-900); }
+
+/* ---- ACTIONS: clon 1:1 de .ventas-actions ---- */
+.predicciones-actions{
+  display: flex;
+  align-items: center;
+  gap: .5rem;
+}
+.predicciones-actions :where(a, button){
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: .5rem;
+  padding: .375rem .75rem;
+  border-radius: .5rem;
+
+  background: rgba(2, 44, 34, .92);
+  border: 1px solid rgba(2, 44, 34, 1);
+  color: var(--white);
+
+  font-size: .85rem;
+  font-weight: 700;
+  text-decoration: none;
+  transition: background .15s ease, transform .06s ease, box-shadow .15s ease;
+  box-shadow: var(--shadow-soft-inset), 0 6px 14px rgba(0,0,0,.12);
+  cursor: pointer;
+}
+.predicciones-actions :where(a, button):hover{ background: var(--emerald-900); }
+.predicciones-actions :where(a, button):active{ transform: translateY(1px); }
+.predicciones-actions :where(a[disabled], button:disabled){ opacity:.6; cursor:not-allowed; }
+
+/* ---- Contenedor principal (clon de Ventas) ---- */
+.predicciones-container{
+  width: 100%;
+  max-width: var(--content-max);
+  margin: 0 auto;
+  padding: 1.5rem 1rem;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch; /* que las tarjetas ocupen el ancho */
+  gap: 1rem;
+}
+
+/* === MATCH EXACTO con Jobs/Ventas (clave para el ancho de la tabla) === */
+.predicciones-container section.card{
+  width: 100%;
+  max-width: var(--content-max);
+  margin: 0 auto;
+}
+
+/* ---- Título y subtítulo ---- */
+.section-head{
+  width: 100%;
+  max-width: var(--content-max);
+  margin: 0 auto 1.25rem;
+}
+.section-title{
+  margin: 0;
+  font-weight: 900;
+  font-size: clamp(2rem, 1.4vw + 1.6rem, 2.75rem);
+  color: var(--white);
+  letter-spacing: .01em;
+}
+.section-subtitle{
+  margin: .4rem 0 0;
+  color: rgba(255,255,255,.95);
+  font-size: 1.05rem;
+  font-weight: 600;
+}
+
+/* ---- Tarjetas del contenido ---- */
+.predicciones-container .card{
+  width: 100%;
+  background: rgba(255,255,255,.96);
+  color: var(--emerald-950);
+  border: 1px solid var(--border);
+  border-radius: 1.5rem;
+  padding: 1rem;
+  box-shadow: var(--shadow);
+  backdrop-filter: blur(6px);
+}
+
+/* ---- Filtros: mismo ancho que el título/subtítulo ---- */
+.predicciones-container > .filters-card{
+  display: block;
+  width: 100%;
+  max-width: var(--content-max);
+  margin-left: auto;
+  margin-right: auto;
+}
+/* (opcional) ancho fijo diferente */
+/* .predicciones-container > .filters-card{ max-width: 68rem; } */
+
+
+/* ==========================================================================
+   TABLA (idéntica a Jobs/Ventas)
+   ========================================================================== */
+.table-card{ padding: 1rem; margin-top: 1rem; }
+.table-wrap{ width: 100%; overflow-x: auto; }
+
+.table{
+  width: 100%;
+  border-collapse: separate;
+  border-spacing: 0;
+  font-size: .95rem;
+}
+
+.table thead th{
+  position: sticky;
+  top: 0;
+  background: #f7faf9;
+  color: #56756b;
+  text-transform: uppercase;
+  letter-spacing: .06em;
+  font-size: .8rem;
+  padding: .8rem .95rem;
+  border-bottom: 1px solid rgba(16,185,129,.22);
+  text-align: left;
+}
+
+.table tbody td{
+  padding: .85rem .95rem;
+  border-bottom: 1px solid rgba(16,185,129,.14);
+}
+
+.table tbody tr:hover{ background: #f8fffc; }
+
+.mono{
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono","Courier New", monospace;
+}
+.muted{ color: #6b7280; }
+
+/* ---- Alert reutilizable ---- */
+.alert{
+  border: 1px solid #fecaca;
+  background: #fff1f2;
+  color: #991b1b;
+  border-radius: 1rem;
+  padding: .9rem 1rem;
+  font-size: .92rem;
+}
+
+/* ---- Skeletons ---- */
+.skeleton{ display:inline-block; height:.9rem; border-radius:.45rem; background:#e5f5ee; }
+.skel-20{ width:5rem; } .skel-24{ width:6rem; } .skel-28{ width:7rem; } .skel-12{ width:3rem; } .skel-10{ width:2.5rem; }
+
+/* ---- Paginador ---- */
+.pager{
+  margin-top: 1rem;
+  display:flex; align-items:center; justify-content:space-between;
+  font-size: .9rem; color: #6b7280;
+}
+.pager-buttons{ display:flex; gap:.6rem; }
+.pager-btn{
+  border: 1px solid rgba(16,185,129,.28);
+  background: #fff;
+  color: var(--emerald-950);
+  padding: .55rem .95rem;
+  border-radius: .9rem;
+  cursor: pointer;
+}
+.pager-btn:disabled{ opacity:.5; cursor:not-allowed; }
+.pager-btn:hover{ background: #f3faf7; }
+
+
+/* ==========================================================================
+   STATUS BANNER (cargando / error) — sutil, sin tarjeta blanca
+   ========================================================================== */
+.status-banner{
+  /* ⬇️ clave para que NO se estire a todo el ancho */
+  align-self: flex-start;        /* ignora el align-items:stretch del contenedor */
+  display: inline-flex;          /* se achica al contenido */
+  width: auto;                   /* auto-anchura */
+  max-width: var(--content-max); /* por si el texto se hace larguísimo */
+
+  padding: .6rem .85rem;
+  border-radius: .75rem;
+  gap: .6rem;
+  font-size: .9rem;
+  line-height: 1.2;
+  box-shadow: var(--shadow-soft-inset);
+  white-space: nowrap;           /* una sola línea; quitá esto si querés que corte */
+}
+
+/* Loading */
+.status--loading{
+  border: 1px solid rgba(16,185,129,.35);
+  background: rgba(236,253,245,.10); /* emerald translúcido */
+  color: var(--emerald-50);
+}
+
+/* Error */
+.status--error{
+  border: 1px solid #fecaca;
+  background: rgba(244,63,94,.12);    /* rose translúcido */
+  color: #ffe4e6;
+}
+
+/* Iconito/spinner */
+.status-icon{
+  display:inline-flex;
+  width: 16px; height: 16px;
+  align-items:center; justify-content:center;
+}
+
+/* Spinner CSS puro */
+.spinner{
+  width: 16px; height: 16px;
+  border-radius: 999px;
+  border: 2px solid rgba(16,185,129,.35);
+  border-top-color: #10b981;
+  animation: spin 1s linear infinite;
+}
+@keyframes spin{ to { transform: rotate(360deg); } }
+
+.status-text{ flex: 1; }
+
+/* Acción del banner (opcional) */
+.status-action{
+  padding: .35rem .6rem;
+  border-radius: .5rem;
+  border: 1px solid rgba(255,255,255,.25);
+  background: transparent;
+  color: inherit;
+  font-weight: 700;
+  cursor: pointer;
+}
+.status-action:hover{ background: rgba(255,255,255,.12); }

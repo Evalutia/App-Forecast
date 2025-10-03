@@ -6,6 +6,8 @@ import './styles/login.css';
 import './styles/home.css';
 import './styles/sales.css';
 import './styles/jobs.css';
+import './styles/predicciones.css';
+
 
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>

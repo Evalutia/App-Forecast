@@ -35,7 +35,7 @@ export default function DatosExtra() {
   }
 
   return (
-    <div className="rounded-xl border border-white/10 bg-white/5 p-4">
+    <div className="predicciones-extra rounded-xl border border-white/10 bg-white/5 p-4">
       <div className="mb-2">
         <h3 className="text-lg font-semibold text-white">Datos extra (gráficas)</h3>
         <p className="text-xs text-emerald-100/70">
