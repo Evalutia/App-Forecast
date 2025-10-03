@@ -19,6 +19,9 @@ RUN mkdir -p ${PENTAHO_HOME} \
  && rm /tmp/pdi.zip
 ENV PATH="${PENTAHO_HOME}/data-integration:${PATH}"
 
+RUN curl -L -o /opt/pentaho/data-integration/lib/mysql-connector-java-5.1.49.jar \
+    https://repo1.maven.org/maven2/mysql/mysql-connector-java/5.1.49/mysql-connector-java-5.1.49.jar
+
 # ---- App repo ----
 WORKDIR /app
 COPY . /app

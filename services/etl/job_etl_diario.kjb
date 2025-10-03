@@ -2,43 +2,17 @@
 <job>
   <name>ETL Diario Ventas</name>
   <description>Job diario: SOAP -> staging -> upsert ventas_historicas -> predict.py -> limpiar staging</description>
-  <extended_description/>
-  <job_version>1</job_version>
-  <created_user>etl</created_user>
-  <created_date>2025/10/03 00:00:00.000</created_date>
-  <modified_user>etl</modified_user>
-  <modified_date>2025/10/03 00:00:00.000</modified_date>
-  <max_undo>0</max_undo>
+
+  <!-- Parámetros -->
   <parameters>
-    <!-- Parámetros opcionales que podés sobreescribir desde Kitchen -->
-    <parameter>
-      <name>WS_START_DATE</name>
-      <default_value>${WS_START_DATE}</default_value>
-      <description>Fecha inicial para backfill (yyyy-MM-dd) cuando ventas_historicas está vacía</description>
-    </parameter>
-    <parameter>
-      <name>CHUNK_DAYS</name>
-      <default_value>${CHUNK_DAYS}</default_value>
-      <description>Días por chunk</description>
-    </parameter>
-    <parameter>
-      <name>PREDICT_PERIODS</name>
-      <default_value>${PREDICT_PERIODS}</default_value>
-      <description>Horizonte de predicción (meses)</description>
-    </parameter>
-    <parameter>
-      <name>PREDICT_MODEL_SET</name>
-      <default_value>${PREDICT_MODEL_SET}</default_value>
-      <description>Conjunto de modelos (full/classic/tree)</description>
-    </parameter>
-    <parameter>
-      <name>PREDICT_VERSION</name>
-      <default_value>${PREDICT_VERSION}</default_value>
-      <description>Versión de modelo/predicción</description>
-    </parameter>
+    <parameter><name>WS_START_DATE</name><default_value>${WS_START_DATE}</default_value></parameter>
+    <parameter><name>CHUNK_DAYS</name><default_value>${CHUNK_DAYS}</default_value></parameter>
+    <parameter><name>PREDICT_PERIODS</name><default_value>${PREDICT_PERIODS}</default_value></parameter>
+    <parameter><name>PREDICT_MODEL_SET</name><default_value>${PREDICT_MODEL_SET}</default_value></parameter>
+    <parameter><name>PREDICT_VERSION</name><default_value>${PREDICT_VERSION}</default_value></parameter>
   </parameters>
 
-  <!-- Conexión MySQL usando variables de entorno -->
+  <!-- Conexión MySQL -->
   <connection>
     <name>MYSQL_EVALUTIA</name>
     <server>${MYSQL_HOST}</server>
@@ -50,168 +24,142 @@
     <password>${MYSQL_PASSWORD}</password>
     <using_unique_connections>N</using_unique_connections>
     <attributes>
-      <attribute>
-        <code>EXTRA_OPTION_MYSQL.defaultFetchSize</code>
-        <attribute>500</attribute>
-      </attribute>
-      <attribute>
-        <code>EXTRA_OPTION_MYSQL.useSSL</code>
-        <attribute>false</attribute>
-      </attribute>
-      <attribute>
-        <code>EXTRA_OPTION_MYSQL.allowPublicKeyRetrieval</code>
-        <attribute>true</attribute>
-      </attribute>
+      <attribute><code>EXTRA_OPTION_MYSQL.useSSL</code><attribute>false</attribute></attribute>
+      <attribute><code>EXTRA_OPTION_MYSQL.allowPublicKeyRetrieval</code><attribute>true</attribute></attribute>
     </attributes>
   </connection>
 
   <entries>
-    <!-- 0) (Opcional) Truncar staging al inicio para asegurar limpieza -->
+    <!-- START -->
     <entry>
-      <name>TRUNCATE STAGE (start)</name>
+      <name>START</name>
       <type>SPECIAL</type>
-      <special>SQL</special>
-      <sql><![CDATA[TRUNCATE TABLE ventas_historicas_stage;]]></sql>
-      <connection>MYSQL_EVALUTIA</connection>
-      <wait>Y</wait>
-      <follow_success>Y</follow_success>
-      <evaluate>N</evaluate>
+      <start>Y</start>
+      <repeat>N</repeat>
+      <schedulerType>0</schedulerType>
+      <xloc>64</xloc><yloc>64</yloc><draw>Y</draw>
     </entry>
 
-    <!-- 1) Obtener última fecha cargada (o usar WS_START_DATE si no hay datos) -->
+    <!-- 0) Truncar staging al inicio -->
+    <entry>
+      <name>TRUNCATE STAGE (start)</name>
+      <type>SQL</type>
+      <connection>MYSQL_EVALUTIA</connection>
+      <sql_script><![CDATA[TRUNCATE TABLE ventas_historicas_stage;]]></sql_script>
+      <send_one_statement>Y</send_one_statement>
+      <xloc>320</xloc><yloc>64</yloc><draw>Y</draw>
+    </entry>
+
+    <!-- 1) Obtener última fecha -->
     <entry>
       <name>GET LAST DATE</name>
       <type>TRANS</type>
-      <file_name>${Internal.Entry.Current.Directory}/tr_get_last_date.ktr</file_name>
+      <filename>${Internal.Entry.Current.Directory}/tr_get_last_date.ktr</filename>
       <wait>Y</wait>
-      <follow_success>Y</follow_success>
       <execute_each_row>N</execute_each_row>
       <parameters>
-        <parameter>
-          <name>START_DATE_PARAM</name>
-          <value>${WS_START_DATE}</value>
-        </parameter>
+        <parameter><name>START_DATE_PARAM</name><value>${WS_START_DATE}</value></parameter>
       </parameters>
       <clear_result_rows>N</clear_result_rows>
-      <clear_result_files>N</clear_result_files>
-      <set_logfile>N</set_logfile>
+      <xloc>560</xloc><yloc>64</yloc><draw>Y</draw>
     </entry>
 
-    <!-- 2) Generar chunks [LAST_DATE+1 .. hoy] por CHUNK_DAYS -->
+    <!-- 2) Generar chunks -->
     <entry>
       <name>GEN CHUNKS</name>
       <type>TRANS</type>
-      <file_name>${Internal.Entry.Current.Directory}/tr_generate_chunks.ktr</file_name>
+      <filename>${Internal.Entry.Current.Directory}/tr_generate_chunks.ktr</filename>
       <wait>Y</wait>
-      <follow_success>Y</follow_success>
       <execute_each_row>N</execute_each_row>
       <parameters>
-        <parameter>
-          <name>LAST_DATE</name>
-          <value>${LAST_LOADED_DATE}</value>
-        </parameter>
-        <parameter>
-          <name>CHUNK_DAYS</name>
-          <value>${CHUNK_DAYS}</value>
-        </parameter>
+        <parameter><name>LAST_DATE</name><value>${LAST_LOADED_DATE}</value></parameter>
+        <parameter><name>CHUNK_DAYS</name><value>${CHUNK_DAYS}</value></parameter>
       </parameters>
       <clear_result_rows>N</clear_result_rows>
-      <clear_result_files>N</clear_result_files>
+      <xloc>800</xloc><yloc>64</yloc><draw>Y</draw>
     </entry>
 
-    <!-- 3) Por cada chunk ejecutar extracción SOAP -> staging -->
+    <!-- 3) Ejecutar extracción por cada fila (chunk) -->
     <entry>
       <name>LOAD SALES CHUNK</name>
       <type>TRANS</type>
-      <file_name>${Internal.Entry.Current.Directory}/tr_extract_sales_chunk.ktr</file_name>
+      <filename>${Internal.Entry.Current.Directory}/tr_extract_sales_chunk.ktr</filename>
       <wait>Y</wait>
-      <follow_success>Y</follow_success>
       <execute_each_row>Y</execute_each_row>
       <parameters>
-        <parameter>
-          <name>CHUNK_START</name>
-          <value>${CHUNK_START}</value>
-        </parameter>
-        <parameter>
-          <name>CHUNK_END</name>
-          <value>${CHUNK_END}</value>
-        </parameter>
+        <parameter><name>CHUNK_START</name><value>${CHUNK_START}</value></parameter>
+        <parameter><name>CHUNK_END</name><value>${CHUNK_END}</value></parameter>
       </parameters>
       <clear_result_rows>N</clear_result_rows>
-      <clear_result_files>N</clear_result_files>
+      <xloc>1040</xloc><yloc>64</yloc><draw>Y</draw>
     </entry>
 
-    <!-- 4) Upsert masivo de staging -> ventas_historicas -->
+    <!-- 4) Upsert staging -> ventas_historicas -->
     <entry>
       <name>MERGE STAGING -> VENTAS</name>
-      <type>SPECIAL</type>
-      <special>SQL</special>
-      <sql><![CDATA[
+      <type>SQL</type>
+      <connection>MYSQL_EVALUTIA</connection>
+      <sql_script><![CDATA[
 INSERT INTO ventas_historicas (fecha, sku, cantidad, ts_carga, fuente)
 SELECT s.fecha, s.sku, s.cantidad, NOW(6), s.fuente
 FROM ventas_historicas_stage s
 ON DUPLICATE KEY UPDATE 
   cantidad = VALUES(cantidad),
   ts_carga = VALUES(ts_carga);
-      ]]></sql>
-      <connection>MYSQL_EVALUTIA</connection>
-      <wait>Y</wait>
-      <follow_success>Y</follow_success>
-      <evaluate>N</evaluate>
+      ]]></sql_script>
+      <send_one_statement>Y</send_one_statement>
+      <xloc>1280</xloc><yloc>64</yloc><draw>Y</draw>
     </entry>
 
     <!-- 5) Ejecutar predict.py -->
     <entry>
       <name>RUN PREDICT.PY</name>
       <type>SHELL</type>
-      <work_directory>${Internal.Entry.Current.Directory}</work_directory>
-      <arg_from_previous>N</arg_from_previous>
-      <exec_configuration/>
-      <parallel>N</parallel>
-      <command>python</command>
+      <filename>/bin/sh</filename>
       <arguments>
-        <argument>/app/services/python-worker/predict.py</argument>
-        <argument>--input-source=mysql</argument>
-        <argument>--periods=${PREDICT_PERIODS}</argument>
-        <argument>--model-set=${PREDICT_MODEL_SET}</argument>
-        <argument>--version=${PREDICT_VERSION}</argument>
+        <argument>-lc</argument>
+        <argument>python3 /app/services/python-worker/predict.py --input-source=mysql --periods=${PREDICT_PERIODS} --model-set=${PREDICT_MODEL_SET} --version=${PREDICT_VERSION}</argument>
       </arguments>
+      <arg_from_previous>N</arg_from_previous>
+      <exec_per_row>N</exec_per_row>
+      <insertScript>N</insertScript>
+      <set_logfile>N</set_logfile>
       <wait>Y</wait>
-      <follow_success>Y</follow_success>
-      <fail_when_not_success>N</fail_when_not_success>
+      <fail_when_not_success>Y</fail_when_not_success>
+      <xloc>1520</xloc><yloc>64</yloc><draw>Y</draw>
     </entry>
+
 
     <!-- 6) Limpiar staging -->
     <entry>
       <name>TRUNCATE STAGE (end)</name>
-      <type>SPECIAL</type>
-      <special>SQL</special>
-      <sql><![CDATA[TRUNCATE TABLE ventas_historicas_stage;]]></sql>
+      <type>SQL</type>
       <connection>MYSQL_EVALUTIA</connection>
-      <wait>Y</wait>
-      <follow_success>Y</follow_success>
-      <evaluate>N</evaluate>
+      <sql_script><![CDATA[TRUNCATE TABLE ventas_historicas_stage;]]></sql_script>
+      <send_one_statement>Y</send_one_statement>
+      <xloc>1760</xloc><yloc>64</yloc><draw>Y</draw>
     </entry>
 
-    <!-- 7) Éxito -->
+    <!-- SUCCESS -->
     <entry>
       <name>SUCCESS</name>
       <type>SPECIAL</type>
-      <special>SUCCESS</special>
+      <success>Y</success>
+      <xloc>2000</xloc><yloc>64</yloc><draw>Y</draw>
     </entry>
   </entries>
 
   <hops>
-    <hop><from>TRUNCATE STAGE (start)</from><to>GET LAST DATE</to><enabled>Y</enabled></hop>
-    <hop><from>GET LAST DATE</from><to>GEN CHUNKS</to><enabled>Y</enabled></hop>
-    <hop><from>GEN CHUNKS</from><to>LOAD SALES CHUNK</to><enabled>Y</enabled></hop>
-    <hop><from>LOAD SALES CHUNK</from><to>MERGE STAGING -> VENTAS</to><enabled>Y</enabled></hop>
-    <hop><from>MERGE STAGING -> VENTAS</from><to>RUN PREDICT.PY</to><enabled>Y</enabled></hop>
-    <hop><from>RUN PREDICT.PY</from><to>TRUNCATE STAGE (end)</to><enabled>Y</enabled></hop>
-    <hop><from>TRUNCATE STAGE (end)</from><to>SUCCESS</to><enabled>Y</enabled></hop>
+    <hop><from>START</from><to>TRUNCATE STAGE (start)</to><enabled>Y</enabled><evaluation>Y</evaluation><unconditional>Y</unconditional></hop>
+    <hop><from>TRUNCATE STAGE (start)</from><to>GET LAST DATE</to><enabled>Y</enabled><evaluation>Y</evaluation><unconditional>Y</unconditional></hop>
+    <hop><from>GET LAST DATE</from><to>GEN CHUNKS</to><enabled>Y</enabled><evaluation>Y</evaluation><unconditional>Y</unconditional></hop>
+    <hop><from>GEN CHUNKS</from><to>LOAD SALES CHUNK</to><enabled>Y</enabled><evaluation>Y</evaluation><unconditional>Y</unconditional></hop>
+    <hop><from>LOAD SALES CHUNK</from><to>MERGE STAGING -> VENTAS</to><enabled>Y</enabled><evaluation>Y</evaluation><unconditional>Y</unconditional></hop>
+    <hop><from>MERGE STAGING -> VENTAS</from><to>RUN PREDICT.PY</to><enabled>Y</enabled><evaluation>Y</evaluation><unconditional>Y</unconditional></hop>
+    <hop><from>RUN PREDICT.PY</from><to>TRUNCATE STAGE (end)</to><enabled>Y</enabled><evaluation>Y</evaluation><unconditional>Y</unconditional></hop>
+    <hop><from>TRUNCATE STAGE (end)</from><to>SUCCESS</to><enabled>Y</enabled><evaluation>Y</evaluation><unconditional>Y</unconditional></hop>
   </hops>
 
-  <!-- Variables que este job espera tener disponibles desde .env -->
   <job_parameters>
     <pass_all_parameters>Y</pass_all_parameters>
   </job_parameters>
