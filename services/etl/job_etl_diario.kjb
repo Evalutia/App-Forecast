@@ -3,16 +3,33 @@
   <name>ETL Diario Ventas</name>
   <description>Job diario: SOAP -> staging -> upsert ventas_historicas -> predict.py -> limpiar staging</description>
 
-  <!-- Parámetros -->
   <parameters>
-    <parameter><name>WS_START_DATE</name><default_value>${WS_START_DATE}</default_value></parameter>
-    <parameter><name>CHUNK_DAYS</name><default_value>${CHUNK_DAYS}</default_value></parameter>
-    <parameter><name>PREDICT_PERIODS</name><default_value>${PREDICT_PERIODS}</default_value></parameter>
-    <parameter><name>PREDICT_MODEL_SET</name><default_value>${PREDICT_MODEL_SET}</default_value></parameter>
-    <parameter><name>PREDICT_VERSION</name><default_value>${PREDICT_VERSION}</default_value></parameter>
+    <!-- WS / extracción -->
+    <parameter><name>WS_URL</name><default_value>${WS_URL}</default_value></parameter>
+    <parameter><name>DATE_FMT</name><default_value>dmy</default_value></parameter>
+    <parameter><name>ID_EMPRESA</name><default_value>1</default_value></parameter>
+    <parameter><name>S_DEPOSITOS</name><default_value></default_value></parameter>
+    <parameter><name>GROUPS</name><default_value>75</default_value></parameter>
+    <parameter><name>FORCE_START</name><default_value></default_value></parameter>
+    <parameter><name>FORCE_END</name><default_value></default_value></parameter>
+
+    <!-- MySQL -->
+    <parameter><name>MYSQL_HOST</name><default_value>${MYSQL_HOST}</default_value></parameter>
+    <parameter><name>MYSQL_DB</name><default_value>${MYSQL_DB}</default_value></parameter>
+    <parameter><name>MYSQL_USER</name><default_value>${MYSQL_USER}</default_value></parameter>
+    <parameter><name>MYSQL_PASSWORD</name><default_value>${MYSQL_PASSWORD}</default_value></parameter>
+    <parameter><name>MYSQL_PORT</name><default_value>${MYSQL_PORT}</default_value></parameter>
+
+    <!-- Predict -->
+    <parameter><name>PREDICT_PERIODS</name><default_value>14</default_value></parameter>
+    <!-- Debe ser uno de: full | classic | tree -->
+    <parameter><name>PREDICT_MODEL_SET</name><default_value>classic</default_value></parameter>
+    <parameter><name>PREDICT_VERSION</name><default_value>1</default_value></parameter>
+
+    <!-- Aux -->
+    <parameter><name>LAST_TABLE</name><default_value>ventas_historicas_stage</default_value></parameter>
   </parameters>
 
-  <!-- Conexión MySQL -->
   <connection>
     <name>MYSQL_EVALUTIA</name>
     <server>${MYSQL_HOST}</server>
@@ -26,11 +43,12 @@
     <attributes>
       <attribute><code>EXTRA_OPTION_MYSQL.useSSL</code><attribute>false</attribute></attribute>
       <attribute><code>EXTRA_OPTION_MYSQL.allowPublicKeyRetrieval</code><attribute>true</attribute></attribute>
+      <attribute><code>EXTRA_OPTION_MYSQL.useUnicode</code><attribute>true</attribute></attribute>
+      <attribute><code>EXTRA_OPTION_MYSQL.characterEncoding</code><attribute>utf8</attribute></attribute>
     </attributes>
   </connection>
 
   <entries>
-    <!-- START -->
     <entry>
       <name>START</name>
       <type>SPECIAL</type>
@@ -40,58 +58,61 @@
       <xloc>64</xloc><yloc>64</yloc><draw>Y</draw>
     </entry>
 
-    <!-- 0) Truncar staging al inicio -->
     <entry>
       <name>TRUNCATE STAGE (start)</name>
       <type>SQL</type>
       <connection>MYSQL_EVALUTIA</connection>
-      <sql_script><![CDATA[TRUNCATE TABLE ventas_historicas_stage;]]></sql_script>
+      <sql_script><![CDATA[
+TRUNCATE TABLE ventas_historicas_stage;
+      ]]></sql_script>
       <send_one_statement>Y</send_one_statement>
-      <xloc>320</xloc><yloc>64</yloc><draw>Y</draw>
+      <xloc>240</xloc><yloc>64</yloc><draw>Y</draw>
     </entry>
 
-    <!-- 1) Obtener última fecha -->
+    <!-- EXTRACT vía shell POSIX -->
     <entry>
-      <name>GET LAST DATE</name>
-      <type>TRANS</type>
-      <filename>${Internal.Entry.Current.Directory}/tr_get_last_date.ktr</filename>
-      <wait>Y</wait>
-      <execute_each_row>N</execute_each_row>
-      <parameters>
-        <parameter><name>START_DATE_PARAM</name><value>${WS_START_DATE}</value></parameter>
-      </parameters>
-      <clear_result_rows>N</clear_result_rows>
-      <xloc>560</xloc><yloc>64</yloc><draw>Y</draw>
-    </entry>
+      <name>RUN EXTRACT (bash)</name>
+      <type>SHELL</type>
+      <filename>/bin/sh</filename>
+      <work_directory>${Internal.Entry.Current.Directory}</work_directory>
+      <arguments>
+        <argument>-c</argument>
+      </arguments>
+      <insertScript>Y</insertScript>
+      <script><![CDATA[
+# POSIX sh
+set -eu
+WS_URL="${WS_URL}"; export WS_URL
+DATE_FMT="${DATE_FMT}"; export DATE_FMT
+ID_EMPRESA="${ID_EMPRESA}"; export ID_EMPRESA
+S_DEPOSITOS="${S_DEPOSITOS}"; export S_DEPOSITOS
+GROUPS="${GROUPS}"; export GROUPS
 
-    <!-- 2) Generar chunks -->
-    <entry>
-      <name>GEN CHUNKS</name>
-      <type>TRANS</type>
-      <filename>${Internal.Entry.Current.Directory}/tr_generate_chunks.ktr</filename>
-      <wait>Y</wait>
-      <execute_each_row>N</execute_each_row>
-      <parameters>
-        <parameter><name>LAST_DATE</name><value>${LAST_LOADED_DATE}</value></parameter>
-        <parameter><name>CHUNK_DAYS</name><value>${CHUNK_DAYS}</value></parameter>
-      </parameters>
-      <clear_result_rows>N</clear_result_rows>
-      <xloc>800</xloc><yloc>64</yloc><draw>Y</draw>
-    </entry>
+# Rango forzado opcional
+[ -n "${FORCE_START:-}" ] && { FORCE_START="${FORCE_START}"; export FORCE_START; } || true
+[ -n "${FORCE_END:-}" ] && { FORCE_END="${FORCE_END}"; export FORCE_END; } || true
 
-    <!-- 3) Ejecutar extracción por cada fila (chunk) -->
-    <entry>
-      <name>LOAD SALES CHUNK</name>
-      <type>TRANS</type>
-      <filename>${Internal.Entry.Current.Directory}/tr_extract_sales_chunk.ktr</filename>
+# MySQL
+MYSQL_HOST="${MYSQL_HOST}"; export MYSQL_HOST
+MYSQL_DB="${MYSQL_DB}"; export MYSQL_DB
+MYSQL_USER="${MYSQL_USER}"; export MYSQL_USER
+MYSQL_PASSWORD="${MYSQL_PASSWORD}"; export MYSQL_PASSWORD
+MYSQL_PORT="${MYSQL_PORT}"; export MYSQL_PORT
+
+# Wrapper
+sed -i 's/\r$//' /app/services/etl/run_etl_daily.sh 2>/dev/null || true
+chmod +x /app/services/etl/run_etl_daily.sh || true
+
+echo "[JOB][RUN EXTRACT] Lanzando run_etl_daily.sh ..."
+/app/services/etl/run_etl_daily.sh
+echo "[JOB][RUN EXTRACT] Finalizado OK."
+      ]]></script>
+      <arg_from_previous>N</arg_from_previous>
+      <exec_per_row>N</exec_per_row>
+      <set_logfile>N</set_logfile>
       <wait>Y</wait>
-      <execute_each_row>Y</execute_each_row>
-      <parameters>
-        <parameter><name>CHUNK_START</name><value>${CHUNK_START}</value></parameter>
-        <parameter><name>CHUNK_END</name><value>${CHUNK_END}</value></parameter>
-      </parameters>
-      <clear_result_rows>N</clear_result_rows>
-      <xloc>1040</xloc><yloc>64</yloc><draw>Y</draw>
+      <fail_when_not_success>Y</fail_when_not_success>
+      <xloc>480</xloc><yloc>64</yloc><draw>Y</draw>
     </entry>
 
     <!-- 4) Upsert staging -> ventas_historicas -->
@@ -100,61 +121,78 @@
       <type>SQL</type>
       <connection>MYSQL_EVALUTIA</connection>
       <sql_script><![CDATA[
+/* Requiere UNIQUE KEY en ventas_historicas(fecha, sku) */
 INSERT INTO ventas_historicas (fecha, sku, cantidad, ts_carga, fuente)
-SELECT s.fecha, s.sku, s.cantidad, NOW(6), s.fuente
+SELECT s.fecha, s.sku, s.cantidad, NOW(6), COALESCE(s.fuente,'soap')
 FROM ventas_historicas_stage s
-ON DUPLICATE KEY UPDATE 
+WHERE s.sku IS NOT NULL
+ON DUPLICATE KEY UPDATE
   cantidad = VALUES(cantidad),
-  ts_carga = VALUES(ts_carga);
+  ts_carga = VALUES(ts_carga),
+  fuente   = VALUES(fuente);
       ]]></sql_script>
       <send_one_statement>Y</send_one_statement>
-      <xloc>1280</xloc><yloc>64</yloc><draw>Y</draw>
+      <xloc>720</xloc><yloc>64</yloc><draw>Y</draw>
     </entry>
 
-    <!-- 5) Ejecutar predict.py -->
+
+    <!-- PREDICT: con flags correctos -->
     <entry>
       <name>RUN PREDICT.PY</name>
       <type>SHELL</type>
       <filename>/bin/sh</filename>
+      <work_directory>${Internal.Entry.Current.Directory}</work_directory>
       <arguments>
-        <argument>-lc</argument>
-        <argument>python3 /app/services/python-worker/predict.py --input-source=mysql --periods=${PREDICT_PERIODS} --model-set=${PREDICT_MODEL_SET} --version=${PREDICT_VERSION}</argument>
+        <argument>-c</argument>
       </arguments>
+      <insertScript>Y</insertScript>
+      <script><![CDATA[
+set -eu
+echo "[JOB][PREDICT] Ejecutando predict.py ..."
+python3 /app/services/python-worker/predict.py \
+  --input-source=mysql \
+  --mysql-host="${MYSQL_HOST}" \
+  --mysql-port="${MYSQL_PORT}" \
+  --mysql-db="${MYSQL_DB}" \
+  --mysql-user="${MYSQL_USER}" \
+  --mysql-pass="${MYSQL_PASSWORD}" \
+  --mysql-table="ventas_historicas" \
+  --periods="${PREDICT_PERIODS}" \
+  --model-set="${PREDICT_MODEL_SET}" \
+  --version="${PREDICT_VERSION}"
+echo "[JOB][PREDICT] Finalizado OK."
+      ]]></script>
       <arg_from_previous>N</arg_from_previous>
       <exec_per_row>N</exec_per_row>
-      <insertScript>N</insertScript>
       <set_logfile>N</set_logfile>
       <wait>Y</wait>
       <fail_when_not_success>Y</fail_when_not_success>
-      <xloc>1520</xloc><yloc>64</yloc><draw>Y</draw>
+      <xloc>960</xloc><yloc>64</yloc><draw>Y</draw>
     </entry>
 
-
-    <!-- 6) Limpiar staging -->
     <entry>
       <name>TRUNCATE STAGE (end)</name>
       <type>SQL</type>
       <connection>MYSQL_EVALUTIA</connection>
-      <sql_script><![CDATA[TRUNCATE TABLE ventas_historicas_stage;]]></sql_script>
+      <sql_script><![CDATA[
+TRUNCATE TABLE ventas_historicas_stage;
+      ]]></sql_script>
       <send_one_statement>Y</send_one_statement>
-      <xloc>1760</xloc><yloc>64</yloc><draw>Y</draw>
+      <xloc>1200</xloc><yloc>64</yloc><draw>Y</draw>
     </entry>
 
-    <!-- SUCCESS -->
     <entry>
       <name>SUCCESS</name>
       <type>SPECIAL</type>
       <success>Y</success>
-      <xloc>2000</xloc><yloc>64</yloc><draw>Y</draw>
+      <xloc>1440</xloc><yloc>64</yloc><draw>Y</draw>
     </entry>
   </entries>
 
   <hops>
     <hop><from>START</from><to>TRUNCATE STAGE (start)</to><enabled>Y</enabled><evaluation>Y</evaluation><unconditional>Y</unconditional></hop>
-    <hop><from>TRUNCATE STAGE (start)</from><to>GET LAST DATE</to><enabled>Y</enabled><evaluation>Y</evaluation><unconditional>Y</unconditional></hop>
-    <hop><from>GET LAST DATE</from><to>GEN CHUNKS</to><enabled>Y</enabled><evaluation>Y</evaluation><unconditional>Y</unconditional></hop>
-    <hop><from>GEN CHUNKS</from><to>LOAD SALES CHUNK</to><enabled>Y</enabled><evaluation>Y</evaluation><unconditional>Y</unconditional></hop>
-    <hop><from>LOAD SALES CHUNK</from><to>MERGE STAGING -> VENTAS</to><enabled>Y</enabled><evaluation>Y</evaluation><unconditional>Y</unconditional></hop>
+    <hop><from>TRUNCATE STAGE (start)</from><to>RUN EXTRACT (bash)</to><enabled>Y</enabled><evaluation>Y</evaluation><unconditional>Y</unconditional></hop>
+    <hop><from>RUN EXTRACT (bash)</from><to>MERGE STAGING -> VENTAS</to><enabled>Y</enabled><evaluation>Y</evaluation><unconditional>Y</unconditional></hop>
     <hop><from>MERGE STAGING -> VENTAS</from><to>RUN PREDICT.PY</to><enabled>Y</enabled><evaluation>Y</evaluation><unconditional>Y</unconditional></hop>
     <hop><from>RUN PREDICT.PY</from><to>TRUNCATE STAGE (end)</to><enabled>Y</enabled><evaluation>Y</evaluation><unconditional>Y</unconditional></hop>
     <hop><from>TRUNCATE STAGE (end)</from><to>SUCCESS</to><enabled>Y</enabled><evaluation>Y</evaluation><unconditional>Y</unconditional></hop>

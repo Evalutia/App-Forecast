@@ -26,6 +26,10 @@ RUN curl -L -o /opt/pentaho/data-integration/lib/mysql-connector-java-5.1.49.jar
 WORKDIR /app
 COPY . /app
 
+COPY services/etl/run_etl_daily.sh /app/services/etl/run_etl_daily.sh
+RUN sed -i 's/\r$//' /app/services/etl/run_etl_daily.sh \
+ && chmod +x /app/services/etl/run_etl_daily.sh
+
 # ---- Python deps para predict.py ----
 RUN python3 -m pip install --upgrade pip setuptools wheel \
  && pip3 install --no-cache-dir -r services/python-worker/requirements.txt

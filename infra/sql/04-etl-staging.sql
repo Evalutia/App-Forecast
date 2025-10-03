@@ -27,3 +27,6 @@ SET @sql2 := IF(@idx2 = 0,
   'SELECT 1;'
 );
 PREPARE stmt2 FROM @sql2; EXECUTE stmt2; DEALLOCATE PREPARE stmt2;
+
+ALTER TABLE evalutia.ventas_historicas_stage
+  ADD COLUMN stock INT DEFAULT 0 AFTER cantidad;
