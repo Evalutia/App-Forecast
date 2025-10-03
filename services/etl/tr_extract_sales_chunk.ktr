@@ -1,0 +1,202 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<transformation>
+  <name>TR Extract Sales Chunk</name>
+  <description>SOAP (JSON inside) -> normalize -> stage ventas_historicas_stage</description>
+  <trans_version>1</trans_version>
+  <size_rowset>10000</size_rowset>
+
+  <!-- Conexión MySQL usando variables de entorno -->
+  <connection>
+    <name>MYSQL_EVALUTIA</name>
+    <server>${MYSQL_HOST}</server>
+    <type>MYSQL</type>
+    <access>Native</access>
+    <database>${MYSQL_DB}</database>
+    <port>${MYSQL_PORT}</port>
+    <username>${MYSQL_USER}</username>
+    <password>${MYSQL_PASSWORD}</password>
+    <using_unique_connections>N</using_unique_connections>
+    <attributes>
+      <attribute><code>EXTRA_OPTION_MYSQL.useSSL</code><attribute>false</attribute></attribute>
+      <attribute><code>EXTRA_OPTION_MYSQL.allowPublicKeyRetrieval</code><attribute>true</attribute></attribute>
+    </attributes>
+  </connection>
+
+  <!-- Parámetros esperados desde el Job -->
+  <parameters>
+    <parameter>
+      <name>CHUNK_START</name>
+      <default_value/>
+      <description>Fecha desde (yyyy-MM-dd)</description>
+    </parameter>
+    <parameter>
+      <name>CHUNK_END</name>
+      <default_value/>
+      <description>Fecha hasta (yyyy-MM-dd)</description>
+    </parameter>
+  </parameters>
+
+  <step>
+    <name>Generate Row</name>
+    <type>RowGenerator</type>
+    <rows>1</rows>
+    <interval>0</interval>
+    <never_ending>N</never_ending>
+    <fields>
+      <field>
+        <name>DUMMY</name><type>String</type><length>1</length><value>X</value>
+      </field>
+    </fields>
+  </step>
+
+  <!-- HTTP POST al .asmx con envelope SOAP y fechas parametrizadas -->
+  <step>
+    <name>SOAP Request</name>
+    <type>HTTPPOST</type>
+    <url>${WS_URL}</url>
+    <encoding>UTF-8</encoding>
+    <post_a_file>false</post_a_file>
+    <multipart>false</multipart>
+    <body><![CDATA[
+<soap:Envelope xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+               xmlns:xsd="http://www.w3.org/2001/XMLSchema"
+               xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/">
+  <soap:Body>
+    <GetVentasJSON xmlns="http://tempuri.org/">
+      <IdGrupo>${WS_ID_GRUPO}</IdGrupo>
+      <FechaDesde>${CHUNK_START}</FechaDesde>
+      <FechaHasta>${CHUNK_END}</FechaHasta>
+    </GetVentasJSON>
+  </soap:Body>
+</soap:Envelope>
+    ]]></body>
+    <header_parameters>
+      <parameter><name>Content-Type</name><value>text/xml; charset=utf-8</value></parameter>
+      <!-- Si el WS requiere auth básica, opcional:
+      <parameter><name>Authorization</name><value>Basic ${WS_BASIC_AUTH}</value></parameter>
+      -->
+    </header_parameters>
+    <result>soap_response</result>
+    <result_code>http_status</result_code>
+    <response_time>response_time</response_time>
+    <response_header>response_headers</response_header>
+    <connection_timeout>${WS_TIMEOUT_MS}</connection_timeout>
+    <read_timeout>${WS_TIMEOUT_MS}</read_timeout>
+  </step>
+
+  <!-- Extraer el nodo con el JSON dentro de la respuesta SOAP -->
+  <step>
+    <name>Extract JSON</name>
+    <type>XMLInputStream</type>
+    <field_name>soap_response</field_name>
+    <result_xml_field>json_text</result_xml_field>
+    <xpath_query>//GetVentasJSONResult</xpath_query>
+    <include_xml_header>N</include_xml_header>
+    <read_url>N</read_url>
+    <IsIgnoreEmptyFile>Y</IsIgnoreEmptyFile>
+    <IsIgnoreMissingPath>Y</IsIgnoreMissingPath>
+    <IsEnableNamespaces>Y</IsEnableNamespaces>
+  </step>
+
+  <!-- Parsear la cadena JSON a filas -->
+  <step>
+    <name>Parse JSON</name>
+    <type>JsonInput</type>
+    <IsInFields>Y</IsInFields>
+    <FieldValue>json_text</FieldValue>
+    <fields>
+      <field><name>sku</name><path>$[*].Articulo</path><type>String</type></field>
+      <field><name>fecha</name><path>$[*].Fecha</path><type>Date</type><format>yyyy-MM-dd</format></field>
+      <field><name>cantidad</name><path>$[*].Venta</path><type>Integer</type></field>
+      <field><name>stock</name><path>$[*].Stock</path><type>Number</type></field>
+    </fields>
+  </step>
+
+  <!-- Validaciones mínimas y normalización -->
+  <step>
+    <name>Filter valid rows</name>
+    <type>FilterRows</type>
+    <send_true_to>Keep valid</send_true_to>
+    <send_false_to>Discard invalid</send_false_to>
+    <condition>
+      <condition>
+        <leftvalue>sku</leftvalue><function>IS NOT NULL</function>
+      </condition>
+      <condition>
+        <leftvalue>fecha</leftvalue><function>IS NOT NULL</function>
+        <operator>AND</operator>
+      </condition>
+      <condition>
+        <leftvalue>cantidad</leftvalue><function>IS NOT NULL</function>
+        <operator>AND</operator>
+      </condition>
+    </condition>
+  </step>
+
+  <step>
+    <name>Keep valid</name>
+    <type>Dummy</type>
+  </step>
+
+  <step>
+    <name>Discard invalid</name>
+    <type>Dummy</type>
+  </step>
+
+  <!-- Seleccionar campos destino -->
+  <step>
+    <name>Select Fields</name>
+    <type>SelectValues</type>
+    <select_fields>
+      <field><name>sku</name></field>
+      <field><name>fecha</name></field>
+      <field><name>cantidad</name></field>
+    </select_fields>
+  </step>
+
+  <!-- Agregar fuente constante (para UNIQUE en ventas_historicas) -->
+  <step>
+    <name>Add Source</name>
+    <type>AddConstants</type>
+    <fields>
+      <field>
+        <name>fuente</name><type>String</type><length>64</length><value>${WS_SOURCE_NAME}</value>
+      </field>
+    </fields>
+  </step>
+
+  <!-- Volcar a tabla de staging -->
+  <step>
+    <name>Table Output (Stage)</name>
+    <type>TableOutput</type>
+    <connection>MYSQL_EVALUTIA</connection>
+    <table>ventas_historicas_stage</table>
+    <commit>1000</commit>
+    <use_batch>Y</use_batch>
+    <ignore_errors>N</ignore_errors>
+    <fields>
+      <field><name>fecha</name><column>fecha</column></field>
+      <field><name>sku</name><column>sku</column></field>
+      <field><name>cantidad</name><column>cantidad</column></field>
+      <field><name>fuente</name><column>fuente</column></field>
+    </fields>
+  </step>
+
+  <!-- Flujo -->
+  <order>
+    <hop><from>Generate Row</from><to>SOAP Request</to></hop>
+    <hop><from>SOAP Request</from><to>Extract JSON</to></hop>
+    <hop><from>Extract JSON</from><to>Parse JSON</to></hop>
+    <hop><from>Parse JSON</from><to>Filter valid rows</to></hop>
+    <hop><from>Filter valid rows</from><to>Keep valid</to></hop>
+    <hop><from>Filter valid rows</from><to>Discard invalid</to></hop>
+    <hop><from>Keep valid</from><to>Select Fields</to></hop>
+    <hop><from>Select Fields</from><to>Add Source</to></hop>
+    <hop><from>Add Source</from><to>Table Output (Stage)</to></hop>
+  </order>
+
+  <info>
+    <created_user>etl</created_user>
+    <created_date>2025/10/03 00:00:00.000</created_date>
+  </info>
+</transformation>

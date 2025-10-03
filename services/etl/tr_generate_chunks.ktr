@@ -1,0 +1,299 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<transformation>
+  <name>TR Generate Chunks</name>
+  <description>Genera rangos [start,end] por CHUNK_DAYS desde LAST_DATE+1 hasta hoy</description>
+  <trans_version>1</trans_version>
+  <size_rowset>10000</size_rowset>
+
+  <!-- Conexión (no se usa aquí para leer/escribir, pero mantener por consistencia) -->
+  <connection>
+    <name>MYSQL_EVALUTIA</name>
+    <server>${MYSQL_HOST}</server>
+    <type>MYSQL</type>
+    <access>Native</access>
+    <database>${MYSQL_DB}</database>
+    <port>${MYSQL_PORT}</port>
+    <username>${MYSQL_USER}</username>
+    <password>${MYSQL_PASSWORD}</password>
+  </connection>
+
+  <!-- Parámetros desde el Job -->
+  <parameters>
+    <parameter>
+      <name>LAST_DATE</name>
+      <default_value/>
+      <description>Última fecha cargada (yyyy-MM-dd)</description>
+    </parameter>
+    <parameter>
+      <name>CHUNK_DAYS</name>
+      <default_value>7</default_value>
+      <description>Tamaño del chunk en días</description>
+    </parameter>
+  </parameters>
+
+  <!-- A) Línea de control: calcula hoy, start_date, diff y número de chunks -->
+  <step>
+    <name>Seed 1 row</name>
+    <type>RowGenerator</type>
+    <rows>1</rows>
+    <interval>0</interval>
+    <never_ending>N</never_ending>
+    <fields>
+      <field><name>DUMMY</name><type>String</type><length>1</length><value>X</value></field>
+    </fields>
+  </step>
+
+  <step>
+    <name>Get System Info</name>
+    <type>GetSystemInfo</type>
+    <fields>
+      <field>
+        <name>today_dt</name>
+        <type>System date (fixed)</type>
+      </field>
+    </fields>
+  </step>
+
+  <step>
+    <name>Add Params</name>
+    <type>AddConstants</type>
+    <fields>
+      <field><name>last_date_str</name><type>String</type><length>10</length><value>${LAST_DATE}</value></field>
+      <field><name>chunk_days_str</name><type>String</type><length>4</length><value>${CHUNK_DAYS}</value></field>
+    </fields>
+  </step>
+
+  <step>
+    <name>Cast Params</name>
+    <type>SelectValues</type>
+    <select_unspecified>N</select_unspecified>
+    <meta>
+      <meta_field>
+        <name>last_date_str</name>
+        <rename>last_date</rename>
+        <type>Date</type>
+        <format>yyyy-MM-dd</format>
+      </meta_field>
+      <meta_field>
+        <name>chunk_days_str</name>
+        <rename>chunk_days</rename>
+        <type>Integer</type>
+      </meta_field>
+    </meta>
+  </step>
+
+  <step>
+    <name>Calc Start = last+1d</name>
+    <type>Calculator</type>
+    <calculation>
+      <field_name>start_date</field_name>
+      <calculation>ADD_DAYS</calculation>
+      <field_a>last_date</field_a>
+      <value>1</value>
+      <value_type>Integer</value_type>
+    </calculation>
+  </step>
+
+  <step>
+    <name>Calc Diff Days</name>
+    <type>Calculator</type>
+    <calculation>
+      <field_name>diff_days</field_name>
+      <calculation>DATE_DIFF</calculation>
+      <field_a>today_dt</field_a>
+      <field_b>start_date</field_b>
+      <value_type>Integer</value_type>
+    </calculation>
+  </step>
+
+  <step>
+    <name>Compute NChunks</name>
+    <type>ModifiedJavaScriptValue</type>
+    <compatible>N</compatible>
+    <jsScript><![CDATA[
+var ndays = (diff_days==null ? 0 : diff_days); // días entre hoy y start_date
+var cd = (chunk_days==null ? 7 : chunk_days);
+var nchunks = 0;
+if (ndays >= 0 && cd > 0) {
+  // incluir el día start_date: +1
+  nchunks = Math.ceil( (ndays+1) / cd );
+}
+NCHUNKS = parseInt(nchunks,10);
+]]></jsScript>
+    <fields>
+      <field>
+        <name>NCHUNKS</name>
+        <rename>NCHUNKS</rename>
+        <type>Integer</type>
+        <length>9</length>
+      </field>
+    </fields>
+  </step>
+
+  <!-- B) Línea de secuencia: genera muchos números y luego filtra <= NCHUNKS -->
+  <step>
+    <name>RowGen many</name>
+    <type>RowGenerator</type>
+    <rows>2000</rows>
+    <interval>0</interval>
+    <never_ending>N</never_ending>
+    <fields>
+      <field><name>D2</name><type>Integer</type><length>1</length><value>0</value></field>
+    </fields>
+  </step>
+
+  <step>
+    <name>Add Sequence</name>
+    <type>Sequence</type>
+    <valuename>seq</valuename>
+    <use_database>N</use_database>
+    <counter_name>chunk_seq</counter_name>
+    <start_at>1</start_at>
+    <increment_by>1</increment_by>
+    <max_value>2000000000</max_value>
+  </step>
+
+  <!-- C) Cruzar 1 fila de control con la secuencia para tener NCHUNKS disponible en cada fila -->
+  <step>
+    <name>Cartesian</name>
+    <type>CartesianProduct</type>
+  </step>
+
+  <step>
+    <name>Filter seq &gt; NCHUNKS</name>
+    <type>FilterRows</type>
+    <send_true_to>Keep rows</send_true_to>
+    <send_false_to>Discard rows</send_false_to>
+    <condition>
+      <condition>
+        <leftvalue>seq</leftvalue>
+        <function>&lt;=</function>
+        <rightvalue>NCHUNKS</rightvalue>
+      </condition>
+      <operator>AND</operator>
+      <condition>
+        <leftvalue>NCHUNKS</leftvalue>
+        <function>&gt;</function>
+        <rightvalue>0</rightvalue>
+      </condition>
+    </condition>
+  </step>
+
+  <!-- D) Calcular CHUNK_START y CHUNK_END -->
+  <step>
+    <name>Calc CHUNK_START</name>
+    <type>Calculator</type>
+    <calculation>
+      <field_name>CHUNK_START</field_name>
+      <calculation>ADD_DAYS</calculation>
+      <field_a>start_date</field_a>
+      <value_field>seq</value_field>
+      <value>-1</value> <!-- neutral, usamos JS abajo para multiplicar -->
+      <value_type>Integer</value_type>
+    </calculation>
+  </step>
+
+  <step>
+    <name>Adjust CHUNK_START</name>
+    <type>ModifiedJavaScriptValue</type>
+    <compatible>N</compatible>
+    <jsScript><![CDATA[
+var offsetDays = (seq-1) * chunk_days;
+CHUNK_START = new Date(start_date.getTime());
+CHUNK_START.setDate(CHUNK_START.getDate() + offsetDays);
+]]></jsScript>
+    <fields>
+      <field><name>CHUNK_START</name><type>Date</type></field>
+    </fields>
+  </step>
+
+  <step>
+    <name>Calc CHUNK_END</name>
+    <type>ModifiedJavaScriptValue</type>
+    <compatible>N</compatible>
+    <jsScript><![CDATA[
+var end = new Date(CHUNK_START.getTime());
+end.setDate(end.getDate() + (chunk_days - 1));
+// limitar a hoy
+if (end.getTime() > today_dt.getTime()){
+  end = new Date(today_dt.getFullYear(), today_dt.getMonth(), today_dt.getDate());
+}
+CHUNK_END = end;
+]]></jsScript>
+    <fields>
+      <field><name>CHUNK_END</name><type>Date</type></field>
+    </fields>
+  </step>
+
+  <!-- E) Formatear y entregar al Job -->
+  <step>
+    <name>Select &amp; Format</name>
+    <type>SelectValues</type>
+    <select_unspecified>N</select_unspecified>
+    <meta>
+      <meta_field>
+        <name>CHUNK_START</name>
+        <type>Date</type>
+        <format>yyyy-MM-dd</format>
+      </meta_field>
+      <meta_field>
+        <name>CHUNK_END</name>
+        <type>Date</type>
+        <format>yyyy-MM-dd</format>
+      </meta_field>
+    </meta>
+    <select_fields>
+      <field><name>CHUNK_START</name></field>
+      <field><name>CHUNK_END</name></field>
+    </select_fields>
+  </step>
+
+  <step>
+    <name>Copy rows to result</name>
+    <type>RowsToResult</type>
+  </step>
+
+  <!-- Flujo -->
+  <order>
+    <!-- Control -->
+    <hop><from>Seed 1 row</from><to>Get System Info</to></hop>
+    <hop><from>Get System Info</from><to>Add Params</to></hop>
+    <hop><from>Add Params</from><to>Cast Params</to></hop>
+    <hop><from>Cast Params</from><to>Calc Start = last+1d</to></hop>
+    <hop><from>Calc Start = last+1d</from><to>Calc Diff Days</to></hop>
+    <hop><from>Calc Diff Days</from><to>Compute NChunks</to></hop>
+
+    <!-- Secuencia -->
+    <hop><from>RowGen many</from><to>Add Sequence</to></hop>
+
+    <!-- Cruce -->
+    <hop><from>Compute NChunks</from><to>Cartesian</to></hop>
+    <hop><from>Add Sequence</from><to>Cartesian</to></hop>
+
+    <!-- Filtro y cálculos finales -->
+    <hop><from>Cartesian</from><to>Filter seq &gt; NCHUNKS</to></hop>
+    <hop><from>Filter seq &gt; NCHUNKS</from><to>Keep rows</to></hop>
+    <hop><from>Keep rows</from><to>Calc CHUNK_START</to></hop>
+    <hop><from>Calc CHUNK_START</from><to>Adjust CHUNK_START</to></hop>
+    <hop><from>Adjust CHUNK_START</from><to>Calc CHUNK_END</to></hop>
+    <hop><from>Calc CHUNK_END</from><to>Select &amp; Format</to></hop>
+    <hop><from>Select &amp; Format</from><to>Copy rows to result</to></hop>
+
+    <!-- Discard -->
+    <hop><from>Filter seq &gt; NCHUNKS</from><to>Discard rows</to></hop>
+  </order>
+
+  <step>
+    <name>Keep rows</name>
+    <type>Dummy</type>
+  </step>
+  <step>
+    <name>Discard rows</name>
+    <type>Dummy</type>
+  </step>
+
+  <info>
+    <created_user>etl</created_user>
+    <created_date>2025/10/03 00:00:00.000</created_date>
+  </info>
+</transformation>

@@ -1,0 +1,90 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<transformation>
+  <name>TR Get Last Date</name>
+  <description>Lee MAX(fecha) de ventas_historicas o usa START_DATE_PARAM-1 día y lo expone como LAST_LOADED_DATE</description>
+  <trans_version>1</trans_version>
+  <size_rowset>10000</size_rowset>
+
+  <!-- Conexión MySQL usando variables de entorno -->
+  <connection>
+    <name>MYSQL_EVALUTIA</name>
+    <server>${MYSQL_HOST}</server>
+    <type>MYSQL</type>
+    <access>Native</access>
+    <database>${MYSQL_DB}</database>
+    <port>${MYSQL_PORT}</port>
+    <username>${MYSQL_USER}</username>
+    <password>${MYSQL_PASSWORD}</password>
+    <using_unique_connections>N</using_unique_connections>
+    <attributes>
+      <attribute><code>EXTRA_OPTION_MYSQL.useSSL</code><attribute>false</attribute></attribute>
+      <attribute><code>EXTRA_OPTION_MYSQL.allowPublicKeyRetrieval</code><attribute>true</attribute></attribute>
+    </attributes>
+  </connection>
+
+  <!-- Parámetro recibido desde el Job (fallback cuando la tabla está vacía) -->
+  <parameters>
+    <parameter>
+      <name>START_DATE_PARAM</name>
+      <default_value/>
+      <description>Fecha inicial (yyyy-MM-dd) para backfill si no hay datos</description>
+    </parameter>
+  </parameters>
+
+  <!-- 1) Consulta: MAX(fecha) o START_DATE_PARAM - 1 día -->
+  <step>
+    <name>Table Input</name>
+    <type>TableInput</type>
+    <connection>MYSQL_EVALUTIA</connection>
+    <sql><![CDATA[
+SELECT
+  IFNULL(MAX(fecha), STR_TO_DATE('${START_DATE_PARAM}','%Y-%m-%d') - INTERVAL 1 DAY) AS last_date
+FROM ventas_historicas;
+    ]]></sql>
+    <rowlimit>0</rowlimit>
+    <execute_each_row>N</execute_each_row>
+  </step>
+
+  <!-- 2) Formatear la fecha a string yyyy-MM-dd -->
+  <step>
+    <name>Select & Format</name>
+    <type>SelectValues</type>
+    <select_unspecified>N</select_unspecified>
+    <meta>
+      <meta_field>
+        <name>last_date</name>
+        <type>Date</type>
+        <format>yyyy-MM-dd</format>
+        <length>-1</length>
+        <precision>-1</precision>
+        <storage_type>normal</storage_type>
+      </meta_field>
+    </meta>
+  </step>
+
+  <!-- 3) Setear variable de Job: LAST_LOADED_DATE -->
+  <step>
+    <name>Set Variables</name>
+    <type>SetVariable</type>
+    <use_formatting>Y</use_formatting>
+    <fields>
+      <field>
+        <variable_name>LAST_LOADED_DATE</variable_name>
+        <field_name>last_date</field_name>
+        <!-- Alcance: válido en el Job padre (lo usa job_etl_diario.kjb) -->
+        <variable_type>PARENT_JOB</variable_type>
+      </field>
+    </fields>
+  </step>
+
+  <!-- Flujo -->
+  <order>
+    <hop><from>Table Input</from><to>Select & Format</to></hop>
+    <hop><from>Select & Format</from><to>Set Variables</to></hop>
+  </order>
+
+  <info>
+    <created_user>etl</created_user>
+    <created_date>2025/10/03 00:00:00.000</created_date>
+  </info>
+</transformation>
