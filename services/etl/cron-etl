@@ -1,3 +1,6 @@
+# Ejecuta el ETL una vez al arrancar el contenedor (catch-up inmediato)
+@reboot root sleep 60 && /opt/pentaho/data-integration/kitchen.sh -file=/app/services/etl/job_etl_diario.kjb -level=Basic >> /app/data/etl_job.log 2>&1
+
 # Ejecuta el ETL diario a la hora configurada (por defecto 03:00)
 # Variables de entorno vienen de docker-compose (env_file: .env)
 SHELL=/bin/bash
