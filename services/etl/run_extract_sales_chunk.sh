@@ -246,8 +246,19 @@ with conn.cursor() as cur:
 
         fecha = norm_fecha(it.get('Fecha') or it.get('fecha'))
         sku   = it.get('IdArticulo') or it.get('Articulo') or it.get('SKU') or it.get('sku')
-        venta = it.get('Venta') if it.get('Venta') is not None else it.get('Cantidad')
-        stock = it.get('Stock')
+        # ventas: probar varias variantes comunes del WS
+        venta = None
+        for k in ['Venta','Cantidad','CantVenta','CantidadVta','CantVta','Cant_Vta','CantidadVenta','CANTIDAD','CANT_VENTA']:
+            if it.get(k) is not None:
+                venta = it.get(k)
+                break
+
+        # stock: también probamos alias (por si en algún cliente cambia)
+        stock = None
+        for k in ['Stock','StockDisp','StockDisponible','Existencia','Existencias','CantidadStock']:
+            if it.get(k) is not None:
+                stock = it.get(k)
+                break
 
         if not fecha or not sku:
             # no pasa CHECKs de NOT NULL/validez

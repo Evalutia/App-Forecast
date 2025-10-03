@@ -1,28 +1,16 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-HOUR="${PREDICT_SCHEDULE_HOUR:-3}"
+# Exportar variables del entorno actual para cron
+printenv | grep -E '^(MYSQL_|WS_|PREDICT_|TZ)=' | sed 's/^/export /' > /etc/profile.d/etl-env.sh
 
-# Armamos un crontab para el USUARIO root (sin columna 'user')
-cat >/tmp/cronfile <<EOF
-SHELL=/bin/bash
-PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/opt/pentaho/data-integration
+# Cronjob: usar "bash -lc" para cargar /etc/profile.d/*
+CRON_SPEC="${CRON_SPEC:-0 3 * * *}"   # default 03:00 UTC si no se setea
+JOB_CMD='/opt/pentaho/data-integration/kitchen.sh -file=/app/services/etl/job_etl_diario.kjb -level=Basic'
 
-# Ejecutar al iniciar el contenedor para 'catch-up' (opcional, comentar si no lo querés)
-@reboot sleep 60 && /opt/pentaho/data-integration/kitchen.sh -file=/app/services/etl/job_etl_diario.kjb -level=Basic >> /app/data/etl_job.log 2>&1
+echo "${CRON_SPEC} bash -lc '${JOB_CMD} >> /app/data/etl_job.log 2>&1'" > /etc/cron.d/etl
+chmod 0644 /etc/cron.d/etl
+crontab /etc/cron.d/etl
 
-# Ejecutar todos los días a la hora configurada (por defecto 03:00)
-0 ${HOUR} * * * /opt/pentaho/data-integration/kitchen.sh -file=/app/services/etl/job_etl_diario.kjb -level=Basic >> /app/data/etl_job.log 2>&1
-EOF
-
-# Instalar crontab para root y mostrarlo
-crontab /tmp/cronfile
-echo "[entrypoint] Crontab instalado:"
-crontab -l
-
-# Asegurar archivo de log
-mkdir -p /app/data
-touch /app/data/etl_job.log
-
-# Ejecutar cron en primer plano
-exec cron -f
+service cron start
+tail -F /app/data/etl_job.log
