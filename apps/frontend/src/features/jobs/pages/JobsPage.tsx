@@ -1,7 +1,6 @@
 import React from 'react';
 import type { JobsQuery } from '../../jobs/types/jobs';
 import TablaJobs from '../../jobs/components/TablaJobs';
-import BackToDashboardButton from '../../users/components/BackToDashboardButton';
 
 const ESTADOS = ['pendiente','ejecutando','exitoso','fallido','cancelado'];
 
@@ -14,85 +13,96 @@ export default function JobsPage() {
     setQuery((q) => ({ ...q, [k]: v, page: 1 }));
 
   return (
-    <div className="jobs-page">
-      <div className="jobs-container">
-        <div className="jobs-topbar">
-          <span className="brand-badge">Evalutia</span>
-          <BackToDashboardButton />
+    <>
+      {/* Topbar idéntica a Home/Sales */}
+      <div className="jobs-topbar-wide">
+        <div className="home-header">
+          <a href="/home" className="home-brand">EVALUTIA</a>
+          <div className="home-actions">
+            {/* Botón igual al de Sales */}
+            <a href="/home" className="btn btn--sm">← Volver al dashboard</a>
+          </div>
         </div>
+      </div>
 
-        <header className="section-head">
-          <h1 className="section-title">Jobs</h1>
-          <p className="section-subtitle">Historial y estado de ejecuciones.</p>
-        </header>
+      <div className="jobs-page">
+        <div className="jobs-container">
+          <header className="section-head">
+            <h1 className="section-title">Jobs</h1>
+            <p className="section-subtitle">Historial y estado de ejecuciones.</p>
+          </header>
 
-        {/* Filtros */}
-        <section className="card filters-card">
-          <div className="filters-grid">
-            <div className="form-row">
-              <label className="label">Tipo de job</label>
-              <input
-                className="input"
-                placeholder="p.ej. forecast, etl..."
-                value={query.tipo ?? ''}
-                onChange={(e) => onChange('tipo')(e.target.value)}
-              />
-            </div>
+          {/* Filtros */}
+          <section className="card filters-card">
+            <div className="filters-grid">
+              <div className="form-row">
+                <label className="label">Tipo de job</label>
+                <input
+                  className="input"
+                  placeholder="p.ej. forecast, etl..."
+                  value={query.tipo ?? ''}
+                  onChange={(e) => onChange('tipo')(e.target.value)}
+                />
+              </div>
 
-            <div className="form-row">
-              <label className="label">Estado</label>
-              <select
-                className="select"
-                value={query.estado ?? ''}
-                onChange={(e) => onChange('estado')(e.target.value)}
-              >
-                <option value="">Todos</option>
-                {ESTADOS.map((s) => <option key={s} value={s}>{s}</option>)}
-              </select>
-            </div>
-
-            <div className="form-row">
-              <label className="label">Desde</label>
-              <input
-                type="date"
-                className="input"
-                value={query.desde ?? ''}
-                onChange={(e) => onChange('desde')(e.target.value)}
-              />
-            </div>
-
-            <div className="form-row">
-              <label className="label">Hasta</label>
-              <input
-                type="date"
-                className="input"
-                value={query.hasta ?? ''}
-                onChange={(e) => onChange('hasta')(e.target.value)}
-              />
-            </div>
-
-            <div className="form-row">
-              <label className="label">&nbsp;</label>
-              <div className="filters-actions">
-                <button type="button" className="button" onClick={() => setQuery((q) => ({ ...q }))}>
-                  Aplicar filtros
-                </button>
-                <button
-                  type="button"
-                  className="button button-ghost"
-                  onClick={() => setQuery({ page: 1, pageSize: 50, tipo: '', estado: '', desde: '', hasta: '' })}
+              <div className="form-row">
+                <label className="label">Estado</label>
+                <select
+                  className="select"
+                  value={query.estado ?? ''}
+                  onChange={(e) => onChange('estado')(e.target.value)}
                 >
-                  Limpiar
-                </button>
+                  <option value="">Todos</option>
+                  {ESTADOS.map((s) => <option key={s} value={s}>{s}</option>)}
+                </select>
+              </div>
+
+              <div className="form-row">
+                <label className="label">Desde</label>
+                <input
+                  type="date"
+                  className="input"
+                  value={query.desde ?? ''}
+                  onChange={(e) => onChange('desde')(e.target.value)}
+                />
+              </div>
+
+              <div className="form-row">
+                <label className="label">Hasta</label>
+                <input
+                  type="date"
+                  className="input"
+                  value={query.hasta ?? ''}
+                  onChange={(e) => onChange('hasta')(e.target.value)}
+                />
               </div>
             </div>
-          </div>
-        </section>
 
-        <section style={{ marginTop: '1rem', width: '100%' }}>
-          <TablaJobs query={query} onQueryChange={setQuery} />
-        </section>
+            {/* Acciones abajo (fuera del grid), igual que Ventas */}
+            <div className="filters-actions">
+              <button
+                type="button"
+                className="button"
+                onClick={() => setQuery((q) => ({ ...q }))}
+              >
+                Aplicar filtros
+              </button>
+              <button
+                type="button"
+                className="button button-ghost"
+                onClick={() => setQuery({ page: 1, pageSize: 50, tipo: '', estado: '', desde: '', hasta: '' })}
+              >
+                Limpiar
+              </button>
+            </div>
+          </section>
+
+
+          <section style={{ marginTop: '1rem', width: '100%' }}>
+            <TablaJobs query={query} onQueryChange={setQuery} />
+          </section>
+        </div>
       </div>
-    </div>
+    </>
   );
 }

@@ -15,6 +15,12 @@
   padding: 1.5rem 1rem;
   display: grid;
   justify-items: center;
+
+  /* === Fondo igual a Sales (no se resetea al hacer scroll) === */
+  background: linear-gradient(135deg, var(--emerald-950), var(--emerald-900), var(--emerald-950));
+  background-attachment: fixed;
+  background-repeat: no-repeat;
+  background-size: cover;
 }
 
 /* Contenedor */
