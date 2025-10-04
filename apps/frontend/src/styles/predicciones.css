@@ -97,6 +97,14 @@
   margin: 0 auto;
 }
 
+/* ------ ANCHO CONSISTENTE EN TODOS LOS BLOQUES IMPORTANTES ------ */
+.predicciones-container > :where(.filters-card,.extra-card,.predicciones-ultimas){
+  width: 100%;
+  max-width: var(--content-max);
+  margin-left: auto;
+  margin-right: auto;
+}
+
 /* ---- Título y subtítulo ---- */
 .section-head{
   width: 100%;
@@ -115,6 +123,19 @@
   color: rgba(255,255,255,.95);
   font-size: 1.05rem;
   font-weight: 600;
+}
+
+/* ---- Subtítulos de SECCIÓN (centrados, fuera de cards) ---- */
+.subsection-title{
+  width: 100%;
+  max-width: var(--content-max);
+  margin: .25rem auto .25rem;
+  text-align: center;
+  color: var(--white);
+  font-weight: 900;
+  letter-spacing: .02em;
+  font-size: 1.15rem;
+  opacity: .95;
 }
 
 /* ---- Tarjetas del contenido ---- */
@@ -141,19 +162,21 @@
 /* .predicciones-container > .filters-card{ max-width: 68rem; } */
 
 
-/* ==========================================================================
-   TABLA (idéntica a Jobs/Ventas)
-   ========================================================================== */
+/* ========================================================================== */
+/* TABLA (idéntica a Jobs/Ventas)                                             */
+/* ========================================================================== */
 .table-card{ padding: 1rem; margin-top: 1rem; }
-.table-wrap{ width: 100%; overflow-x: auto; }
 
+/* ------ BLINDEO TABLA: que siempre se estire al 100% ------ */
+.table-card{ width: 100% !important; align-self: stretch !important; }
+
+.table-wrap{ width: 100%; overflow-x: auto; }
 .table{
   width: 100%;
   border-collapse: separate;
   border-spacing: 0;
   font-size: .95rem;
 }
-
 .table thead th{
   position: sticky;
   top: 0;
@@ -166,12 +189,10 @@
   border-bottom: 1px solid rgba(16,185,129,.22);
   text-align: left;
 }
-
 .table tbody td{
   padding: .85rem .95rem;
   border-bottom: 1px solid rgba(16,185,129,.14);
 }
-
 .table tbody tr:hover{ background: #f8fffc; }
 
 .mono{
@@ -212,15 +233,14 @@
 .pager-btn:hover{ background: #f3faf7; }
 
 
-/* ==========================================================================
-   STATUS BANNER (cargando / error) — sutil, sin tarjeta blanca
-   ========================================================================== */
+/* ========================================================================== */
+/* STATUS BANNER (cargando / error) — sutil, sin tarjeta blanca               */
+/* ========================================================================== */
 .status-banner{
-  /* ⬇️ clave para que NO se estire a todo el ancho */
-  align-self: flex-start;        /* ignora el align-items:stretch del contenedor */
-  display: inline-flex;          /* se achica al contenido */
-  width: auto;                   /* auto-anchura */
-  max-width: var(--content-max); /* por si el texto se hace larguísimo */
+  align-self: flex-start;      /* no se estira */
+  display: inline-flex;
+  width: auto;
+  max-width: var(--content-max);
 
   padding: .6rem .85rem;
   border-radius: .75rem;
@@ -228,50 +248,153 @@
   font-size: .9rem;
   line-height: 1.2;
   box-shadow: var(--shadow-soft-inset);
-  white-space: nowrap;           /* una sola línea; quitá esto si querés que corte */
+  white-space: nowrap;
 }
-
-/* Loading */
 .status--loading{
   border: 1px solid rgba(16,185,129,.35);
-  background: rgba(236,253,245,.10); /* emerald translúcido */
+  background: rgba(236,253,245,.10);
   color: var(--emerald-50);
 }
-
-/* Error */
 .status--error{
   border: 1px solid #fecaca;
-  background: rgba(244,63,94,.12);    /* rose translúcido */
+  background: rgba(244,63,94,.12);
   color: #ffe4e6;
 }
-
-/* Iconito/spinner */
-.status-icon{
-  display:inline-flex;
-  width: 16px; height: 16px;
-  align-items:center; justify-content:center;
-}
-
-/* Spinner CSS puro */
+.status-icon{ display:inline-flex; width:16px; height:16px; align-items:center; justify-content:center; }
 .spinner{
-  width: 16px; height: 16px;
-  border-radius: 999px;
-  border: 2px solid rgba(16,185,129,.35);
-  border-top-color: #10b981;
+  width:16px; height:16px; border-radius:999px;
+  border:2px solid rgba(16,185,129,.35); border-top-color:#10b981;
   animation: spin 1s linear infinite;
 }
 @keyframes spin{ to { transform: rotate(360deg); } }
-
-.status-text{ flex: 1; }
-
-/* Acción del banner (opcional) */
+.status-text{ flex:1; }
 .status-action{
-  padding: .35rem .6rem;
-  border-radius: .5rem;
-  border: 1px solid rgba(255,255,255,.25);
-  background: transparent;
-  color: inherit;
-  font-weight: 700;
-  cursor: pointer;
+  padding:.35rem .6rem; border-radius:.5rem;
+  border:1px solid rgba(255,255,255,.25); background:transparent;
+  color:inherit; font-weight:700; cursor:pointer;
 }
 .status-action:hover{ background: rgba(255,255,255,.12); }
+
+
+/* ========================================================================== */
+/* DATOS EXTRA (GRÁFICAS)                                                     */
+/* ========================================================================== */
+
+/* Subtítulo global exterior (ya definido con .subsection-title) */
+
+/* La tarjeta blanca de gráficas (mismo look de .card) */
+.extra-card{
+  width: 100%;
+  max-width: var(--content-max);
+  margin: 0 auto;
+  background: rgba(255,255,255,.96);
+  color: var(--emerald-950);
+  border: 1px solid var(--border);
+  border-radius: 1.5rem;
+  padding: 1rem;
+  box-shadow: var(--shadow);
+  backdrop-filter: blur(6px);
+}
+
+/* Subtítulo dentro de la tarjeta (línea superior separada) */
+.extra-subtitle{
+  margin: 0 0 .75rem;
+  font-size: .85rem;
+  color: rgba(6,78,59,.72);
+  padding-bottom: .5rem;
+  border-bottom: 1px dashed rgba(16,185,129,.25);
+}
+
+/* Grilla de gráficos: 1 col en mobile, 2 en >=768px */
+.charts-grid{
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 1rem;
+}
+@media (min-width: 768px){
+  .charts-grid{ grid-template-columns: 1fr 1fr; }
+}
+
+/* Tarjeta/slot para cada gráfico */
+.chart-card{
+  background: #fff;
+  border: 1px solid rgba(16,185,129,.18);
+  border-radius: 1rem;
+  padding: .75rem;
+  box-shadow: 0 8px 18px rgba(2,44,34,.06);
+  min-height: 320px;
+  display: flex;
+  flex-direction: column;
+}
+
+/* Título de cada chart (opcional) */
+.chart-title{
+  margin: 0 0 .5rem;
+  font-weight: 700;
+  font-size: .95rem;
+  color: var(--emerald-900);
+}
+
+/* Selector/controles dentro del bloque */
+.chart-controls{
+  display: flex; align-items: center; gap: .5rem; margin-bottom: .5rem;
+}
+.chart-label{
+  font-size: .75rem; color: rgba(6,78,59,.72); font-weight: 700; letter-spacing: .04em; text-transform: uppercase;
+}
+.chart-select{
+  padding: .4rem .6rem;
+  border-radius: .6rem;
+  border: 1px solid rgba(16,185,129,.25);
+  background: #fff;
+  color: var(--emerald-950);
+  outline: none;
+}
+.chart-select:focus{
+  border-color: #10b981;
+  box-shadow: 0 0 0 3px rgba(52,211,153,.25);
+}
+
+/* Estados/feedback dentro de la tarjeta */
+.chart-empty,
+.chart-error,
+.chart-loading{
+  border: 1px dashed rgba(16,185,129,.28);
+  background: #f7faf9;
+  color: #56756b;
+  border-radius: .9rem;
+  padding: .9rem;
+  font-size: .9rem;
+}
+
+/* Contenedor donde monta el gráfico */
+.chart-body{
+  flex: 1; min-height: 260px;
+  display: flex; align-items: center; justify-content: center;
+}
+
+/* =================== Ajustes visuales específicos =================== */
+/* Ocultar el header interno de "Últimas predicciones" dentro de la card */
+.predicciones-ultimas > .mb-3 h3{ display:none; }
+
+/* Quitar el “marco” negro de las gráficas (Recharts) SOLO en esta sección */
+.chart-card { 
+  border: 0 !important;             /* por si el slot del chart tuviera borde */
+}
+
+/* Recharts: líneas del borde del eje (el “marco”) */
+.chart-card .recharts-cartesian-axis-line,
+.chart-card .recharts-cartesian-axis-tick-line {
+  stroke: transparent !important;
+}
+
+/* Recharts: por si el grid dibuja una línea de borde */
+.chart-card .recharts-cartesian-grid line {
+  stroke: rgba(0,0,0,0.08);          /* o poné transparent si querés cero líneas */
+}
+
+/* Si aún ves una línea pegada al borde, mata la primera del grid */
+.chart-card .recharts-cartesian-grid-horizontal line:first-child,
+.chart-card .recharts-cartesian-grid-vertical   line:first-child {
+  stroke: transparent !important;
+}

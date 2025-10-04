@@ -47,10 +47,12 @@ export default function PrediccionesPage() {
           </p>
         </header>
 
-        {/* Últimas predicciones */}
+        {/* Sección: Últimas corridas */}
+        <h2 className="subsection-title">Últimas predicciones (del último job)</h2>
         <UltimasPredicciones />
 
-        {/* Filtros */}
+        {/* Sección: Búsqueda por SKU/fechas */}
+        <h2 className="subsection-title">Búsqueda por SKU/fechas</h2>
         <PrediccionesFilters />
 
         {/* Historial paginado (respeta filtros de la URL) */}
@@ -58,71 +60,60 @@ export default function PrediccionesPage() {
 
         {/* Si hay jobId en la URL, mostramos bloque especial */}
         {typeof jobId === 'number' && (
-          <div className="predicciones-job rounded-xl border border-white/10 bg-white/5 p-4">
-            <div className="mb-3 flex items-center justify-between">
-              <h3 className="text-lg font-semibold text-white">
-                Predicciones del Job #{jobId}
-              </h3>
-              <button
-                type="button"
-                onClick={clearJobId}
-                className="rounded-lg border border-white/15 px-3 py-1.5 text-xs font-medium text-emerald-100/90 hover:bg-white/10"
-              >
-                Limpiar Job
-              </button>
-            </div>
+          <>
+            <h2 className="subsection-title">Predicciones del Job #{jobId}</h2>
 
-            {loadingByJob ? (
-              <div className="text-emerald-100/80">Cargando…</div>
-            ) : errorByJob ? (
-              <div className="rounded-lg border border-rose-400/20 bg-rose-400/10 p-3 text-rose-100">
-                Error cargando las predicciones de este job.
-              </div>
-            ) : (byJob?.length ?? 0) === 0 ? (
-              <div className="text-emerald-100/80">Sin resultados para este job.</div>
-            ) : (
-              <div className="overflow-x-auto -mx-2 sm:mx-0">
-                <table className="min-w-full text-sm">
+            <section className="card table-card predicciones-job">
+              <div className="table-wrap">
+                <table className="table">
                   <thead>
-                    <tr className="border-b border-white/10 text-emerald-100/70">
-                      <th className="px-2 py-2 text-left">SKU</th>
-                      <th className="px-2 py-2 text-left">Fecha</th>
-                      <th className="px-2 py-2 text-right">Cantidad</th>
-                      <th className="px-2 py-2 text-left">Modelo</th>
-                      <th className="px-2 py-2 text-left">Versión</th>
-                      <th className="px-2 py-2 text-right">h</th>
-                      <th className="px-2 py-2 text-right">R²</th>
-                      <th className="px-2 py-2 text-right">RMSE</th>
-                      <th className="px-2 py-2 text-left">Generación</th>
+                    <tr>
+                      <th>SKU</th>
+                      <th>Fecha</th>
+                      <th style={{ textAlign:'right' }}>Cantidad</th>
+                      <th>Modelo</th>
+                      <th>Versión</th>
+                      <th style={{ textAlign:'right' }}>h</th>
+                      <th style={{ textAlign:'right' }}>R²</th>
+                      <th style={{ textAlign:'right' }}>RMSE</th>
+                      <th>Generación</th>
                     </tr>
                   </thead>
-                  <tbody className="divide-y divide-white/10 text-emerald-100/90">
+                  <tbody>
                     {(byJob ?? []).map((p) => (
                       <tr key={p.id}>
-                        <td className="px-2 py-2">
-                          <span className="inline-flex rounded bg-white/10 px-2 py-0.5 text-xs">{p.sku}</span>
-                        </td>
-                        <td className="px-2 py-2">{p.fechaPredicha}</td>
-                        <td className="px-2 py-2 text-right">{p.cantidadPredicha}</td>
-                        <td className="px-2 py-2">{p.modelo}</td>
-                        <td className="px-2 py-2">{p.versionModelo}</td>
-                        <td className="px-2 py-2 text-right">{p.horizonte}</td>
-                        <td className="px-2 py-2 text-right">{p.r2 ?? '-'}</td>
-                        <td className="px-2 py-2 text-right">{p.rmse ?? '-'}</td>
-                        <td className="px-2 py-2">{p.tsGeneracion}</td>
+                        <td className="mono">{p.sku}</td>
+                        <td>{p.fechaPredicha}</td>
+                        <td style={{ textAlign:'right' }}>{p.cantidadPredicha}</td>
+                        <td>{p.modelo}</td>
+                        <td>{p.versionModelo}</td>
+                        <td style={{ textAlign:'right' }}>{p.horizonte}</td>
+                        <td style={{ textAlign:'right' }}>{p.r2 ?? '-'}</td>
+                        <td style={{ textAlign:'right' }}>{p.rmse ?? '-'}</td>
+                        <td>{p.tsGeneracion}</td>
                       </tr>
                     ))}
                   </tbody>
                 </table>
               </div>
-            )}
-          </div>
+
+              <div style={{ marginTop: '.75rem', display:'flex', justifyContent:'flex-end' }}>
+                <button
+                  type="button"
+                  onClick={clearJobId}
+                  className="pager-btn"
+                  title="Limpiar Job"
+                >
+                  Limpiar Job
+                </button>
+              </div>
+            </section>
+          </>
         )}
 
-        {/* Datos extra: gráficas */}
-        <div className="rounded-xl border border-white/10 bg-white/5 p-4">
-          <DatosExtra />
-        </div>
+        {/* Sección: Datos extra */}
+        <h2 className="subsection-title">Datos extra (gráficas)</h2>
+        <DatosExtra />
       </div>
     </div>
   );

@@ -19,7 +19,7 @@ export default function ProjectedSalesChart({ data, sku }: Props) {
   };
 
   return (
-    <div className="rounded-xl border border-white/10 bg-white/5 p-4">
+    <div className="rounded-xl **border border-white/10** bg-white/5 p-4">
       <h4 className="text-base font-semibold text-white">Ventas proyectadas</h4>
       <p className="mb-3 text-xs text-emerald-100/70">
         Serie mensual predicha (un valor por mes). Si hay varias corridas/modelos, se prioriza COMBINADA y, si no, la más reciente.

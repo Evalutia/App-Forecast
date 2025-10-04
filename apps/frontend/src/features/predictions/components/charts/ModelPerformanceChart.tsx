@@ -22,8 +22,7 @@ export default function ModelPerformanceChart({ data }: Props) {
   };
 
   return (
-    <div className="rounded-xl border border-white/10 bg-white/5 p-4">
-      <h4 className="text-base font-semibold text-white">Rendimiento por modelo</h4>
+    <div className="rounded-xl **border border-white/10** bg-white/5 p-4">
       <p className="mb-3 text-xs text-emerald-100/70">
         Promedio de R² según las predicciones listadas. (Cuanto más alto, mejor).
       </p>
