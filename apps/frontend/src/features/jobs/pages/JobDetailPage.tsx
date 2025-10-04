@@ -13,7 +13,7 @@ export default function JobDetailPage() {
             <h1 className="section-title">Detalle del Job</h1>
             <p className="section-subtitle">Información y warnings de la ejecución.</p>
           </div>
-          <Link to="/jobs" className="button button-ghost">← Volver</Link>
+          <Link to="/jobs" className="btn btn--sm">← Volver</Link>
         </header>
 
         {Number.isNaN(jobId)
