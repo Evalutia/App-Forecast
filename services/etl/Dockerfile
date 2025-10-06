@@ -14,20 +14,39 @@ RUN apt-get update && apt-get install -y \
 
 RUN ln -snf /usr/share/zoneinfo/$TZ /etc/localtime && echo $TZ > /etc/timezone
 
-# ---- Pentaho PDI CE 9.4 (parametrizable) ----
+# ---- Pentaho PDI CE 9.4 con fallback de mirrors ----
 ARG PDI_VER=9.4.0.0-343
 ARG PDI_ZIP=pdi-ce-${PDI_VER}.zip
+ARG PDI_URL=""   # opcional: pasar una URL propia en build
 ENV PENTAHO_HOME=/opt/pentaho
-RUN mkdir -p ${PENTAHO_HOME} \
- && curl -fL "https://sourceforge.net/projects/pentaho/files/Pentaho-${PDI_VER}/${PDI_ZIP}/download" -o /tmp/pdi.zip \
- && unzip -q /tmp/pdi.zip -d ${PENTAHO_HOME} \
- && rm /tmp/pdi.zip
+
+RUN set -eu; \
+    mkdir -p "${PENTAHO_HOME}"; \
+    urls=""; \
+    [ -n "${PDI_URL:-}" ] && urls="${PDI_URL}"; \
+    urls="${urls} \
+      https://repo.kalamangga.net/database/pentaho/${PDI_ZIP} \
+      https://downloads.sourceforge.net/project/pentaho/Pentaho-${PDI_VER}/${PDI_ZIP} \
+      https://sourceforge.net/projects/pentaho/files/Pentaho-${PDI_VER}/${PDI_ZIP}/download \
+    "; \
+    echo "[PDI] Intentando descargar ${PDI_ZIP}..."; \
+    success=0; \
+    for u in $urls; do \
+      echo " - GET $u"; \
+      if curl -fL --retry 3 --retry-delay 3 --connect-timeout 20 -o /tmp/pdi.zip "$u"; then success=1; break; fi; \
+    done; \
+    [ "$success" -eq 1 ] && [ -s /tmp/pdi.zip ]; \
+    unzip -t /tmp/pdi.zip >/dev/null; \
+    unzip -q /tmp/pdi.zip -d "${PENTAHO_HOME}"; \
+    rm -f /tmp/pdi.zip
+
 ENV PATH="${PENTAHO_HOME}/data-integration:${PATH}"
+RUN chmod +x ${PENTAHO_HOME}/data-integration/*.sh || true
 
 # ---- MySQL Connector/J 8.x (compatible MySQL 8) ----
 ARG MYSQL_JVER=8.4.0
 RUN curl -fsSL -o /opt/pentaho/data-integration/lib/mysql-connector-j-${MYSQL_JVER}.jar \
-    https://repo1.maven.org/maven2/com/mysql/mysql-connector-j/${MYSQL_JVER}/mysql-connector-j-${MYSQL_JVER}.jar \
+    "https://repo1.maven.org/maven2/com/mysql/mysql-connector-j/${MYSQL_JVER}/mysql-connector-j-${MYSQL_JVER}.jar" \
  && rm -f /opt/pentaho/data-integration/lib/mysql-connector-java-*.jar || true
 
 # ---- App ----
