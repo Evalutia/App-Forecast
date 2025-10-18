@@ -42,7 +42,7 @@ export default function PrediccionesTable({ className }: Props) {
   const setPageSize = (nextPageSize: number) => {
     const next = new URLSearchParams(sp);
     next.set('pageSize', String(nextPageSize));
-    next.set('page', '1');
+    next.set('page', '1'); // reset a la primera página
     setSp(next, { replace: true });
   };
 
@@ -121,7 +121,7 @@ export default function PrediccionesTable({ className }: Props) {
         </table>
       </div>
 
-      {/* Paginador igual a Ventas */}
+      {/* Paginador */}
       <div className="pager">
         <div>Página {page} de {totalPages}</div>
         <div className="pager-buttons">
@@ -142,13 +142,13 @@ export default function PrediccionesTable({ className }: Props) {
         </div>
       </div>
 
-      {/* selector de tamaño como en tu versión anterior (si lo querés dejar) */}
-      {/* <div style={{ marginTop: '.5rem' }} className="muted">
+      {/* Selector de tamaño (mostrado como en las otras secciones) */}
+      <div style={{ marginTop: '.5rem' }} className="muted">
         Filas por página:&nbsp;
         <select value={pageSize} onChange={(e) => setPageSize(Number(e.target.value))}>
-          {[10,20,50,100].map(n => <option key={n} value={n}>{n}</option>)}
+          {[10, 20, 50, 100].map(n => <option key={n} value={n}>{n}</option>)}
         </select>
-      </div> */}
+      </div>
     </section>
   );
 }
