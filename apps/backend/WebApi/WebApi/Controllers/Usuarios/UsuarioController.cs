@@ -98,11 +98,10 @@ namespace WebApi.Controllers.Usuarios
     {
       var cambios = new WebApi.Models.Usuario
       {
-        HashPassword = dto.Contrasena,
         Rol = dto.Rol
       };
 
-      var u = _usuarioService.Update(id, cambios);
+      var u = _usuarioService.Update(id, cambios, dto.Contrasena);
 
       return Ok(new UsuarioOutDto(
           id: (int)u.Id,
