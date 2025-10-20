@@ -47,6 +47,12 @@ RUN chmod +x ${PENTAHO_HOME}/data-integration/*.sh || true
 COPY services/etl/run_ofelia.sh /usr/local/bin/run_ofelia.sh
 RUN chmod +x /usr/local/bin/run_ofelia.sh
 
+# Normalizar EOL (CRLF -> LF) en scripts y jobs de Pentaho
+RUN apt-get update && apt-get install -y dos2unix && \
+    find /app -type f \( -name "*.sh" -o -name "*.py" -o -name "*.ktr" -o -name "*.kjb" -o -name "*.sql" \) -print0 | xargs -0 dos2unix && \
+    chmod +x /usr/local/bin/run_ofelia.sh || true && \
+    find /app -type f -name "*.sh" -exec chmod +x {} \; || true
+
 # ---- Python deps predict.py ----
 RUN python3 -m pip install --upgrade pip setuptools wheel \
  && pip3 install --no-cache-dir -r services/python-worker/requirements.txt

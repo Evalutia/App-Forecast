@@ -91,7 +91,7 @@ MYSQL_PORT="${MYSQL_PORT}"; export MYSQL_PORT
 sed -i 's/\r$//' /app/services/etl/run_etl_daily.sh 2>/dev/null || true
 chmod +x /app/services/etl/run_etl_daily.sh || true
 echo "[JOB][RUN EXTRACT] Lanzando run_etl_daily.sh ..."
-/app/services/etl/run_etl_daily.sh
+/bin/bash /app/services/etl/run_etl_daily.sh
 echo "[JOB][RUN EXTRACT] Finalizado OK."
       ]]></script>
       <arg_from_previous>N</arg_from_previous>
