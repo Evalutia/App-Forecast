@@ -1,61 +1,51 @@
-# ---- Base Java 11 + Python 3.10 (Ubuntu 22.04) ----
+# ---- Base Java 11 + Ubuntu 22.04 ----
 FROM ubuntu:22.04
 
 ENV DEBIAN_FRONTEND=noninteractive \
-    TZ=UTC \
+    TZ=America/Montevideo \
     LANG=C.UTF-8 \
     LC_ALL=C.UTF-8
 
 RUN apt-get update && apt-get install -y \
-    openjdk-11-jre-headless python3 python3-pip \
-    curl unzip ca-certificates tzdata cron locales build-essential \
+    openjdk-11-jre-headless curl unzip ca-certificates tzdata locales \
+    python3 python3-pip \
  && locale-gen C.UTF-8 \
  && rm -rf /var/lib/apt/lists/*
 
-RUN ln -snf /usr/share/zoneinfo/$TZ /etc/localtime && echo $TZ > /etc/timezone
-
-# ---- Pentaho PDI CE 9.4 con fallback de mirrors ----
+# ---- Pentaho PDI CE 9.4 ----
 ARG PDI_VER=9.4.0.0-343
 ARG PDI_ZIP=pdi-ce-${PDI_VER}.zip
-ARG PDI_URL=""   # opcional: pasar una URL propia en build
+ARG PDI_URL=""
 ENV PENTAHO_HOME=/opt/pentaho
-
 RUN set -eu; \
     mkdir -p "${PENTAHO_HOME}"; \
-    urls=""; \
-    [ -n "${PDI_URL:-}" ] && urls="${PDI_URL}"; \
+    urls=""; [ -n "${PDI_URL:-}" ] && urls="${PDI_URL}"; \
     urls="${urls} \
       https://repo.kalamangga.net/database/pentaho/${PDI_ZIP} \
       https://downloads.sourceforge.net/project/pentaho/Pentaho-${PDI_VER}/${PDI_ZIP} \
       https://sourceforge.net/projects/pentaho/files/Pentaho-${PDI_VER}/${PDI_ZIP}/download \
     "; \
-    echo "[PDI] Intentando descargar ${PDI_ZIP}..."; \
-    success=0; \
-    for u in $urls; do \
-      echo " - GET $u"; \
+    echo "Descargando ${PDI_ZIP}..."; success=0; \
+    for u in $urls; do echo " - $u"; \
       if curl -fL --retry 3 --retry-delay 3 --connect-timeout 20 -o /tmp/pdi.zip "$u"; then success=1; break; fi; \
-    done; \
-    [ "$success" -eq 1 ] && [ -s /tmp/pdi.zip ]; \
-    unzip -t /tmp/pdi.zip >/dev/null; \
-    unzip -q /tmp/pdi.zip -d "${PENTAHO_HOME}"; \
-    rm -f /tmp/pdi.zip
+    done; [ "$success" -eq 1 ] && [ -s /tmp/pdi.zip ]; \
+    unzip -t /tmp/pdi.zip >/dev/null; unzip -q /tmp/pdi.zip -d "${PENTAHO_HOME}"; rm -f /tmp/pdi.zip
 
 ENV PATH="${PENTAHO_HOME}/data-integration:${PATH}"
-RUN chmod +x ${PENTAHO_HOME}/data-integration/*.sh || true
 
-# ---- MySQL Connector/J 8.x (compatible MySQL 8) ----
+# ---- MySQL Connector/J 8.x ----
 ARG MYSQL_JVER=8.4.0
-RUN curl -fsSL -o /opt/pentaho/data-integration/lib/mysql-connector-j-${MYSQL_JVER}.jar \
+RUN curl -fsSL -o ${PENTAHO_HOME}/data-integration/lib/mysql-connector-j-${MYSQL_JVER}.jar \
     "https://repo1.maven.org/maven2/com/mysql/mysql-connector-j/${MYSQL_JVER}/mysql-connector-j-${MYSQL_JVER}.jar" \
- && rm -f /opt/pentaho/data-integration/lib/mysql-connector-java-*.jar || true
+ && rm -f ${PENTAHO_HOME}/data-integration/lib/mysql-connector-java-*.jar || true
 
-# ---- App ----
+# ---- App (jobs .kjb/.ktr y configs) ----
 WORKDIR /app
 COPY . /app
+RUN chmod +x ${PENTAHO_HOME}/data-integration/*.sh || true
 
-# Shells con finales de línea correctos
-RUN sed -i 's/\r$//' /app/services/etl/run_etl_daily.sh \
- && chmod +x /app/services/etl/run_etl_daily.sh
+COPY services/etl/run_ofelia.sh /usr/local/bin/run_ofelia.sh
+RUN chmod +x /usr/local/bin/run_ofelia.sh
 
 # ---- Python deps predict.py ----
 RUN python3 -m pip install --upgrade pip setuptools wheel \
@@ -64,11 +54,5 @@ RUN python3 -m pip install --upgrade pip setuptools wheel \
 # Asegurar ejecución scripts de PDI
 RUN chmod +x ${PENTAHO_HOME}/data-integration/*.sh || true
 
-# ---- Entrypoint/cron ----
-COPY services/etl/entrypoint.sh /entrypoint.sh
-RUN sed -i 's/\r$//' /entrypoint.sh && chmod +x /entrypoint.sh
-
-# Logs
-RUN mkdir -p /app/data && touch /app/data/etl_job.log
-
-CMD ["/entrypoint.sh"]
+# Mantener contenedor vivo para que Ofelia ejecute kitchen.sh dentro
+CMD ["bash", "-lc", "echo 'etl idle, waiting for Ofelia…'; tail -f /dev/null"]

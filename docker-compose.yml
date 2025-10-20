@@ -108,12 +108,25 @@ services:
     env_file:
       - .env
     environment:
-      TZ: ${TZ}
+      - TZ=America/Montevideo
     depends_on:
       mysql:
         condition: service_healthy
     networks:
       - evalutia_net
+    restart: unless-stopped
+
+
+  ofelia:
+    image: mcuadros/ofelia:latest
+    container_name: evalutia-ofelia
+    command: daemon --config=/etc/ofelia/config.ini
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - ./ofelia.ini:/etc/ofelia/config.ini:ro
+      - /etc/localtime:/etc/localtime:ro
+    environment:
+      - TZ=America/Montevideo
     restart: unless-stopped
 
 networks:
