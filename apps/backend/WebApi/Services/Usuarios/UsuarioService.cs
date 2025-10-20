@@ -43,22 +43,37 @@ namespace Services.Usuarios
       return entity;
     }
 
-    public Usuario Update(int id, Usuario cambios)
+    public Usuario Update(int id, Usuario cambios, string currentPasswordPlain)
     {
       ArgumentNullException.ThrowIfNull(cambios);
 
-      Usuario current = _repo.GetById(id) ?? throw new KeyNotFoundException("Usuario no encontrado");
+      var current = _repo.GetById(id)
+          ?? throw new KeyNotFoundException("Usuario no encontrado");
 
-      var tmp = new Usuario { Correo = current.Correo, HashPassword = cambios.HashPassword, Rol = cambios.Rol };
+      if (string.IsNullOrWhiteSpace(currentPasswordPlain) ||
+          string.IsNullOrEmpty(current.HashPassword) ||
+          !PasswordHasher.Verify(currentPasswordPlain, current.HashPassword))
+      {
+        throw new InvalidOperationException("Credenciales inválidas");
+      }
 
-      UsuarioValidator.Validacion(tmp);
+      var nuevoRol = cambios.Rol;
+      var tmp = new Usuario { Correo = current.Correo, Rol = nuevoRol };
 
-      current.HashPassword = PasswordHasher.Hash(cambios.HashPassword);
-      current.Rol = cambios.Rol;
+      if (string.IsNullOrEmpty(cambios.Rol)) throw new InvalidOperationException("Rol inválido");
 
-      _repo.Update(current);
+      var ok = new[] { "administrador", "duenoDeEmpresa" }.Contains(cambios.Rol, StringComparer.OrdinalIgnoreCase);
+      if (!ok) throw new InvalidOperationException("Rol inválido");
+
+      if (!string.Equals(current.Rol, nuevoRol, StringComparison.Ordinal))
+      {
+        current.Rol = nuevoRol;
+        _repo.Update(current);
+      }
+
       return current;
     }
+
 
     public Usuario GetById(int id)
     {
