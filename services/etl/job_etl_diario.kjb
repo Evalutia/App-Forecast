@@ -1,0 +1,191 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<job>
+  <name>ETL Diario Ventas</name>
+  <description>Job diario: SOAP -> staging -> upsert ventas_historicas -> predict.py -> limpiar staging</description>
+
+  <parameters>
+    <parameter><name>WS_URL</name><default_value>${WS_URL}</default_value></parameter>
+    <parameter><name>DATE_FMT</name><default_value>dmy</default_value></parameter>
+    <parameter><name>ID_EMPRESA</name><default_value>1</default_value></parameter>
+    <parameter><name>S_DEPOSITOS</name><default_value></default_value></parameter>
+    <parameter><name>GROUPS</name><default_value>75</default_value></parameter>
+    <parameter><name>FORCE_START</name><default_value></default_value></parameter>
+    <parameter><name>FORCE_END</name><default_value></default_value></parameter>
+
+    <parameter><name>MYSQL_HOST</name><default_value>${MYSQL_HOST}</default_value></parameter>
+    <parameter><name>MYSQL_DB</name><default_value>${MYSQL_DB}</default_value></parameter>
+    <parameter><name>MYSQL_USER</name><default_value>${MYSQL_USER}</default_value></parameter>
+    <parameter><name>MYSQL_PASSWORD</name><default_value>${MYSQL_PASSWORD}</default_value></parameter>
+    <parameter><name>MYSQL_PORT</name><default_value>${MYSQL_PORT}</default_value></parameter>
+
+    <parameter><name>PREDICT_PERIODS</name><default_value>14</default_value></parameter>
+    <parameter><name>PREDICT_MODEL_SET</name><default_value>classic</default_value></parameter>
+    <parameter><name>PREDICT_VERSION</name><default_value>1</default_value></parameter>
+
+    <parameter><name>LAST_TABLE</name><default_value>ventas_historicas_stage</default_value></parameter>
+  </parameters>
+
+  <connection>
+    <name>MYSQL_EVALUTIA</name>
+    <server>${MYSQL_HOST}</server>
+    <type>MYSQL</type>
+    <access>Native</access>
+    <database>${MYSQL_DB}</database>
+    <port>${MYSQL_PORT}</port>
+    <username>${MYSQL_USER}</username>
+    <password>${MYSQL_PASSWORD}</password>
+    <using_unique_connections>N</using_unique_connections>
+    <attributes>
+      <attribute><code>EXTRA_OPTION_MYSQL.useSSL</code><attribute>false</attribute></attribute>
+      <attribute><code>EXTRA_OPTION_MYSQL.allowPublicKeyRetrieval</code><attribute>true</attribute></attribute>
+      <attribute><code>EXTRA_OPTION_MYSQL.useUnicode</code><attribute>true</attribute></attribute>
+      <attribute><code>EXTRA_OPTION_MYSQL.characterEncoding</code><attribute>utf8</attribute></attribute>
+    </attributes>
+  </connection>
+
+  <entries>
+    <entry>
+      <name>START</name>
+      <type>SPECIAL</type>
+      <start>Y</start>
+      <repeat>N</repeat>
+      <schedulerType>0</schedulerType>
+      <xloc>64</xloc><yloc>64</yloc><draw>Y</draw>
+    </entry>
+
+    <!-- TRUNCATE INICIAL -> DELETE -->
+    <entry>
+      <name>TRUNCATE STAGE (start)</name>
+      <type>SQL</type>
+      <connection>MYSQL_EVALUTIA</connection>
+      <sql><![CDATA[
+DELETE FROM ventas_historicas_stage;
+      ]]></sql>
+      <send_one_statement>Y</send_one_statement>
+      <xloc>240</xloc><yloc>64</yloc><draw>Y</draw>
+    </entry>
+
+    <!-- EXTRACT vía shell POSIX -->
+    <entry>
+      <name>RUN EXTRACT (bash)</name>
+      <type>SHELL</type>
+      <filename>/bin/sh</filename>
+      <work_directory>${Internal.Entry.Current.Directory}</work_directory>
+      <arguments><argument>-c</argument></arguments>
+      <insertScript>Y</insertScript>
+      <script><![CDATA[
+# POSIX sh
+set -eu
+WS_URL="${WS_URL}"; export WS_URL
+DATE_FMT="${DATE_FMT}"; export DATE_FMT
+ID_EMPRESA="${ID_EMPRESA}"; export ID_EMPRESA
+S_DEPOSITOS="${S_DEPOSITOS}"; export S_DEPOSITOS
+GROUPS="${GROUPS}"; export GROUPS
+[ -n "${FORCE_START:-}" ] && { FORCE_START="${FORCE_START}"; export FORCE_START; } || true
+[ -n "${FORCE_END:-}" ] && { FORCE_END="${FORCE_END}"; export FORCE_END; } || true
+MYSQL_HOST="${MYSQL_HOST}"; export MYSQL_HOST
+MYSQL_DB="${MYSQL_DB}"; export MYSQL_DB
+MYSQL_USER="${MYSQL_USER}"; export MYSQL_USER
+MYSQL_PASSWORD="${MYSQL_PASSWORD}"; export MYSQL_PASSWORD
+MYSQL_PORT="${MYSQL_PORT}"; export MYSQL_PORT
+sed -i 's/\r$//' /app/services/etl/run_etl_daily.sh 2>/dev/null || true
+chmod +x /app/services/etl/run_etl_daily.sh || true
+echo "[JOB][RUN EXTRACT] Lanzando run_etl_daily.sh ..."
+/bin/bash /app/services/etl/run_etl_daily.sh
+echo "[JOB][RUN EXTRACT] Finalizado OK."
+      ]]></script>
+      <arg_from_previous>N</arg_from_previous>
+      <exec_per_row>N</exec_per_row>
+      <set_logfile>N</set_logfile>
+      <wait>Y</wait>
+      <fail_when_not_success>Y</fail_when_not_success>
+      <xloc>480</xloc><yloc>64</yloc><draw>Y</draw>
+    </entry>
+
+    <!-- MERGE STAGING -> VENTAS (sin ${MYSQL_DB} en SQL) -->
+    <entry>
+      <name>MERGE STAGING -> VENTAS</name>
+      <type>SQL</type>
+      <connection>MYSQL_EVALUTIA</connection>
+      <sql><![CDATA[
+/* requiere UNIQUE(fecha, sku) en ventas_historicas */
+INSERT INTO ventas_historicas (fecha, sku, cantidad, ts_carga, fuente)
+SELECT DATE(s.fecha),
+       TRIM(s.sku),
+       CAST(s.cantidad AS DECIMAL(12,3)),
+       NOW(6),
+       COALESCE(s.fuente,'ws_consstockventa')
+FROM ventas_historicas_stage s
+WHERE s.sku IS NOT NULL
+ON DUPLICATE KEY UPDATE
+  cantidad = VALUES(cantidad),
+  ts_carga = VALUES(ts_carga),
+  fuente   = VALUES(fuente);
+      ]]></sql>
+      <send_one_statement>Y</send_one_statement>
+      <xloc>720</xloc><yloc>64</yloc><draw>Y</draw>
+    </entry>
+
+    <!-- PREDICT -->
+    <entry>
+      <name>RUN PREDICT.PY</name>
+      <type>SHELL</type>
+      <filename>/bin/sh</filename>
+      <work_directory>${Internal.Entry.Current.Directory}</work_directory>
+      <arguments><argument>-c</argument></arguments>
+      <insertScript>Y</insertScript>
+      <script><![CDATA[
+set -eu
+echo "[JOB][PREDICT] Ejecutando predict.py ..."
+python3 /app/services/python-worker/predict.py \
+  --input-source mysql \
+  --mysql-host="${MYSQL_HOST}" \
+  --mysql-port="${MYSQL_PORT}" \
+  --mysql-db="${MYSQL_DB}" \
+  --mysql-user="${MYSQL_USER}" \
+  --mysql-pass="${MYSQL_PASSWORD}" \
+  --periods="6" \
+  --version="mvp-001"
+echo "[JOB][PREDICT] Finalizado OK."
+      ]]></script>
+      <arg_from_previous>N</arg_from_previous>
+      <exec_per_row>N</exec_per_row>
+      <set_logfile>N</set_logfile>
+      <wait>Y</wait>
+      <fail_when_not_success>Y</fail_when_not_success>
+      <xloc>960</xloc><yloc>64</yloc><draw>Y</draw>
+    </entry>
+
+    <!-- TRUNCATE FINAL -> DELETE -->
+    <entry>
+      <name>TRUNCATE STAGE (end)</name>
+      <type>SQL</type>
+      <connection>MYSQL_EVALUTIA</connection>
+      <sql><![CDATA[
+DELETE FROM ventas_historicas_stage;
+      ]]></sql>
+      <send_one_statement>Y</send_one_statement>
+      <xloc>1200</xloc><yloc>64</yloc><draw>Y</draw>
+    </entry>
+
+    <entry>
+      <name>SUCCESS</name>
+      <type>SPECIAL</type>
+      <success>Y</success>
+      <xloc>1440</xloc><yloc>64</yloc><draw>Y</draw>
+    </entry>
+  </entries>
+
+  <hops>
+    <hop><from>START</from><to>TRUNCATE STAGE (start)</to><enabled>Y</enabled><evaluation>Y</evaluation><unconditional>Y</unconditional></hop>
+    <hop><from>TRUNCATE STAGE (start)</from><to>RUN EXTRACT (bash)</to><enabled>Y</enabled><evaluation>Y</evaluation><unconditional>Y</unconditional></hop>
+    <hop><from>RUN EXTRACT (bash)</from><to>MERGE STAGING -> VENTAS</to><enabled>Y</enabled><evaluation>Y</evaluation><unconditional>Y</unconditional></hop>
+    <hop><from>MERGE STAGING -> VENTAS</from><to>RUN PREDICT.PY</to><enabled>Y</enabled><evaluation>Y</evaluation><unconditional>Y</unconditional></hop>
+    <hop><from>RUN PREDICT.PY</from><to>TRUNCATE STAGE (end)</to><enabled>Y</enabled><evaluation>Y</evaluation><unconditional>Y</unconditional></hop>
+    <hop><from>TRUNCATE STAGE (end)</from><to>SUCCESS</to><enabled>Y</enabled><evaluation>Y</evaluation><unconditional>Y</unconditional></hop>
+  </hops>
+
+  <job_parameters>
+    <pass_all_parameters>Y</pass_all_parameters>
+  </job_parameters>
+</job>

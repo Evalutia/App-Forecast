@@ -1,4 +1,0 @@
-pandas
-SQLAlchemy
-mysql-connector-python
-python-dotenv

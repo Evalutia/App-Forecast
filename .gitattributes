@@ -1,0 +1,6 @@
+# Fuerza fin de línea LF en scripts y recursos de Pentaho
+*.sh  text eol=lf
+*.py  text eol=lf
+*.ktr text eol=lf
+*.kjb text eol=lf
+*.sql text eol=lf
