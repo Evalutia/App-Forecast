@@ -1,3 +1,4 @@
+// apps/frontend/src/apps/predicciones/components/DatosExtra.tsx
 import { useMemo, useState, useEffect } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { usePrediccionesSearch } from '../hooks/usePredicciones';
@@ -14,22 +15,24 @@ function getParam(sp: URLSearchParams, k: string) {
 export default function DatosExtra() {
   const [sp] = useSearchParams();
 
-  const params: PrediccionSearchParams = useMemo(() => ({
-    sku: getParam(sp, 'sku'),
+  // ---- CARGA 1: dataset amplio para combo + rendimiento por modelo ----
+  const paramsListado: PrediccionSearchParams = useMemo(() => ({
+    sku:    getParam(sp, 'sku'),
     modelo: getParam(sp, 'modelo'),
-    desde: getParam(sp, 'desde'),
-    hasta: getParam(sp, 'hasta'),
+    desde:  getParam(sp, 'desde'),
+    hasta:  getParam(sp, 'hasta'),
     page: 1,
-    pageSize: 200,
+    pageSize: 500, // alto para evitar quedarnos cortos
+    // ultimoJob: true, // usa esto si tu backend lo soporta como default
   }), [sp]);
 
-  const { data, isLoading, isError } = usePrediccionesSearch(params);
-  const items = data?.items ?? [];
+  const { data: dataListado, isLoading, isError } = usePrediccionesSearch(paramsListado);
+  const itemsListado = dataListado?.items ?? [];
 
   // SKUs únicos (normalizados a "base")
   const skuSet = useMemo(
-    () => Array.from(new Set(items.map(p => getSkuBase(p.sku)))),
-    [items]
+    () => Array.from(new Set(itemsListado.map(p => getSkuBase(p.sku)))),
+    [itemsListado]
   );
 
   // SKU que viene en la URL (si viene)
@@ -41,8 +44,7 @@ export default function DatosExtra() {
   // Selección actual para el gráfico derecho
   const [skuSel, setSkuSel] = useState<string | undefined>(undefined);
 
-  // ✅ Inicialización (solo cuando cambian los datos/filtros o la URL),
-  // no dependemos de "skuSel" para NO pisar la elección del usuario.
+  // Inicialización de selección
   useEffect(() => {
     if (skuSet.length === 0) {
       setSkuSel(undefined);
@@ -53,14 +55,30 @@ export default function DatosExtra() {
         (urlSkuBase && skuSet.includes(urlSkuBase)) ? urlSkuBase : skuSet[0];
       setSkuSel(preferred);
     }
-  }, [skuSet, urlSkuBase]); // <-- sin skuSel
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [skuSet, urlSkuBase]);
 
-  // ✅ Si la selección actual deja de existir por un cambio de filtros, corregimos.
+  // Si la selección deja de existir por cambio de filtros, corregimos
   useEffect(() => {
     if (skuSel && !skuSet.includes(skuSel)) {
       setSkuSel(skuSet[0] ?? undefined);
     }
   }, [skuSet, skuSel]);
+
+  // ---- CARGA 2: dataset focalizado para la serie del SKU ----
+  // Evitamos llamar “sin SKU” pasando un valor imposible para que el backend devuelva vacío.
+  const paramsSku: PrediccionSearchParams = useMemo(() => ({
+    sku: skuSel ?? '__skip__',
+    page: 1,
+    pageSize: 2000, // grande para cubrir todos los meses/modelos del SKU
+    // ultimoJob: true, // si aplica en tu backend
+  }), [skuSel]);
+
+  const { data: dataSku } = usePrediccionesSearch(paramsSku);
+  const itemsSku = useMemo(
+    () => (skuSel ? (dataSku?.items ?? []) : []),
+    [dataSku, skuSel]
+  );
 
   return (
     <section className="extra-card">
@@ -73,19 +91,19 @@ export default function DatosExtra() {
         <div className="chart-loading">Cargando…</div>
       ) : isError ? (
         <div className="chart-error">Error cargando los datos para las gráficas.</div>
-      ) : items.length === 0 ? (
+      ) : itemsListado.length === 0 ? (
         <div className="chart-empty">Sin datos para graficar con los filtros actuales.</div>
       ) : (
         <div className="charts-grid">
-          {/* Rendimiento por modelo */}
+          {/* Rendimiento por modelo (dataset amplio) */}
           <div className="chart-card">
             <h4 className="chart-title">Rendimiento por modelo</h4>
             <div className="chart-body">
-              <ModelPerformanceChart data={items} />
+              <ModelPerformanceChart data={itemsListado} />
             </div>
           </div>
 
-          {/* Ventas proyectadas por SKU */}
+          {/* Ventas proyectadas por SKU (dataset focalizado del SKU) */}
           <div className="chart-card">
             <div className="chart-controls">
               <span className="chart-label">SKU</span>
@@ -101,7 +119,13 @@ export default function DatosExtra() {
             </div>
             <div className="chart-body">
               {skuSel ? (
-                <ProjectedSalesChart data={items} sku={skuSel} />
+                itemsSku.length > 0 ? (
+                  <ProjectedSalesChart data={itemsSku} sku={skuSel} />
+                ) : (
+                  <div className="chart-empty" style={{ width: '100%' }}>
+                    No hay suficientes datos del SKU seleccionado.
+                  </div>
+                )
               ) : (
                 <div className="chart-empty" style={{ width: '100%' }}>
                   No hay SKUs disponibles para graficar.
