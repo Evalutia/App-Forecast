@@ -305,96 +305,100 @@
   border-bottom: 1px dashed rgba(16,185,129,.25);
 }
 
-/* Grilla de gráficos: 1 col en mobile, 2 en >=768px */
+/* Grilla de gráficos: mismo alto para ambas tarjetas */
 .charts-grid{
   display: grid;
   grid-template-columns: 1fr;
   gap: 1rem;
+  align-items: stretch; /* ← garantiza misma altura */
 }
 @media (min-width: 768px){
   .charts-grid{ grid-template-columns: 1fr 1fr; }
 }
 
-/* Tarjeta/slot para cada gráfico */
+/* Tarjeta/slot para cada gráfico: alto fijo y layout columna */
 .chart-card{
   background: #fff;
   border: 1px solid rgba(16,185,129,.18);
   border-radius: 1rem;
   padding: .75rem;
   box-shadow: 0 8px 18px rgba(2,44,34,.06);
-  min-height: 320px;
+
+  height: 420px;               /* ← todas iguales */
   display: flex;
   flex-direction: column;
+  box-sizing: border-box;
+}
+@media (min-width: 1280px){
+  .chart-card{ height: 460px; }
 }
 
 /* Título de cada chart (opcional) */
-.chart-title{
-  margin: 0 0 .5rem;
-  font-weight: 700;
-  font-size: .95rem;
-  color: var(--emerald-900);
-}
+.chart-title{ margin: 0 0 .5rem; font-weight: 700; font-size: .95rem; color: var(--emerald-900); }
+.chart-card h4{ margin: 0 0 .5rem; }
+.chart-card p{ margin: 0 0 .5rem; }
 
-/* Selector/controles dentro del bloque */
+/* ====== Controles del chart (SKU + select) ====== */
 .chart-controls{
-  display: flex; align-items: center; gap: .5rem; margin-bottom: .5rem;
+  display: flex;
+  align-items: center;
+  gap: .5rem;
+  margin-bottom: .5rem;
 }
+/* “SKU” como badge */
 .chart-label{
-  font-size: .75rem; color: rgba(6,78,59,.72); font-weight: 700; letter-spacing: .04em; text-transform: uppercase;
+  display: inline-block;
+  padding: .25rem .5rem;
+  border-radius: .5rem;
+  font-size: .72rem;
+  font-weight: 800;
+  letter-spacing: .06em;
+  text-transform: uppercase;
+  line-height: 1;
+  color: #065f46;                         /* verde oscuro */
+  background: #ecfdf5;                    /* verde muy claro */
+  border: 1px solid rgba(16,185,129,.35); /* borde sutil */
 }
+/* Select compacto y redondeado */
 .chart-select{
-  padding: .4rem .6rem;
+  appearance: none;
+  padding: .4rem .65rem;
   border-radius: .6rem;
-  border: 1px solid rgba(16,185,129,.25);
+  border: 1px solid rgba(16,185,129,.35);
   background: #fff;
-  color: var(--emerald-950);
+  color: #064e3b;
+  box-shadow: 0 1px 0 rgba(0,0,0,.02);
   outline: none;
 }
+.chart-select:hover{ border-color: #10b981; }
 .chart-select:focus{
   border-color: #10b981;
-  box-shadow: 0 0 0 3px rgba(52,211,153,.25);
+  box-shadow: 0 0 0 3px rgba(16,185,129,.20);
 }
 
-/* Estados/feedback dentro de la tarjeta */
-.chart-empty,
-.chart-error,
-.chart-loading{
-  border: 1px dashed rgba(16,185,129,.28);
-  background: #f7faf9;
-  color: #56756b;
-  border-radius: .9rem;
-  padding: .9rem;
-  font-size: .9rem;
-}
-
-/* Contenedor donde monta el gráfico */
+/* Contenedor donde monta el gráfico: ocupa todo el espacio libre */
 .chart-body{
-  flex: 1; min-height: 260px;
-  display: flex; align-items: center; justify-content: center;
+  flex: 1;
+  min-height: 0;      /* evita overflow en flex */
+  display: block;     /* para que el canvas se estire */
+}
+
+/* El canvas llena el área del gráfico */
+.chart-body > canvas{
+  width: 100% !important;
+  height: 100% !important;
+  display: block;
+  border: 0 !important;
 }
 
 /* =================== Ajustes visuales específicos =================== */
 /* Ocultar el header interno de "Últimas predicciones" dentro de la card */
 .predicciones-ultimas > .mb-3 h3{ display:none; }
 
-/* Quitar el “marco” negro de las gráficas (Recharts) SOLO en esta sección */
-.chart-card { 
-  border: 0 !important;             /* por si el slot del chart tuviera borde */
-}
-
-/* Recharts: líneas del borde del eje (el “marco”) */
+/* Quitar el “marco” negro de Recharts (si hubiera) en esta sección */
+.chart-card { border: 0 !important; }
 .chart-card .recharts-cartesian-axis-line,
-.chart-card .recharts-cartesian-axis-tick-line {
-  stroke: transparent !important;
-}
-
-/* Recharts: por si el grid dibuja una línea de borde */
-.chart-card .recharts-cartesian-grid line {
-  stroke: rgba(0,0,0,0.08);          /* o poné transparent si querés cero líneas */
-}
-
-/* Si aún ves una línea pegada al borde, mata la primera del grid */
+.chart-card .recharts-cartesian-axis-tick-line { stroke: transparent !important; }
+.chart-card .recharts-cartesian-grid line { stroke: rgba(0,0,0,0.08); }
 .chart-card .recharts-cartesian-grid-horizontal line:first-child,
-.chart-card .recharts-cartesian-grid-vertical   line:first-child {
-  stroke: transparent !important;
-}
+.chart-card .recharts-cartesian-grid-vertical   line:first-child { stroke: transparent !important; }
