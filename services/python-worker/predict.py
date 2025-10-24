@@ -9,10 +9,10 @@ import time
 import numpy as np
 import pandas as pd
 
-
 from datetime import datetime
 from decimal import Decimal
 from typing import Dict, List, Optional
+
 from ioworker.db import (
     DBConfig,
     get_engine,
@@ -23,16 +23,13 @@ from ioworker.db import (
 from ioworker.data import load_series_by_sku, load_series_by_sku_mysql
 from ml.evaluate import rmse, r2_score
 from ml.models import (
-    fit_sarima_insample,
-    fit_ets_insample,
     fit_rf_insample,
     fit_xgb_insample,
-    combine_by_inverse_rmse_insample,
     ModelResult,
-    CombinedResult,
 )
 from utils.logging_conf import setup_logging
 from utils.versioning import resolve_version
+
 
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser("Forecast CLI (paridad de notebook)")
@@ -42,7 +39,8 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--skus", type=str, default=None)
     p.add_argument("--min-history", type=int, default=24)
     p.add_argument("--version", type=str, required=True)
-    p.add_argument("--model-set", type=str, default="full", choices=["full","classic","tree"])
+    # Mantenemos el flag para compatibilidad, pero solo permitimos 'tree'
+    p.add_argument("--model-set", type=str, default="tree", choices=["tree"])
     p.add_argument("--mysql-host", type=str, default=os.getenv("MYSQL_HOST"))
     p.add_argument("--mysql-port", type=int, default=int(os.getenv("MYSQL_PORT", "3306")))
     p.add_argument("--mysql-db", type=str, default=os.getenv("MYSQL_DB", "evalutia"))
@@ -103,7 +101,7 @@ def _sanitize_forecast(a: np.ndarray, min_val: float = 0.0, max_val: float = 1e9
 
 def safe_metric(val):
     """Devuelve float o None si es None/NaN/Inf (para DB)."""
-    return float(round(val,4)) if (val is not None and np.isfinite(val)) else None
+    return float(round(val, 4)) if (val is not None and np.isfinite(val)) else None
 
 
 def as_decimal2(x: float) -> Decimal:
@@ -160,51 +158,24 @@ def main() -> None:
 
                 results: List[ModelResult] = []
 
-                want_sarima = args.model_set in ("full","classic")
-                want_ets    = args.model_set in ("full","classic")
-                want_rf     = args.model_set in ("full","tree")
-                want_xgb    = args.model_set in ("full","tree")
+                # Forzado: SOLO árboles
+                want_rf = True
+                want_xgb = True
 
-                if want_sarima:
-                    r = fit_sarima_insample(train, steps_forecast=args.periods)
-                    if r: results.append(r)
-                if want_ets:
-                    r = fit_ets_insample(train, steps_forecast=args.periods)
-                    if r: results.append(r)
                 if want_rf:
                     r = fit_rf_insample(train, steps_forecast=args.periods, lags=12)
-                    if r: results.append(r)
+                    if r:
+                        results.append(r)
                 if want_xgb:
                     r = fit_xgb_insample(train, steps_forecast=args.periods, lags=12)
-                    if r: results.append(r)
+                    if r:
+                        results.append(r)
 
-                combined = combine_by_inverse_rmse_insample(results, train, steps=args.periods)
-
-                base = [m for m in results if m.holdout_pred is not None and m.rmse is not None]
-                if base:
-                    fits = [m.holdout_pred.reindex(train.index) for m in base]
-                    weights = np.array([combined.weights[m.name] for m in base], dtype="float64")
-                    weights = weights / weights.sum()
-                    combined_ins = sum(w * f.values for w, f in zip(weights, fits))
-                    combined_ins = pd.Series(combined_ins, index=train.index)
-
-                    if len(combined_ins) > 12:
-                        n = 12
-                        slope = (combined_ins.iloc[-1] - combined_ins.iloc[-1-n]) / n
-                    else:
-                        slope = 0.0
-                    if len(combined.forecast) > 0:
-                        alpha = 0.5
-                        combined.forecast[0] = float(alpha * (combined_ins.iloc[-1] + slope) + (1 - alpha) * combined.forecast[0])
-
-                    combined.rmse = rmse(train.values, combined_ins.values)
-                    combined.r2   = r2_score(train.values, combined_ins.values)
-
+                # Sanitizar forecasts
                 for r in results:
                     r.forecast = _sanitize_forecast(r.forecast)
-                if combined is not None:
-                    combined.forecast = _sanitize_forecast(combined.forecast)
 
+                # Persistir filas de predicciones por modelo/horizonte
                 for r in results:
                     for h, (dt, yhat) in enumerate(zip(fidx, r.forecast), start=1):
                         rows_buffer.append(
@@ -216,35 +187,28 @@ def main() -> None:
                                 "version_modelo": version,
                                 "horizonte": h,
                                 "rmse": safe_metric(r.rmse),
-                                "r2":   safe_metric(r.r2),
-                            }
-                        )
-                if combined is not None:
-                    for h, (dt, yhat) in enumerate(zip(fidx, combined.forecast), start=1):
-                        rows_buffer.append(
-                            {
-                                "sku": sku,
-                                "fecha_predicha": dt.date(),
-                                "cantidad_predicha": as_decimal2(float(yhat)),
-                                "modelo": "COMBINADA",
-                                "version_modelo": version,
-                                "horizonte": h,
-                                "rmse": safe_metric(combined.rmse),
-                                "r2":   safe_metric(combined.r2),
+                                "r2": safe_metric(r.r2),
                             }
                         )
 
-                for r in results + ([combined] if combined else []):
-                    summary_rows.append({"sku": sku, "modelo": r.name, "rmse": r.rmse, "r2": r.r2,
-                                         "features": getattr(r, "features", None)})
+                # Resumen por modelo
+                for r in results:
+                    summary_rows.append(
+                        {
+                            "sku": sku,
+                            "modelo": r.name,
+                            "rmse": r.rmse,
+                            "r2": r.r2,
+                            "features": getattr(r, "features", None),
+                        }
+                    )
 
+                # Dump opcional para inspección
                 if args.debug_dump:
                     df_dump = pd.DataFrame({"fecha": train.index, "y_true": train.values})
                     for r in results:
                         if r.holdout_pred is not None:
                             df_dump[r.name] = r.holdout_pred.reindex(train.index).values
-                    if combined and base:
-                        df_dump["COMBINADA"] = combined_ins.values
                     df_dump.to_csv(f"eval_{sku}.csv", index=False)
 
                 processed += 1
@@ -262,23 +226,26 @@ def main() -> None:
             "job_id": job_id,
             "version": version,
             "periods": args.periods,
-            "model_set": args.model_set,
+            "model_set": args.model_set,  # ahora solo 'tree'
             "skus_procesados": processed,
-            "modelos": modelos,
+            "modelos": modelos,           # debería listar solo ['RF', 'XGB']
             "warnings": warnings_list,
         }
         update_job_end(engine, job_id, estado="exitoso", detalle=detalle)
 
         if summary_rows:
             df_sum = pd.DataFrame(summary_rows)
-            for c in ["rmse","r2"]:
+            for c in ["rmse", "r2"]:
                 df_sum[c] = df_sum[c].apply(lambda x: f"{float(x):.6f}" if x is not None and np.isfinite(x) else "")
+
             def _feat(f):
-                return "lags 1–12 + month + trend" if isinstance(f, list) and len(f)>0 else ""
+                return "lags 1–12 + month + trend" if isinstance(f, list) and len(f) > 0 else ""
+
             if "features" in df_sum.columns:
                 df_sum["features"] = df_sum["features"].apply(_feat)
+
             print("\n=== Resumen por modelo/SKU ===")
-            print(df_sum[["sku","modelo","rmse","r2","features"]].sort_values(["sku","modelo"]).to_string(index=False))
+            print(df_sum[["sku", "modelo", "rmse", "r2", "features"]].sort_values(["sku", "modelo"]).to_string(index=False))
 
     except Exception as e:
         try:
