@@ -91,7 +91,7 @@ export default function PrediccionesFilters({ onChange }: Props) {
             className="input"
             value={modelo}
             onChange={(e) => setModelo(e.target.value)}
-            placeholder="COMBINADA / RF / XGB…"
+            placeholder="RF / XGB"
           />
         </div>
 
