@@ -1,8 +1,8 @@
-// apps/frontend/src/apps/predicciones/components/PrediccionesTable.tsx
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { usePrediccionesSearch } from '../hooks/usePredicciones';
 import type { PrediccionSearchParams } from '../types/predicciones';
+import { exportAllPredicciones } from '../utils/exportPredicciones';
 
 type Props = { className?: string };
 
@@ -17,6 +17,8 @@ function getInt(sp: URLSearchParams, k: string, def: number) {
 
 export default function PrediccionesTable({ className }: Props) {
   const [sp, setSp] = useSearchParams();
+
+  const [exporting, setExporting] = useState(false);
 
   const params: PrediccionSearchParams = useMemo(() => ({
     sku: getParam(sp, 'sku'),
@@ -50,11 +52,34 @@ export default function PrediccionesTable({ className }: Props) {
     return <div className="alert">Ocurrió un error al cargar el historial. {(error as any)?.message ?? ''}</div>;
   }
 
+  const handleExport = async () => {
+    try {
+      setExporting(true);
+      await exportAllPredicciones(params);
+    } catch (err) {
+      console.error('Error exportando predicciones', err);
+      throw err;
+    } finally {
+      setExporting(false);
+    }
+  };
+
   return (
     <section className={['card table-card', className].filter(Boolean).join(' ')}>
       <div style={{ marginBottom: '.5rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <div className="muted">{isFetching ? 'Actualizando…' : 'Historial de predicciones'}</div>
-        <div className="muted">Total: <strong>{total}</strong></div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '.5rem' }}>
+          <div className="muted">Total: <strong>{total}</strong></div>
+          <button
+            className="pager-btn"
+            disabled={exporting || isFetching || isLoading}
+            onClick={handleExport}
+            title="Descargar todas las predicciones en Excel"
+            type="button"
+          >
+            {exporting ? 'Exportando…' : 'Descargar Excel'}
+          </button>
+        </div>
       </div>
 
       <div className="table-wrap">
