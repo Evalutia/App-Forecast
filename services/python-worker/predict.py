@@ -20,6 +20,7 @@ from ioworker.db import (
     update_job_end,
     upsert_predicciones,
 )
+# --- MODIFICADO: load_series_by_sku and load_series_by_sku_mysql accept top_n now
 from ioworker.data import load_series_by_sku, load_series_by_sku_mysql
 from ml.evaluate import rmse, r2_score
 from ml.models import (
@@ -53,6 +54,14 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--mysql-table", type=str, default="ventas_historicas")
     p.add_argument("--mysql-schema", type=str, default=None)
     p.add_argument("--debug-dump", action="store_true")
+    # --- MODIFICADO: nuevo flag --top-n para limitar a los N SKUs más vendidos
+    p.add_argument(
+        "--top-n",
+        type=int,
+        default=20,
+        help="Considerar solo los N SKUs con mayor venta total histórica. "
+             "Si se pasa --skus explicitamente, esas SKUs tienen prioridad.",
+    )
     args = p.parse_args()
     if args.input_source == "csv" and not args.csv:
         p.error("--csv es obligatorio con --input-source=csv")
@@ -128,12 +137,25 @@ def main() -> None:
 
     try:
         only_skus = [s.strip() for s in args.skus.split(",")] if args.skus else None
+
+        # --- MODIFICADO: Pasamos `top_n` al loader. Si `--skus` fue pasado explícitamente,
+        # --- MODIFICADO: prevalece sobre `--top-n`.
         if args.input_source == "mysql":
             sku_series = load_series_by_sku_mysql(
-                engine=engine, table=args.mysql_table, schema=args.mysql_schema, freq=args.freq, only_skus=only_skus
+                engine=engine,
+                table=args.mysql_table,
+                schema=args.mysql_schema,
+                freq=args.freq,
+                only_skus=only_skus,
+                top_n=args.top_n,
             )
         else:
-            sku_series = load_series_by_sku(args.csv, freq=args.freq, only_skus=only_skus)
+            sku_series = load_series_by_sku(
+                args.csv,
+                freq=args.freq,
+                only_skus=only_skus,
+                top_n=args.top_n,
+            )
 
         rows_buffer: List[Dict] = []
         summary_rows: List[Dict] = []
