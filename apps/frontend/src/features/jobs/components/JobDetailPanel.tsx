@@ -26,13 +26,13 @@ export default function JobDetailPanel({ jobId }: { jobId: number }) {
       </div>
 
       <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:'1rem', marginTop:'1rem' }}>
-        <div>
-          <div className="label" style={{ marginBottom:'.25rem' }}>Inicio</div>
-          <div>{formatDateTime(job.fechaInicio)}</div>
+        <div style={{ textAlign: 'center' }}>
+          <div className="label" style={{ marginBottom:'.25rem', textTransform: 'uppercase' }}>Inicio</div>
+          <div style={{ fontWeight: 600 }}>{formatDateTime(job.fechaInicio)}</div>
         </div>
-        <div>
-          <div className="label" style={{ marginBottom:'.25rem' }}>Fin</div>
-          <div>{formatDateTime(job.fechaFin)}</div>
+        <div style={{ textAlign: 'center' }}>
+          <div className="label" style={{ marginBottom:'.25rem', textTransform: 'uppercase' }}>Fin</div>
+          <div style={{ fontWeight: 600 }}>{formatDateTime(job.fechaFin)}</div>
         </div>
         {job.detalle && (
           <div style={{ gridColumn:'1 / -1' }}>
