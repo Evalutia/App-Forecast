@@ -21,6 +21,8 @@
     <parameter><name>PREDICT_PERIODS</name><default_value>14</default_value></parameter>
     <parameter><name>PREDICT_MODEL_SET</name><default_value>classic</default_value></parameter>
     <parameter><name>PREDICT_VERSION</name><default_value>1</default_value></parameter>
+    <!-- agregado: regla de resample para predict (MS o QS) -->
+    <parameter><name>PREDICT_RESAMPLE_RULE</name><default_value>MS</default_value></parameter>
 
     <parameter><name>LAST_TABLE</name><default_value>ventas_historicas_stage</default_value></parameter>
   </parameters>
@@ -144,8 +146,11 @@ python3 /app/services/python-worker/predict.py \
   --mysql-db="${MYSQL_DB}" \
   --mysql-user="${MYSQL_USER}" \
   --mysql-pass="${MYSQL_PASSWORD}" \
-  --periods="6" \
-  --version="mvp-001"
+  --periods="${PREDICT_PERIODS}" \
+  --resample-rule="${PREDICT_RESAMPLE_RULE}" \
+  --model-set="${PREDICT_MODEL_SET}" \
+  --version="${PREDICT_VERSION}" \
+  --force-end="${FORCE_END}"
 echo "[JOB][PREDICT] Finalizado OK."
       ]]></script>
       <arg_from_previous>N</arg_from_previous>

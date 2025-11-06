@@ -5,7 +5,7 @@ import pandas as pd
 
 def _prepare_series(df: pd.DataFrame, freq: str) -> pd.Series:
     """
-    Construye la serie mensual (o con freq) a partir de un DataFrame por SKU.
+    Construye la serie mensual/trimestral (o con freq) a partir de un DataFrame por SKU.
     --- NOTA: esta función **asume** que `df` contiene columnas 'fecha' y 'cantidad',
     y que está filtrado para un SKU concreto.
     """
@@ -15,16 +15,20 @@ def _prepare_series(df: pd.DataFrame, freq: str) -> pd.Series:
         .asfreq(freq, fill_value=0)
         .astype(float)
     )
-    s.index = s.index.to_period("M").to_timestamp()
+    # Ajuste del índice según freq: inicio de mes o inicio de trimestre
+    if str(freq).upper().startswith("Q"):
+        s.index = s.index.to_period("Q").to_timestamp()
+    else:
+        s.index = s.index.to_period("M").to_timestamp()
     return s
 
 
 def load_series_by_sku(csv_path: str, freq: str = "MS", only_skus: Optional[Iterable[str]] = None, top_n: Optional[int] = None) -> Dict[str, pd.Series]:
     """
-    Lee calendario_ventas.csv y devuelve dict sku -> Serie mensual (float), index datetime (inicio de mes).
+    Lee calendario_ventas.csv y devuelve dict sku -> Serie (float), index datetime (inicio de periodo).
 
     --- MODIFICADO:
-    - Añadido parámetro `top_n` (como antes).
+    - Añadido parámetro `top_n`.
     - Cambio clave: para cada SKU **cortamos** los registros *antes del resample* para que
       la serie comience en la **primera venta efectiva** (primer fecha con cantidad > 0).
       Si un SKU no tiene ventas (todas las cantidades = 0) se omite.
@@ -46,7 +50,6 @@ def load_series_by_sku(csv_path: str, freq: str = "MS", only_skus: Optional[Iter
         df = df[df["sku"].isin(set(only_skus))].copy()
     # Si no hay only_skus y se pidió top_n, calculamos los top N por suma histórica
     elif top_n and isinstance(top_n, int) and top_n > 0:
-        # Calculamos suma por SKU y nos quedamos con los top_n
         sku_sums = df.groupby("sku", sort=False)["cantidad"].sum().nlargest(top_n).index
         df = df[df["sku"].isin(sku_sums)].copy()
 
@@ -54,7 +57,6 @@ def load_series_by_sku(csv_path: str, freq: str = "MS", only_skus: Optional[Iter
 
     # --- MODIFICADO: ahora cortamos por primera venta antes de resamplear
     for sku, g in df.groupby("sku"):
-        # g es el DataFrame solo para este SKU, ordenado por fecha
         g = g.sort_values("fecha").copy()
 
         # encontrar la primera fecha con venta efectiva (> 0)
@@ -84,15 +86,13 @@ def load_series_by_sku_mysql(
     top_n: Optional[int] = None,
 ) -> Dict[str, pd.Series]:
     """
-    Lee ventas históricas desde MySQL (tabla 'ventas_historicas' por defecto),
-    agrega a nivel DIARIO por (fecha, sku) sumando 'cantidad' (posibles múltiples 'fuente'),
-    y devuelve series MENSUALES por SKU resampleadas a 'freq' (MS = inicio de mes).
+    Lee ventas históricas desde MySQL, agrega a nivel DIARIO por (fecha, sku) sumando 'cantidad',
+    y devuelve series resampleadas a 'freq' (MS = inicio de mes, QS = inicio de trimestre).
 
     --- MODIFICADO:
-    - Añadido parámetro `top_n` (como antes).
+    - Añadido parámetro `top_n`.
     - Cambio clave: para cada SKU **recortamos** las filas *desde la primera venta efectiva*
-      (cantidad > 0) antes de resamplear, de modo que la serie mensual comience
-      en la primera venta efectiva para ese SKU. Si el SKU no tiene ventas efectivas, se omite.
+      (cantidad > 0) antes de resamplear, de modo que la serie comience en la primera venta efectiva.
     """
     tbl = f"{schema}.{table}" if schema else table
 
@@ -142,7 +142,12 @@ def load_series_by_sku_mysql(
              .sum()
              .asfreq(freq, fill_value=0.0)
         )
-        s.index = s.index.to_period("M").to_timestamp()
+        # Ajuste del índice según freq
+        if str(freq).upper().startswith("Q"):
+            s.index = s.index.to_period("Q").to_timestamp()
+        else:
+            s.index = s.index.to_period("M").to_timestamp()
+
         if len(s) > 0:
             series_by_sku[sku] = s
     return series_by_sku
