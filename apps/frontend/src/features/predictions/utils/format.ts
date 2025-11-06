@@ -69,3 +69,42 @@ export function pickMonthlyProjection(
   const values = labels.map((ym) => byYm.get(ym)!.cantidadPredicha);
   return { labels, values };
 }
+
+export function toQuarterLabelFromDate(d: string): string {
+  const dt = new Date(d);
+  if (!isNaN(dt.getTime())) {
+    const y = dt.getFullYear();
+    const q = Math.floor(dt.getMonth() / 3) + 1;
+    return `${y}-Q${q}`;
+  }
+  // fallback: try YYYY-MM
+  const m = d.match(/^(\d{4})-(\d{2})/);
+  if (m) {
+    const y = Number(m[1]);
+    const month = Number(m[2]);
+    const q = Math.floor((month - 1) / 3) + 1;
+    return `${y}-Q${q}`;
+  }
+  return d;
+}
+
+export function pickQuarterlyProjection(items: Prediccion[], preferModelo: string | null = 'COMBINADA') {
+  const byQ = new Map<string, Prediccion>();
+
+  const isBetter = (curr: Prediccion | undefined, cand: Prediccion) => {
+    if (!curr) return true;
+    if (preferModelo && cand.modelo === preferModelo && curr.modelo !== preferModelo) return true;
+    if (preferModelo && curr.modelo === preferModelo && cand.modelo !== preferModelo) return false;
+    return (cand.tsGeneracion ?? '') > (curr.tsGeneracion ?? '');
+  };
+
+  for (const p of items) {
+    const qlab = toQuarterLabelFromDate(p.fechaPredicha);
+    const curr = byQ.get(qlab);
+    if (isBetter(curr, p)) byQ.set(qlab, p);
+  }
+
+  const labels = Array.from(byQ.keys()).sort();
+  const values = labels.map((lab) => byQ.get(lab)!.cantidadPredicha);
+  return { labels, values };
+}
