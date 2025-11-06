@@ -16,8 +16,14 @@ export default function ProjectedSalesChart({ data, sku }: Props) {
 
   // Ventas históricas agregadas trimestralmente (desde endpoint de ventas)
   // pedimos agregación mensual al backend y la convertimos a trimestres en cliente
+  // limitar histórico a los últimos 3 años
+  const now = new Date();
+  const cutoff = new Date(now);
+  cutoff.setFullYear(now.getFullYear() - 3);
+  const fmt = (d: Date) => d.toISOString().slice(0, 10); // YYYY-MM-DD
+
   const { data: ventasAg } = useVentasAgregadas(
-    { sku: skuBase, agregado: 'mensual', pageSize: 200 },
+    { sku: skuBase, agregado: 'mensual', pageSize: 200, fechaDesde: fmt(cutoff) },
     { enabled: true }
   );
 
@@ -73,7 +79,7 @@ export default function ProjectedSalesChart({ data, sku }: Props) {
     <div className="rounded-xl **border border-white/10** bg-white/5 p-4">
       <h4 className="text-base font-semibold text-white">Ventas proyectadas</h4>
       <p className="mb-3 text-xs text-emerald-100/70">
-        Serie trimestral: histórico agregado por trimestre y predicción (un valor por trimestre).
+        Serie trimestral: ventas históricas (acotado a 3 años antes de la predicción) agregadas por trimestre y predicción (un valor por trimestre).
       </p>
       {noVentasHistoricas && (
         <div className="mb-2 text-sm text-amber-100">No se encontraron ventas históricas agregadas para este SKU — mostrando solo predicción.</div>
