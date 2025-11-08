@@ -183,7 +183,7 @@ def main() -> None:
             if prev_det and isinstance(prev_det, dict):
                 prev_rule = prev_det.get("resample_rule")
                 prev_periods = prev_det.get("forecast_periods") or prev_det.get("requested_periods")
-                if prev_rule and prev_rule != None and prev_rule != "":
+                if prev_rule and prev_rule != None and prev_rule != " " and prev_rule != "":
                     if prev_rule != None and prev_rule != "" and prev_rule != None and prev_rule != None:
                         # sólo comprobar si hay cambio
                         if prev_rule != None and prev_rule != "" and prev_rule != args.resample_rule:
@@ -241,6 +241,9 @@ def main() -> None:
 
         # forecast_periods := cantidad de periodos en la frecuencia elegida (args.periods ya se interpreta así)
         forecast_periods = args.periods
+
+        # compute run_date once so all SKUs use the same 'today' anchor
+        run_date = pd.Timestamp.now().normalize()
 
         for sku, serie in sku_series.items():
             try:
@@ -330,11 +333,11 @@ def main() -> None:
                 # exactamente en la fecha indicada (no alineada al inicio de mes/trimestre).
                 if force_end_dt is not None:
                     if args.resample_rule.upper().startswith("Q"):
-                        fidx = pd.to_datetime([fidx_start + pd.DateOffset(months=3 * i) for i in range(forecast_periods)])
+                        fidx_model = pd.to_datetime([fidx_start + pd.DateOffset(months=3 * i) for i in range(forecast_periods)])
                     else:
-                        fidx = pd.to_datetime([fidx_start + pd.DateOffset(months=1 * i) for i in range(forecast_periods)])
+                        fidx_model = pd.to_datetime([fidx_start + pd.DateOffset(months=1 * i) for i in range(forecast_periods)])
                 else:
-                    fidx = pd.date_range(start=fidx_start, periods=forecast_periods, freq=freq_str)
+                    fidx_model = pd.date_range(start=fidx_start, periods=forecast_periods, freq=freq_str)
 
                 # determinar lags según frecuencia
                 lags = 8 if args.resample_rule.upper().startswith("Q") else 12
@@ -357,13 +360,30 @@ def main() -> None:
                 for r in results:
                     r.forecast = _sanitize_forecast(r.forecast)
 
+                # ----------------------------
+                # Construir las fechas que SE VAN A PERSISTIR: la primera fecha es
+                # SIEMPRE "run_date" (fecha exacta de ejecución) y las siguientes avancen
+                # en meses/trimestres.
+                # ----------------------------
+                fecha_preds: List = []
+                if args.resample_rule.upper().startswith("Q"):
+                    # avanzar 3 meses por horizonte
+                    for i in range(forecast_periods):
+                        fecha_preds.append((run_date + pd.DateOffset(months=3 * i)).date())
+                else:
+                    for i in range(forecast_periods):
+                        fecha_preds.append((run_date + pd.DateOffset(months=1 * i)).date())
+
                 # Persistir filas de predicciones por modelo/horizonte
+                # Usamos fidx_model para mantener la correspondencia correcta entre el forecast
+                # del modelo (r.forecast[i]) y el horizonte lógico del modelo, pero guardamos
+                # como "fecha_predicha" las fechas calculadas en fecha_preds (que empiezan en run_date).
                 for r in results:
-                    for h, (dt, yhat) in enumerate(zip(fidx, r.forecast), start=1):
+                    for h, (dt_model, yhat, fecha_pred) in enumerate(zip(fidx_model, r.forecast, fecha_preds), start=1):
                         rows_buffer.append(
                             {
                                 "sku": sku,
-                                "fecha_predicha": dt.date(),
+                                "fecha_predicha": fecha_pred,
                                 "cantidad_predicha": as_decimal2(float(yhat)),
                                 "modelo": r.name,
                                 "version_modelo": version,

@@ -72,14 +72,13 @@ def fit_sarima_insample(train: pd.Series, steps_forecast: int) -> Optional[Model
             forecast=y_fc,
             rmse=_rmse(tr.values, fit_series.values),
             r2=_r2(tr.values, fit_series.values),
-            params={"order": res.model_orders["ar"], "seasonal_order": res.model_orders.get("seasonal_ar", None)},
+            params={"order": res.model_orders.get("ar", None), "seasonal_order": None},
             holdout_pred=fit_series,
         )
     except Exception:
         return None
 
 def fit_ets_insample(train: pd.Series, steps_forecast: int) -> Optional[ModelResult]:
-    """ETS fijo como notebook: trend='add', seasonal='add', sp=12 (si hay suficiente historia)."""
     try:
         tr = pd.Series(train, dtype="float64").sort_index()
         seasonal_periods = 12
@@ -108,15 +107,10 @@ def fit_ets_insample(train: pd.Series, steps_forecast: int) -> Optional[ModelRes
         return None
 
 def _build_lag_month_trend(series: pd.Series, lags: int, freq: str = "MS") -> tuple[pd.DataFrame, pd.Series, List[str]]:
-    """
-    Construye la matriz de lags + period (month o quarter) + trend.
-    freq: cadena que indica la regla de resample, p.ej. 'MS' (inicio mes) o 'QS' (inicio trimestre)
-    """
     df = pd.DataFrame({"y": pd.Series(series).astype("float64").sort_index()})
     for i in range(1, lags + 1):
         df[f"lag_{i}"] = df["y"].shift(i)
     df = df.dropna()
-    # period: month(1-12) o quarter(1-4)
     if str(freq).upper().startswith("Q"):
         df["period"] = df.index.quarter
     else:
@@ -130,7 +124,10 @@ def _build_lag_month_trend(series: pd.Series, lags: int, freq: str = "MS") -> tu
 def fit_rf_insample(train: pd.Series, steps_forecast: int, lags: int = 12, freq: str = "MS") -> Optional[ModelResult]:
     try:
         tr = pd.Series(train).astype("float64").sort_index()
-        X_rf, y_rf, feats = _build_lag_month_trend(tr, lags, freq)
+        # adapt lags to available history to avoid creating empty feature sets
+        max_lags_allowed = max(1, len(tr) - 1)
+        eff_lags = min(lags, max_lags_allowed)
+        X_rf, y_rf, feats = _build_lag_month_trend(tr, eff_lags, freq)
 
         rf = RandomForestRegressor(
             n_estimators=100, min_samples_leaf=2,
@@ -142,10 +139,12 @@ def fit_rf_insample(train: pd.Series, steps_forecast: int, lags: int = 12, freq:
         rf_full = fit_part.reindex(tr.index).ffill().bfill()
 
         # rolling one-step-ahead usando predicción autoregresiva
-        hist = tr.tolist()[-lags:]
+        hist = list(tr.values[-eff_lags:])
+        if len(hist) < eff_lags:
+            pad_val = hist[0] if len(hist) > 0 else 0.0
+            hist = [pad_val] * (eff_lags - len(hist)) + hist
         oos = []
         for i in range(steps_forecast):
-            # offset según freq
             if str(freq).upper().startswith("Q"):
                 idx = tr.index[-1] + pd.offsets.QuarterBegin(i + 1)
                 period_val = idx.quarter
@@ -153,18 +152,26 @@ def fit_rf_insample(train: pd.Series, steps_forecast: int, lags: int = 12, freq:
                 idx = tr.index[-1] + pd.offsets.MonthBegin(i + 1)
                 period_val = idx.month
 
-            xlags = hist[-lags:][::-1]
-            df_feat = pd.DataFrame([xlags], columns=[f"lag_{j+1}" for j in range(lags)])
-            df_feat["period"] = period_val
-            df_feat["trend"] = len(tr) + i
-            df_feat = df_feat[feats]
+            xlags = hist[-eff_lags:][::-1]  # newest first -> lag_1
+            data = {}
+            for j, val in enumerate(xlags):
+                data[f"lag_{j+1}"] = val
+            data["period"] = period_val
+            data["trend"] = len(tr) + i
+            feat_row = {f: data.get(f, 0.0) for f in feats}
+            df_feat = pd.DataFrame([feat_row], columns=feats)
             p = float(rf.predict(df_feat)[0])
             oos.append(p)
             hist.append(p)
         y_fc = np.asarray(oos, dtype="float64")
 
         rmse_full = _rmse(tr.values, rf_full.values)
-        r2_valid = _r2(y_rf.values, fit_part.values)
+        y_arr = np.asarray(y_rf.values, dtype="float64").ravel()
+        fit_arr = np.asarray(fit_part.values, dtype="float64").ravel()
+        if np.isfinite(y_arr).all() and np.nanstd(y_arr) == 0.0:
+            r2_valid = 1.0 if np.allclose(y_arr, fit_arr, equal_nan=True) else 0.0
+        else:
+            r2_valid = float(_r2(y_arr, fit_arr))
 
         return ModelResult(
             name="RF",
@@ -181,7 +188,9 @@ def fit_rf_insample(train: pd.Series, steps_forecast: int, lags: int = 12, freq:
 def fit_xgb_insample(train: pd.Series, steps_forecast: int, lags: int = 12, freq: str = "MS") -> Optional[ModelResult]:
     try:
         tr = pd.Series(train).astype("float64").sort_index()
-        X_rf, y_rf, feats = _build_lag_month_trend(tr, lags, freq)
+        max_lags_allowed = max(1, len(tr) - 1)
+        eff_lags = min(lags, max_lags_allowed)
+        X_rf, y_rf, feats = _build_lag_month_trend(tr, eff_lags, freq)
 
         xgb = XGBRegressor(
             n_estimators=100, max_depth=4, learning_rate=0.03,
@@ -194,7 +203,10 @@ def fit_xgb_insample(train: pd.Series, steps_forecast: int, lags: int = 12, freq
         fit_part = pd.Series(xgb.predict(X_rf), index=X_rf.index, dtype="float64")
         xgb_full = fit_part.reindex(tr.index).ffill().bfill()
 
-        hist = tr.tolist()[-lags:]
+        hist = list(tr.values[-eff_lags:])
+        if len(hist) < eff_lags:
+            pad_val = hist[0] if len(hist) > 0 else 0.0
+            hist = [pad_val] * (eff_lags - len(hist)) + hist
         oos = []
         for i in range(steps_forecast):
             if str(freq).upper().startswith("Q"):
@@ -204,18 +216,26 @@ def fit_xgb_insample(train: pd.Series, steps_forecast: int, lags: int = 12, freq
                 idx = tr.index[-1] + pd.offsets.MonthBegin(i + 1)
                 period_val = idx.month
 
-            xlags = hist[-lags:][::-1]
-            df_feat = pd.DataFrame([xlags], columns=[f"lag_{j+1}" for j in range(lags)])
-            df_feat["period"] = period_val
-            df_feat["trend"] = len(tr) + i
-            df_feat = df_feat[feats]
+            xlags = hist[-eff_lags:][::-1]
+            data = {}
+            for j, val in enumerate(xlags):
+                data[f"lag_{j+1}"] = val
+            data["period"] = period_val
+            data["trend"] = len(tr) + i
+            feat_row = {f: data.get(f, 0.0) for f in feats}
+            df_feat = pd.DataFrame([feat_row], columns=feats)
             p = float(xgb.predict(df_feat)[0])
             oos.append(p)
             hist.append(p)
         y_fc = np.asarray(oos, dtype="float64")
 
         rmse_full = _rmse(tr.values, xgb_full.values)
-        r2_valid = _r2(y_rf.values, fit_part.values)
+        y_arr = np.asarray(y_rf.values, dtype="float64").ravel()
+        fit_arr = np.asarray(fit_part.values, dtype="float64").ravel()
+        if np.isfinite(y_arr).all() and np.nanstd(y_arr) == 0.0:
+            r2_valid = 1.0 if np.allclose(y_arr, fit_arr, equal_nan=True) else 0.0
+        else:
+            r2_valid = float(_r2(y_arr, fit_arr))
 
         return ModelResult(
             name="XGB",
@@ -230,10 +250,6 @@ def fit_xgb_insample(train: pd.Series, steps_forecast: int, lags: int = 12, freq
         return None
 
 def combine_by_inverse_rmse_insample(models: List[ModelResult], train: pd.Series, steps: int) -> CombinedResult:
-    """
-    Pesos por 1/RMSE usando RMSE in-sample de cada modelo, como en el notebook.
-    Devuelve forecast combinado (y las métricas se calculan afuera).
-    """
     base = [m for m in models if m.rmse is not None and m.holdout_pred is not None]
     if not base:
         return CombinedResult("COMBINADA", forecast=np.zeros(steps, dtype="float64"), rmse=None, r2=None, weights={})
