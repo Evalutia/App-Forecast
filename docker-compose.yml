@@ -129,6 +129,26 @@ services:
       - TZ=America/Montevideo
     restart: unless-stopped
 
+  webapp:
+    build:
+      context: ./apps/frontend
+      dockerfile: Dockerfile
+      args:
+        VITE_API_BASE_URL: ${VITE_API_BASE_URL}
+    container_name: evalutia-webapp
+    env_file:
+      - .env
+    environment:
+      - TZ=${TZ}
+    depends_on:
+      webapi:
+        condition: service_healthy
+    ports:
+      - "5173:80"
+    networks:
+      - evalutia_net
+    restart: unless-stopped
+
 networks:
   evalutia_net:
 
