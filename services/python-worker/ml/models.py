@@ -1,9 +1,11 @@
+# services/python-worker/ml/models.py
 from __future__ import annotations
 
 import warnings
 import itertools
 import numpy as np
 import pandas as pd
+import os
 
 from dataclasses import dataclass
 from typing import Dict, List, Optional
@@ -13,6 +15,16 @@ from statsmodels.tsa.statespace.sarimax import SARIMAX
 from statsmodels.tsa.holtwinters import ExponentialSmoothing
 from statsmodels.tools.sm_exceptions import ConvergenceWarning
 from .evaluate import rmse as _rmse, r2_score as _r2
+
+RF_DEFAULT_MAX_DEPTH = int(os.getenv("RF_MAX_DEPTH", "5"))
+RF_DEFAULT_MIN_SAMPLES_LEAF = int(os.getenv("RF_MIN_SAMPLES_LEAF", "5"))
+RF_DEFAULT_N_ESTIMATORS = int(os.getenv("RF_N_ESTIMATORS", "200"))
+
+XGB_DEFAULT_MAX_DEPTH = int(os.getenv("XGB_MAX_DEPTH", "10"))
+XGB_DEFAULT_MIN_CHILD_WEIGHT = int(os.getenv("XGB_MIN_CHILD_WEIGHT", "5"))
+XGB_DEFAULT_REG_LAMBDA = float(os.getenv("XGB_REG_LAMBDA", "5"))
+XGB_DEFAULT_N_ESTIMATORS = int(os.getenv("XGB_N_ESTIMATORS", "800"))
+XGB_DEFAULT_LEARNING_RATE = float(os.getenv("XGB_LEARNING_RATE", "0.022"))
 
 @dataclass
 class ModelResult:
@@ -31,6 +43,77 @@ class CombinedResult:
     rmse: Optional[float]
     r2: Optional[float]
     weights: Dict[str, float]
+
+def fit_xgb_insample(train: pd.Series, steps_forecast: int, lags: int = 12, freq: str = "MS") -> Optional[ModelResult]:
+    try:
+        tr = pd.Series(train).astype("float64").sort_index()
+        max_lags_allowed = max(1, len(tr) - 1)
+        eff_lags = min(lags, max_lags_allowed)
+        X_rf, y_rf, feats = _build_lag_month_trend(tr, eff_lags, freq)
+
+        xgb = XGBRegressor(
+            n_estimators=XGB_DEFAULT_N_ESTIMATORS,
+            max_depth=XGB_DEFAULT_MAX_DEPTH,
+            learning_rate=XGB_DEFAULT_LEARNING_RATE,
+            reg_alpha=0,
+            reg_lambda=XGB_DEFAULT_REG_LAMBDA,
+            min_child_weight=XGB_DEFAULT_MIN_CHILD_WEIGHT,
+            subsample=0.7,
+            colsample_bytree=0.7,
+            gamma=0.15,
+            random_state=0,
+            objective="reg:squarederror",
+        )
+        xgb.fit(X_rf, y_rf)
+
+        fit_part = pd.Series(xgb.predict(X_rf), index=X_rf.index, dtype="float64")
+        xgb_full = fit_part.reindex(tr.index).ffill().bfill()
+
+        hist = list(tr.values[-eff_lags:])
+        if len(hist) < eff_lags:
+            pad_val = hist[0] if len(hist) > 0 else 0.0
+            hist = [pad_val] * (eff_lags - len(hist)) + hist
+        oos = []
+        for i in range(steps_forecast):
+            if str(freq).upper().startswith("Q"):
+                idx = tr.index[-1] + pd.offsets.QuarterBegin(i + 1)
+                period_val = idx.quarter
+            else:
+                idx = tr.index[-1] + pd.offsets.MonthBegin(i + 1)
+                period_val = idx.month
+
+            xlags = hist[-eff_lags:][::-1]
+            data = {}
+            for j, val in enumerate(xlags):
+                data[f"lag_{j+1}"] = val
+            data["period"] = period_val
+            data["trend"] = len(tr) + i
+            feat_row = {f: data.get(f, 0.0) for f in feats}
+            df_feat = pd.DataFrame([feat_row], columns=feats)
+            p = float(xgb.predict(df_feat)[0])
+            oos.append(p)
+            hist.append(p)
+        y_fc = np.asarray(oos, dtype="float64")
+
+        rmse_full = _rmse(tr.values, xgb_full.values)
+        y_arr = np.asarray(y_rf.values, dtype="float64").ravel()
+        fit_arr = np.asarray(fit_part.values, dtype="float64").ravel()
+        if np.isfinite(y_arr).all() and np.nanstd(y_arr) == 0.0:
+            r2_valid = 1.0 if np.allclose(y_arr, fit_arr, equal_nan=True) else 0.0
+        else:
+            r2_valid = float(_r2(y_arr, fit_arr))
+
+        return ModelResult(
+            name="XGB",
+            forecast=y_fc,
+            rmse=rmse_full,
+            r2=r2_valid,
+            params=xgb.get_params(),
+            features=feats,
+            holdout_pred=xgb_full,
+        )
+    except Exception:
+        return None
 
 def _fit_sarima_aic_grid(y_train: pd.Series):
     best_res = None
@@ -124,21 +207,22 @@ def _build_lag_month_trend(series: pd.Series, lags: int, freq: str = "MS") -> tu
 def fit_rf_insample(train: pd.Series, steps_forecast: int, lags: int = 12, freq: str = "MS") -> Optional[ModelResult]:
     try:
         tr = pd.Series(train).astype("float64").sort_index()
-        # adapt lags to available history to avoid creating empty feature sets
         max_lags_allowed = max(1, len(tr) - 1)
         eff_lags = min(lags, max_lags_allowed)
         X_rf, y_rf, feats = _build_lag_month_trend(tr, eff_lags, freq)
 
         rf = RandomForestRegressor(
-            n_estimators=100, min_samples_leaf=2,
-            max_features="sqrt", random_state=0
+            n_estimators=RF_DEFAULT_N_ESTIMATORS,
+            max_depth=RF_DEFAULT_MAX_DEPTH,
+            min_samples_leaf=RF_DEFAULT_MIN_SAMPLES_LEAF,
+            max_features="sqrt",
+            random_state=0
         )
         rf.fit(X_rf, y_rf)
 
         fit_part = pd.Series(rf.predict(X_rf), index=X_rf.index, dtype="float64")
         rf_full = fit_part.reindex(tr.index).ffill().bfill()
 
-        # rolling one-step-ahead usando predicción autoregresiva
         hist = list(tr.values[-eff_lags:])
         if len(hist) < eff_lags:
             pad_val = hist[0] if len(hist) > 0 else 0.0
@@ -152,7 +236,7 @@ def fit_rf_insample(train: pd.Series, steps_forecast: int, lags: int = 12, freq:
                 idx = tr.index[-1] + pd.offsets.MonthBegin(i + 1)
                 period_val = idx.month
 
-            xlags = hist[-eff_lags:][::-1]  # newest first -> lag_1
+            xlags = hist[-eff_lags:][::-1]
             data = {}
             for j, val in enumerate(xlags):
                 data[f"lag_{j+1}"] = val
@@ -181,70 +265,6 @@ def fit_rf_insample(train: pd.Series, steps_forecast: int, lags: int = 12, freq:
             params=rf.get_params(),
             features=feats,
             holdout_pred=rf_full,
-        )
-    except Exception:
-        return None
-
-def fit_xgb_insample(train: pd.Series, steps_forecast: int, lags: int = 12, freq: str = "MS") -> Optional[ModelResult]:
-    try:
-        tr = pd.Series(train).astype("float64").sort_index()
-        max_lags_allowed = max(1, len(tr) - 1)
-        eff_lags = min(lags, max_lags_allowed)
-        X_rf, y_rf, feats = _build_lag_month_trend(tr, eff_lags, freq)
-
-        xgb = XGBRegressor(
-            n_estimators=100, max_depth=4, learning_rate=0.03,
-            reg_alpha=1, reg_lambda=1, min_child_weight=2,
-            subsample=0.7, colsample_bytree=0.7, random_state=0,
-            objective="reg:squarederror",
-        )
-        xgb.fit(X_rf, y_rf)
-
-        fit_part = pd.Series(xgb.predict(X_rf), index=X_rf.index, dtype="float64")
-        xgb_full = fit_part.reindex(tr.index).ffill().bfill()
-
-        hist = list(tr.values[-eff_lags:])
-        if len(hist) < eff_lags:
-            pad_val = hist[0] if len(hist) > 0 else 0.0
-            hist = [pad_val] * (eff_lags - len(hist)) + hist
-        oos = []
-        for i in range(steps_forecast):
-            if str(freq).upper().startswith("Q"):
-                idx = tr.index[-1] + pd.offsets.QuarterBegin(i + 1)
-                period_val = idx.quarter
-            else:
-                idx = tr.index[-1] + pd.offsets.MonthBegin(i + 1)
-                period_val = idx.month
-
-            xlags = hist[-eff_lags:][::-1]
-            data = {}
-            for j, val in enumerate(xlags):
-                data[f"lag_{j+1}"] = val
-            data["period"] = period_val
-            data["trend"] = len(tr) + i
-            feat_row = {f: data.get(f, 0.0) for f in feats}
-            df_feat = pd.DataFrame([feat_row], columns=feats)
-            p = float(xgb.predict(df_feat)[0])
-            oos.append(p)
-            hist.append(p)
-        y_fc = np.asarray(oos, dtype="float64")
-
-        rmse_full = _rmse(tr.values, xgb_full.values)
-        y_arr = np.asarray(y_rf.values, dtype="float64").ravel()
-        fit_arr = np.asarray(fit_part.values, dtype="float64").ravel()
-        if np.isfinite(y_arr).all() and np.nanstd(y_arr) == 0.0:
-            r2_valid = 1.0 if np.allclose(y_arr, fit_arr, equal_nan=True) else 0.0
-        else:
-            r2_valid = float(_r2(y_arr, fit_arr))
-
-        return ModelResult(
-            name="XGB",
-            forecast=y_fc,
-            rmse=rmse_full,
-            r2=r2_valid,
-            params=xgb.get_params(),
-            features=feats,
-            holdout_pred=xgb_full,
         )
     except Exception:
         return None

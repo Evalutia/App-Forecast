@@ -187,7 +187,7 @@ docker compose exec etl /opt/pentaho/data-integration/kitchen.sh `
   "-param:MYSQL_HOST=mysql" "-param:MYSQL_DB=evalutia" `
   "-param:MYSQL_USER=evalutia" "-param:MYSQL_PASSWORD=evalutia" "-param:MYSQL_PORT=3306" `
   "-param:PREDICT_PERIODS=2" "-param:PREDICT_RESAMPLE_RULE=QS" "-param:PREDICT_MODEL_SET=classic" "-param:PREDICT_VERSION=mvp-002" `
-  "-param:FORCE_START=03/10/2016" "-param:FORCE_END=06/11/2025"
+  "-param:FORCE_START=03/10/2016" "-param:FORCE_END=11/11/2025"
 ```
 
 **Backfill de 2 años relativo (PowerShell):**
