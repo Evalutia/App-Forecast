@@ -1,4 +1,4 @@
 USE evalutia;
 
 INSERT INTO usuarios (correo, hash_password, rol)
-VALUES ('admin@evalutia.local', '$2b$12$REEMPLAZAR_CON_HASH_BCRYPT', 'administrador');
+VALUES ('admin@evalutia.com', '$2b$11$6WJXyYf7x0p00/Z2ituT6uXArHM83W1G7ojDUon4/b.Ma.URWyxAi', 'administrador');
