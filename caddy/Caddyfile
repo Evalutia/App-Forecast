@@ -1,0 +1,19 @@
+# Frontend
+app.evalutia.net {
+    encode gzip
+    reverse_proxy webapp:80
+    log {
+      output stdout
+      level INFO
+    }
+}
+
+# Backend
+api.evalutia.net {
+    encode gzip
+    reverse_proxy webapi:8080
+    log {
+      output stdout
+      level INFO
+    }
+}
