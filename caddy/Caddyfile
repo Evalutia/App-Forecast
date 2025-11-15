@@ -1,19 +1,51 @@
-# Frontend
-app.evalutia.net {
+# Landing site (public)
+evalutia.net, www.evalutia.net {
+    header {
+        Strict-Transport-Security "max-age=31536000; includeSubDomains; preload"
+        X-Frame-Options "DENY"
+        X-Content-Type-Options "nosniff"
+        Referrer-Policy "no-referrer-when-downgrade"
+    }
+
+    # redirect www -> apex
+    @www host www.evalutia.net
+    redir @www https://evalutia.net{uri} 301
+
+    root * /opt/evalutia/webpage
+    file_server
     encode gzip
-    reverse_proxy webapp:80
+
     log {
-      output stdout
-      level INFO
+        output stdout
+        level INFO
     }
 }
 
-# Backend
-api.evalutia.net {
+# Frontend (no basicauth, app handles login)
+app.evalutia.net {
     encode gzip
-    reverse_proxy webapi:8080
+    reverse_proxy webapp:80 {
+        header_up X-Forwarded-Proto {scheme}
+        header_up X-Forwarded-Host {host}
+        header_up X-Forwarded-For {remote_host}
+    }
     log {
-      output stdout
-      level INFO
+        output stdout
+        level INFO
     }
 }
+
+# Backend (no basicauth)
+api.evalutia.net {
+    encode gzip
+    reverse_proxy webapi:8080 {
+        header_up X-Forwarded-Proto {scheme}
+        header_up X-Forwarded-Host {host}
+        header_up X-Forwarded-For {remote_host}
+    }
+    log {
+        output stdout
+        level INFO
+    }
+}
+

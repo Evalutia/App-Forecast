@@ -156,6 +156,7 @@ services:
       - ./caddy/Caddyfile:/etc/caddy/Caddyfile:ro
       - caddy_data:/data
       - caddy_config:/config
+      - ./webpage:/opt/evalutia/webpage:ro
     networks:
       - evalutia_net
 
