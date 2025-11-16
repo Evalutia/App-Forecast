@@ -4,17 +4,13 @@ import pandas as pd
 
 from ml.evaluate import r2_score
 from ml.models import (
-    fit_rf_with_holdout,
     fit_xgb_with_holdout_multi,
-    fit_xgb_log_with_holdout_multi,
-    fit_lin_with_holdout_multi,
 )
 from ioworker.db import DBConfig, get_engine
 from ioworker.data import load_series_by_sku_mysql
 
 
 FREQ = os.getenv("EVAL_FREQ", "QS")
-TOP_N = int(os.getenv("EVAL_TOP_N", "20"))
 TEST_YEARS = int(os.getenv("EVAL_TEST_YEARS", "1"))
 LAGS = int(os.getenv("EVAL_LAGS", "8"))
 FORECAST_PERIODS = int(os.getenv("EVAL_FORECAST_PERIODS", "2"))
@@ -30,46 +26,15 @@ def main() -> None:
     )
     engine = get_engine(db_cfg)
 
+    # Cargar TODAS las series de SKUs (sin tope de TOP_N)
     series_by_sku = load_series_by_sku_mysql(
-        engine, table="ventas_historicas", freq=FREQ, only_skus=None, top_n=TOP_N
+        engine, table="ventas_historicas", freq=FREQ, only_skus=None, top_n=None
     )
 
-    rows = []
+    rows = []  # filas por (sku, modelo)
     for sku, s in series_by_sku.items():
         try:
-            # Random Forest con holdout de último año
-            rf_res = fit_rf_with_holdout(
-                s, freq=FREQ, forecast_periods=FORECAST_PERIODS, lags=LAGS, years_test=TEST_YEARS
-            )
-            if rf_res is not None:
-                rows.append(
-                    {
-                        "model": rf_res.name,
-                        "r2_train": rf_res.r2_train,
-                        "r2_test": rf_res.r2_test,
-                        "mae_train": rf_res.mae_train,
-                        "mae_test": rf_res.mae_test,
-                    }
-                )
-
-            # Linear (Ridge) - varias configuraciones con holdout
-            lin_results = fit_lin_with_holdout_multi(
-                s, freq=FREQ, forecast_periods=FORECAST_PERIODS, lags=LAGS, years_test=TEST_YEARS
-            )
-            for model_name, lin_res in lin_results.items():
-                if lin_res is None:
-                    continue
-                rows.append(
-                    {
-                        "model": model_name,
-                        "r2_train": lin_res.r2_train,
-                        "r2_test": lin_res.r2_test,
-                        "mae_train": lin_res.mae_train,
-                        "mae_test": lin_res.mae_test,
-                    }
-                )
-
-            # XGB (features simples) con holdout
+            # Solo modelos XGB (features simples) con holdout
             xgb_results = fit_xgb_with_holdout_multi(
                 s, freq=FREQ, forecast_periods=FORECAST_PERIODS, lags=LAGS, years_test=TEST_YEARS
             )
@@ -78,23 +43,7 @@ def main() -> None:
                     continue
                 rows.append(
                     {
-                        "model": model_name,
-                        "r2_train": xgb_res.r2_train,
-                        "r2_test": xgb_res.r2_test,
-                        "mae_train": xgb_res.mae_train,
-                        "mae_test": xgb_res.mae_test,
-                    }
-                )
-
-            # XGB (log-transform) con holdout
-            xgb_log_results = fit_xgb_log_with_holdout_multi(
-                s, freq=FREQ, forecast_periods=FORECAST_PERIODS, lags=LAGS, years_test=TEST_YEARS
-            )
-            for model_name, xgb_res in xgb_log_results.items():
-                if xgb_res is None:
-                    continue
-                rows.append(
-                    {
+                        "sku": sku,
                         "model": model_name,
                         "r2_train": xgb_res.r2_train,
                         "r2_test": xgb_res.r2_test,
@@ -112,6 +61,7 @@ def main() -> None:
 
     df["gap"] = df["r2_train"] - df["r2_test"]
     df["mae_rel"] = df["mae_test"] / df["mae_train"]
+    # Resumen por modelo (promedio sobre todos los SKUs)
     summary = (
         df.groupby(["model"])
         .agg(
@@ -126,6 +76,7 @@ def main() -> None:
         .reset_index()
         .sort_values(["model"])
     )
+    print("\n== Resumen por modelo (promedio sobre todos los SKUs) ==")
     print(summary.to_string(index=False, float_format="{:.4f}".format))
 
 

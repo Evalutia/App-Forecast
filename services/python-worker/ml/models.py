@@ -452,8 +452,8 @@ def fit_xgb_with_holdout_multi(
 
     # Ensamble simple de los mejores XGB (promedio de predicciones)
     ensemble_members = [
+        "XGB_lr_low",
         "XGB_lr_very_low",
-        "XGB_lr_very_low_reg",
         "XGB_mid_trees",
     ]
     if all(m in base_results for m in ensemble_members):
@@ -775,23 +775,7 @@ def fit_xgb_insample_multi(
     freq: str = "MS",
 ) -> Dict[str, ModelResult]:
     configs = [
-        # Base: igual a fit_xgb_insample (punto de partida)
-        ("XGB", {}),
-
-        # Menos árboles (más simple, menos riesgo de overfit)
-        ("XGB_less_trees", {
-            "n_estimators": max(200, XGB_DEFAULT_N_ESTIMATORS // 2),
-        }),
-
-        # Compromiso actual (ya dio buen R2_test)
-        ("XGB_compromise", {
-            "n_estimators": max(250, int(XGB_DEFAULT_N_ESTIMATORS * 0.7)),
-            "subsample": 0.75,
-            "colsample_bytree": 0.75,
-            "reg_lambda": XGB_DEFAULT_REG_LAMBDA * 1.2,
-        }),
-
-        # Learning rate más bajo + más árboles (boosting suave alrededor del compromiso)
+        # Learning rate más bajo + más árboles
         ("XGB_lr_low", {
             "learning_rate": XGB_DEFAULT_LEARNING_RATE * 0.6,
             "n_estimators": int(XGB_DEFAULT_N_ESTIMATORS * 1.1),
@@ -800,7 +784,7 @@ def fit_xgb_insample_multi(
             "reg_lambda": XGB_DEFAULT_REG_LAMBDA * 1.4,
         }),
 
-        # Mejor modelo actual: lr muy bajo + más árboles
+        # lr muy bajo + más árboles
         ("XGB_lr_very_low", {
             "learning_rate": XGB_DEFAULT_LEARNING_RATE * 0.4,
             "n_estimators": int(XGB_DEFAULT_N_ESTIMATORS * 1.3),
@@ -809,7 +793,7 @@ def fit_xgb_insample_multi(
             "reg_lambda": XGB_DEFAULT_REG_LAMBDA * 1.6,
         }),
 
-        # Variante de XGB_lr_very_low con aún más árboles (por si ayuda al test)
+        # lr muy bajo con aún más árboles
         ("XGB_lr_very_low_more_trees", {
             "learning_rate": XGB_DEFAULT_LEARNING_RATE * 0.4,
             "n_estimators": int(XGB_DEFAULT_N_ESTIMATORS * 1.6),
@@ -818,36 +802,12 @@ def fit_xgb_insample_multi(
             "reg_lambda": XGB_DEFAULT_REG_LAMBDA * 1.6,
         }),
 
-        # Variante de XGB_lr_very_low con más regularización (intento de bajar gap)
-        ("XGB_lr_very_low_reg", {
-            "learning_rate": XGB_DEFAULT_LEARNING_RATE * 0.4,
-            "n_estimators": int(XGB_DEFAULT_N_ESTIMATORS * 1.3),
-            "subsample": 0.75,
-            "colsample_bytree": 0.75,
-            "reg_lambda": XGB_DEFAULT_REG_LAMBDA * 2.0,
-        }),
-
-        # Variante intermedia entre compromise y less_trees
+        # Variante intermedia con menos árboles y algo más de regularización
         ("XGB_mid_trees", {
             "n_estimators": max(220, int(XGB_DEFAULT_N_ESTIMATORS * 0.6)),
             "subsample": 0.8,
             "colsample_bytree": 0.8,
             "reg_lambda": XGB_DEFAULT_REG_LAMBDA * 1.3,
-        }),
-
-        # Variante optimizada a MAE sobre base XGB (misma estructura pero loss abs)
-        ("XGB_mae", {
-            "objective": "reg:absoluteerror",
-        }),
-
-        # Variante de XGB_lr_very_low pero optimizando MAE directamente
-        ("XGB_lr_very_low_mae", {
-            "objective": "reg:absoluteerror",
-            "learning_rate": XGB_DEFAULT_LEARNING_RATE * 0.4,
-            "n_estimators": int(XGB_DEFAULT_N_ESTIMATORS * 1.3),
-            "subsample": 0.75,
-            "colsample_bytree": 0.75,
-            "reg_lambda": XGB_DEFAULT_REG_LAMBDA * 1.6,
         }),
     ]
 
