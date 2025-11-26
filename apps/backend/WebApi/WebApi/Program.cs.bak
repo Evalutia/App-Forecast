@@ -102,18 +102,13 @@ builder.Services.AddAuthorization();
 
 // CORS
 var corsPolicy = "Frontend";
-var allowedOrigins = builder.Configuration["CORS__AllowedOrigins"]
-		     ?? builder.Configuration["CORS_ORIGINS"]
-		     ?? "http://localhost:5173";
-
-var origins = allowedOrigins.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
 builder.Services.AddCors(options =>
 {
-	options.AddPolicy(corsPolicy, policy =>
-		policy.WithOrigins(origins)
-			.AllowAnyHeader()
-			.AllowAnyMethod()
-			.AllowCredentials());
+    options.AddPolicy(corsPolicy, policy =>
+        policy.WithOrigins("http://localhost:5173")
+              .AllowAnyHeader()
+              .AllowAnyMethod()
+              .AllowCredentials());
 });
 
 var app = builder.Build();
