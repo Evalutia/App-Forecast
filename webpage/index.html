@@ -34,9 +34,9 @@
       font-family:"Inter",system-ui,-apple-system,"Segoe UI",Roboto,Arial;
       -webkit-font-smoothing:antialiased;
       -moz-osx-font-smoothing:grayscale;
-      background: radial-gradient(circle at 10% 20%, rgba(52,196,143,0.35), transparent 60%),
-                  radial-gradient(circle at 90% 80%, rgba(4,107,63,0.45), transparent 55%),
-                  linear-gradient(180deg, rgba(4,91,45,0.95) 0%, rgba(6,95,47,0.96) 100%);
+      background: radial-gradient(circle at 10% 20%, rgba(52,196,143,0.2), transparent 60%),
+                  radial-gradient(circle at 90% 80%, rgba(4,107,63,0.25), transparent 55%),
+                  linear-gradient(180deg, rgba(2,70,35,0.98) 0%, rgba(3,50,25,0.99) 100%);
       color:var(--white);
       -webkit-tap-highlight-color: transparent;
       overflow-x:hidden;
@@ -371,6 +371,12 @@
       border:1px solid rgba(255,255,255,0.44);
       position:relative;
       overflow:hidden;
+      transition: transform 0.3s cubic-bezier(0.34, 1.56, 0.64, 1), box-shadow 0.3s ease, border-color 0.3s ease;
+    }
+    .feature:hover {
+      transform: scale(1.12);
+      box-shadow: 0 32px 64px rgba(9,45,25,0.35);
+      border-color: rgba(52,196,143,0.5);
     }
     .feature::before{
       content:"";
@@ -403,28 +409,133 @@
 
     /* Explain / steps */
     .explain {
-      margin-top:36px;
+      margin-top:48px;
       display:flex;
-      gap:22px;
-      align-items:flex-start;
       flex-direction:column;
+      gap:24px;
+      align-items:center;
     }
-    .explain .text {
-      width:100%;
-      background:rgba(255,255,255,0.96);
-      backdrop-filter: blur(24px) saturate(135%);
-      -webkit-backdrop-filter: blur(24px) saturate(135%);
-      color:#21382f;
-      padding:22px 22px 20px;
-      border-radius:16px;
-      box-shadow:var(--card-shadow);
-      border:1px solid rgba(255,255,255,0.52);
+
+    .steps-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 24px;
+      width: 100%;
+      max-width: 1000px;
+      margin: 0 auto;
     }
-    .explain h3{
-      margin:0 0 8px;
-      color:var(--esmeralda-700);
-      font-size:18px;
+
+    .step {
+      background: rgba(255, 255, 255, 0.08);
+      backdrop-filter: blur(16px) saturate(110%);
+      -webkit-backdrop-filter: blur(16px) saturate(110%);
+      border: 1px solid rgba(255, 255, 255, 0.15);
+      border-radius: 14px;
+      padding: 28px 24px;
+      color: var(--white);
+      position: relative;
+      overflow: hidden;
+      transition: all 0.3s ease;
     }
+
+    .step:hover {
+      background: rgba(255, 255, 255, 0.12);
+      border-color: rgba(52, 196, 143, 0.3);
+      transform: translateY(-4px);
+    }
+
+    .step::before {
+      content: "";
+      position: absolute;
+      inset: 0;
+      background: radial-gradient(circle at 0 0, rgba(52, 196, 143, 0.1), transparent 70%);
+      opacity: 0;
+      transition: opacity 0.3s ease;
+      pointer-events: none;
+    }
+
+    .step:hover::before {
+      opacity: 1;
+    }
+
+    .step-number {
+      width: 48px;
+      height: 48px;
+      border-radius: 12px;
+      background: rgba(52, 196, 143, 0.15);
+      border: 2px solid rgba(52, 196, 143, 0.4);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 24px;
+      font-weight: 700;
+      color: var(--esmeralda-500);
+      flex-shrink: 0;
+      position: relative;
+      z-index: 1;
+    }
+
+    .step-header {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      margin-bottom: 16px;
+    }
+
+    .step h4 {
+      margin: 0;
+      font-size: 18px;
+      font-weight: 700;
+      color: var(--white);
+      position: relative;
+      z-index: 1;
+      display: block;
+    }
+
+    /* Pulso verde oscuro sutil en subtítulos */
+    .step h4 {
+      animation: pulse-subtle 2.5s ease-in-out infinite;
+    }
+
+    @keyframes pulse-subtle {
+      0%, 100% {
+        color: var(--white);
+        text-shadow: 0 0 0 rgba(52, 196, 143, 0);
+      }
+      50% {
+        color: rgba(255, 255, 255, 0.95);
+        text-shadow: 0 0 12px rgba(52, 196, 143, 0.4);
+      }
+    }
+
+    .step p {
+      margin: 0;
+      color: rgba(255, 255, 255, 0.85);
+      font-size: 14px;
+      line-height: 1.6;
+      position: relative;
+      z-index: 1;
+    }
+
+    /* Animación de entrada distinta para los pasos */
+    .step.reveal-on-scroll {
+      opacity: 0;
+      transform: scale(0.85) translate3d(0, 20px, 0);
+      filter: blur(10px);
+      transition:
+        opacity 0.7s ease-out,
+        transform 0.7s cubic-bezier(0.34, 1.56, 0.64, 1),
+        filter 0.7s ease-out;
+      transition-delay: calc(0.12s * var(--step-delay));
+      will-change: opacity, transform, filter;
+    }
+
+    .step.reveal-on-scroll.is-visible {
+      opacity: 1;
+      transform: scale(1) translate3d(0, 0, 0);
+      filter: blur(0);
+    }
+
     .bullets{
       margin:12px 0 0;
       display:grid;
@@ -590,6 +701,9 @@
       .hero h1{ font-size:26px; }
       nav.top-nav{ display:none; }
     }
+    @media (max-width:768px){
+      .steps-grid{ grid-template-columns:1fr; }
+    }
     @media (max-width:640px){
       .grid{ grid-template-columns:1fr; }
       .page{ padding:18px; margin:22px auto 26px; }
@@ -600,6 +714,7 @@
       .hero{ padding:24px 18px; }
       .hero-head{ flex-direction:column; }
       .contact{ align-items:flex-start; }
+      .steps-grid{ grid-template-columns:1fr; }
     }
   </style>
 </head>
@@ -734,28 +849,38 @@
 
     <!-- Explicación paso a paso -->
     <section class="explain" aria-labelledby="how-title">
-      <div class="text reveal-on-scroll" role="region" aria-labelledby="how-title">
-        <h3 id="how-title">Cómo lo hacemos (en 4 pasos simples)</h3>
-        <div class="bullets" role="list">
-          <div class="bullet" role="listitem">
-            <div class="dot" aria-hidden="true"></div>
-            <p><strong>1. Traemos tus datos</strong><br>Subís un archivo o conectamos tu base. Nosotros limpiamos y preparamos los datos para análisis confiable.</p>
+      <h2 id="how-title" style="width:100%; margin:0 0 24px; color:var(--white); font-size:20px; font-weight:700; text-align:center;">Cómo lo hacemos (en 4 pasos simples)</h2>
+      <div class="steps-grid">
+        <div class="step reveal-on-scroll" style="--step-delay: 0">
+          <div class="step-header">
+            <div class="step-number">1</div>
+            <h4>Traemos tus datos</h4>
           </div>
+          <p>Subís un archivo o conectamos tu base. Nosotros limpiamos y preparamos los datos para análisis confiable.</p>
+        </div>
 
-          <div class="bullet" role="listitem">
-            <div class="dot" aria-hidden="true"></div>
-            <p><strong>2. Generamos predicciones</strong><br>Ejecutamos análisis que estiman ventas y picos de demanda, comparando modelos para elegir la mejor opción.</p>
+        <div class="step reveal-on-scroll" style="--step-delay: 1">
+          <div class="step-header">
+            <div class="step-number">2</div>
+            <h4>Generamos predicciones</h4>
           </div>
+          <p>Ejecutamos análisis que estiman ventas y picos de demanda, comparando modelos para elegir la mejor opción.</p>
+        </div>
 
-          <div class="bullet" role="listitem">
-            <div class="dot" aria-hidden="true"></div>
-            <p><strong>3. Entregamos planes prácticos</strong><br>Recomendaciones accionables: cantidades a pedir, fechas y riesgo estimado, listas para tu equipo.</p>
+        <div class="step reveal-on-scroll" style="--step-delay: 2">
+          <div class="step-header">
+            <div class="step-number">3</div>
+            <h4>Entregamos planes prácticos</h4>
           </div>
+          <p>Recomendaciones accionables: cantidades a pedir, fechas y riesgo estimado, listas para tu equipo.</p>
+        </div>
 
-          <div class="bullet" role="listitem">
-            <div class="dot" aria-hidden="true"></div>
-            <p><strong>4. Lo dejamos automático</strong><br>Programamos ejecuciones periódicas y recibís reportes sin intervención manual, con soporte cuando lo necesites.</p>
+        <div class="step reveal-on-scroll" style="--step-delay: 3">
+          <div class="step-header">
+            <div class="step-number">4</div>
+            <h4>Lo dejamos automático</h4>
           </div>
+          <p>Programamos ejecuciones periódicas y recibís reportes sin intervención manual, con soporte cuando lo necesites.</p>
         </div>
       </div>
     </section>
@@ -862,14 +987,17 @@
       const ambient = new THREE.AmbientLight(0xffffff, 0.6);
       scene.add(light, light2, ambient);
 
-      // Interacción con el mouse
+      // Interacción con el mouse - suave y uniforme
       let mouseX = 0;
       let mouseY = 0;
+      let targetMouseX = 0;
+      let targetMouseY = 0;
+      
       window.addEventListener('pointermove', (event) => {
         const x = (event.clientX / window.innerWidth) * 2 - 1;
         const y = (event.clientY / window.innerHeight) * 2 - 1;
-        mouseX = x;
-        mouseY = y;
+        targetMouseX = x;
+        targetMouseY = y;
       });
 
       // Resize
@@ -886,11 +1014,17 @@
         requestAnimationFrame(animate);
         const t = clock.getElapsedTime();
 
-        // Rotación base + respuesta al mouse
+        // Interpolación suave del mouse para movimiento uniforme
+        mouseX += (targetMouseX - mouseX) * 0.08;
+        mouseY += (targetMouseY - mouseY) * 0.08;
+
+        // Rotación constante uniforme
         group.rotation.y += 0.0025;
         group.rotation.x += 0.0015;
-        group.rotation.y += mouseX * 0.002;
-        group.rotation.x += mouseY * 0.002;
+        
+        // Respuesta sutil al mouse (movimiento suave, no dependencia directa)
+        group.rotation.y += mouseX * 0.0008;
+        group.rotation.x += mouseY * 0.0008;
 
         // Pequeña pulsación
         const scale = 1 + Math.sin(t * 0.6) * 0.03;
