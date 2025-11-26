@@ -3,6 +3,7 @@ using DataAccess.Repositories.PrediccionDataAccess;
 using DataAccess.Repositories.UsuarioDataAccess;
 using DataAccess.Repositories.VentaDataAccess;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
 using Microsoft.OpenApi.Models;
@@ -20,9 +21,9 @@ var builder = WebApplication.CreateBuilder(args);
 // DbContext (Pomelo MySQL)
 builder.Services.AddDbContextPool<EvalutiaDbContext>(opt =>
 {
-  var cs = builder.Configuration.GetConnectionString("Default");
-  var serverVersion = new MySqlServerVersion(new Version(8, 0, 36));
-  opt.UseMySql(cs, serverVersion, x => x.EnableRetryOnFailure(3));
+    var cs = builder.Configuration.GetConnectionString("Default");
+    var serverVersion = new MySqlServerVersion(new Version(8, 0, 36));
+    opt.UseMySql(cs, serverVersion, x => x.EnableRetryOnFailure(3));
 });
 
 // JWT
@@ -40,32 +41,30 @@ builder.Services.AddScoped<IPrediccionService, PrediccionService>();
 builder.Services.AddScoped<IVentaRepository, VentaRepository>();
 builder.Services.AddScoped<IVentasService, VentasService>();
 
-// 🚨 Agregamos ExceptionFilter como filtro global
+// Exception filter global
 builder.Services.AddControllers(o =>
 {
-  o.Filters.Add<ExceptionFilter>();
+    o.Filters.Add<ExceptionFilter>();
 });
 
 builder.Services.AddEndpointsApiExplorer();
 
-// 🔒 Swagger con seguridad Bearer
+// Swagger + Bearer
 builder.Services.AddSwaggerGen(c =>
 {
-  c.SwaggerDoc("v1", new OpenApiInfo { Title = "Evalutia API", Version = "v1" });
+    c.SwaggerDoc("v1", new OpenApiInfo { Title = "Evalutia API", Version = "v1" });
 
-  // Definición del esquema Bearer
-  c.AddSecurityDefinition("Bearer", new OpenApiSecurityScheme
-  {
-    Description = "JWT en el header Authorization. Ejemplo: **Bearer eyJhbGciOi...**",
-    Name = "Authorization",
-    In = ParameterLocation.Header,
-    Type = SecuritySchemeType.Http,
-    Scheme = "bearer",
-    BearerFormat = "JWT"
-  });
+    c.AddSecurityDefinition("Bearer", new OpenApiSecurityScheme
+    {
+        Description = "JWT en el header Authorization. Ejemplo: **Bearer eyJhbGciOi...**",
+        Name = "Authorization",
+        In = ParameterLocation.Header,
+        Type = SecuritySchemeType.Http,
+        Scheme = "bearer",
+        BearerFormat = "JWT"
+    });
 
-  // Requisito global
-  c.AddSecurityRequirement(new OpenApiSecurityRequirement
+    c.AddSecurityRequirement(new OpenApiSecurityRequirement
     {
         {
             new OpenApiSecurityScheme
@@ -86,37 +85,49 @@ var jwt = builder.Configuration.GetSection("Jwt").Get<JwtOptions>()!;
 builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
     .AddJwtBearer(o =>
     {
-      o.TokenValidationParameters = new()
-      {
-        ValidateIssuer = true,
-        ValidIssuer = jwt.Issuer,
-        ValidateAudience = true,
-        ValidAudience = jwt.Audience,
-        ValidateIssuerSigningKey = true,
-        IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(jwt.Secret)),
-        ValidateLifetime = true,
-        ClockSkew = TimeSpan.FromMinutes(2)
-      };
+        o.TokenValidationParameters = new()
+        {
+            ValidateIssuer = true,
+            ValidIssuer = jwt.Issuer,
+            ValidateAudience = true,
+            ValidAudience = jwt.Audience,
+            ValidateIssuerSigningKey = true,
+            IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(jwt.Secret)),
+            ValidateLifetime = true,
+            ClockSkew = TimeSpan.FromMinutes(2)
+        };
     });
 builder.Services.AddAuthorization();
 
-// CORS
+// CORS - lee la variable (soporta varios orígenes separados por comas)
 var corsPolicy = "Frontend";
 var allowedOrigins = builder.Configuration["CORS__AllowedOrigins"]
-		     ?? builder.Configuration["CORS_ORIGINS"]
-		     ?? "http://localhost:5173";
+                     ?? builder.Configuration["CORS_ORIGINS"]
+                     ?? "http://localhost:5173";
 
 var origins = allowedOrigins.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
 builder.Services.AddCors(options =>
 {
-	options.AddPolicy(corsPolicy, policy =>
-		policy.WithOrigins(origins)
-			.AllowAnyHeader()
-			.AllowAnyMethod()
-			.AllowCredentials());
+    options.AddPolicy(corsPolicy, policy =>
+        policy.WithOrigins(origins)
+              .AllowAnyHeader()
+              .AllowAnyMethod()
+              .AllowCredentials());
 });
 
 var app = builder.Build();
+
+// Forwarded headers (para proxys como Caddy)
+app.UseForwardedHeaders(new ForwardedHeadersOptions
+{
+    ForwardedHeaders = ForwardedHeaders.XForwardedFor | ForwardedHeaders.XForwardedProto
+});
+
+if (!app.Environment.IsDevelopment())
+{
+    app.UseHsts();
+}
+
 app.UseCors(corsPolicy);
 app.UseSwagger();
 app.UseSwaggerUI();
