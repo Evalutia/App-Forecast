@@ -52,23 +52,99 @@
       pointer-events:none;
     }
 
+    /* Navbar fija */
+    .navbar {
+      position: fixed;
+      top: 0;
+      left: 0;
+      right: 0;
+      z-index: 999;
+      background: rgba(2, 30, 20, 0.75);
+      backdrop-filter: blur(16px);
+      -webkit-backdrop-filter: blur(16px);
+      border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+      display: flex;
+      align-items: center;
+      gap: 24px;
+      padding: 12px 28px;
+    }
+
+    .navbar-logo-link {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .navbar-logo {
+      width: 48px;
+      height: 48px;
+      object-fit: contain;
+      border-radius: 10px;
+      background: var(--white);
+      padding: 6px;
+      cursor: pointer;
+      flex-shrink: 0;
+      transition: transform .2s ease, box-shadow .2s ease;
+    }
+    .navbar-logo:hover {
+      transform: scale(1.05);
+      box-shadow: 0 4px 14px rgba(0, 0, 0, 0.3);
+    }
+
+    .navbar-title {
+      display: flex;
+      flex-direction: column;
+      line-height: 1.1;
+      flex-shrink: 0;
+    }
+    .navbar-title h1 {
+      margin: 0;
+      font-size: 18px;
+      font-weight: 800;
+      color: var(--white);
+      letter-spacing: -0.3px;
+    }
+    .navbar-title p {
+      margin: 2px 0 0;
+      font-size: 11px;
+      font-weight: 600;
+      color: rgba(255, 255, 255, 0.75);
+    }
+
+    .navbar-nav {
+      margin-left: auto;
+      display: flex;
+      gap: 10px;
+      align-items: center;
+    }
+    .navbar-nav a {
+      color: rgba(255, 255, 255, 0.92);
+      font-weight: 600;
+      padding: 8px 14px;
+      border-radius: 8px;
+      border: 1px solid rgba(255, 255, 255, 0.12);
+      background: rgba(255, 255, 255, 0.08);
+      transition: background .14s ease, transform .14s ease, box-shadow .14s ease;
+      font-size: 13px;
+    }
+    .navbar-nav a:hover {
+      background: rgba(255, 255, 255, 0.15);
+      transform: translateY(-2px);
+      box-shadow: 0 8px 18px rgba(0, 0, 0, 0.25);
+    }
+
     /* Layout principal */
     .page {
-      position:relative;
-      z-index:2;
+      position: relative;
+      z-index: 2;
       max-width: var(--max-width);
-      margin: 40px auto 36px;
+      margin: 80px auto 36px;
       padding: 28px;
     }
 
     /* Header */
     header.global-header {
-      display:flex;
-      align-items:center;
-      gap:18px;
-      color:var(--white);
-      margin-bottom:24px;
-      padding:8px 6px;
+      display: none;
     }
 
     .logo {
@@ -440,23 +516,23 @@
 
   <!-- El canvas 3D se crea desde JS (Three.js) y se posiciona fijo de fondo -->
 
+  <!-- Navbar fija -->
+  <nav class="navbar" role="navigation" aria-label="Navegación principal">
+    <a href="#" class="navbar-logo-link" title="Ir al inicio">
+      <img class="navbar-logo" src="assets/logo.png" alt="Logo Evalutia" onerror="this.onerror=null; this.src='logo.png';">
+    </a>
+    <div class="navbar-title">
+      <h1>Evalutia</h1>
+      <p>Automatización & Predicción</p>
+    </div>
+    <div class="navbar-nav" aria-label="Navegación rápida">
+      <a href="https://app.evalutia.net" title="Abrir aplicación">Abrir aplicación</a>
+      <a href="https://api.evalutia.net/swagger/index.html" title="Documentación API">API / Swagger</a>
+      <a href="mailto:evalutia.uy@gmail.com" title="Contacto">Contacto</a>
+    </div>
+  </nav>
+
   <div class="page" role="main">
-
-    <!-- Header: logo + título + nav -->
-    <header class="global-header" role="banner" aria-label="Encabezado Evalutia">
-      <img class="logo" src="assets/logo.png" alt="Logo Evalutia - Automatización inteligente y predictiva" onerror="this.onerror=null; this.src='logo.png';">
-      <div class="global-title">
-        <h1 class="site-title">Evalutia</h1>
-        <p class="site-sub">Automatización inteligente y predicción para PYMEs</p>
-      </div>
-
-      <nav class="top-nav" aria-label="Navegación rápida">
-        <!-- Mantener hrefs y funcionalidad -->
-        <a href="https://app.evalutia.net" title="Abrir aplicación en app.evalutia.net">Abrir aplicación</a>
-        <a href="https://api.evalutia.net/swagger/index.html" title="Abrir documentación API">API / Swagger</a>
-        <a href="mailto:evalutia.uy@gmail.com" title="Contacto por correo">Contacto</a>
-      </nav>
-    </header>
 
     <!-- Hero Card -->
     <section class="hero reveal-on-scroll" role="region" aria-labelledby="hero-title">
@@ -469,26 +545,6 @@
           Convertimos tus datos de ventas en respuestas claras: <strong>cuánto vas a vender, cuándo pedir stock y cómo planificar compras</strong> para gastar menos y vender más.
           Entregamos resultados listos para usar en tu operación —sin jerga técnica— con reportes periódicos y planes accionables.
         </p>
-
-        <div class="hero-cta" aria-label="Acciones principales">
-          <!-- No cambiar hrefs ni funciones -->
-          <a class="btn primary" href="https://app.evalutia.net" title="Abrir aplicación en app.evalutia.net" role="button">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true" focusable="false">
-              <path d="M3 12h18" stroke="white" stroke-width="2" stroke-linecap="round"/>
-              <path d="M12 3v18" stroke="white" stroke-width="2" stroke-linecap="round"/>
-            </svg>
-            Abrir aplicación
-          </a>
-
-          <a class="btn ghost" href="https://api.evalutia.net/swagger/index.html" title="Abrir documentación API" role="button">
-            API / Swagger
-          </a>
-
-          <!-- Secondary CTA (misma funcionalidad) -->
-          <a class="btn ghost" href="mailto:evalutia.uy@gmail.com" title="Solicitar demo por correo" role="button" style="border-style:dashed;">
-            Solicitar demo
-          </a>
-        </div>
 
         <div class="contact" aria-hidden="false">
           <strong>Contacto:</strong>
