@@ -4,14 +4,9 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <title>Evalutia — Automatización inteligente & Predicción</title>
-
-  <!-- Tipografía -->
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;700;800&display=swap" rel="stylesheet">
 
   <style>
-    /* =========================
-       Variables de color (mismo esquema)
-       ========================= */
     :root{
       --esmeralda-900: #023927;
       --esmeralda-700: #046b3f;
@@ -729,6 +724,215 @@
 
     /* Feature grid delays */
 
+    /* Contact Button */
+    .contact-btn {
+      background: linear-gradient(135deg, var(--esmeralda-500), var(--esmeralda-600));
+      color: var(--white);
+      border: 1px solid rgba(52, 196, 143, 0.5);
+      padding: 12px 24px;
+      border-radius: 8px;
+      font-size: 15px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.3s ease;
+      box-shadow: 0 8px 24px rgba(52, 196, 143, 0.2);
+    }
+
+    .contact-btn:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 12px 32px rgba(52, 196, 143, 0.35);
+      background: linear-gradient(135deg, var(--esmeralda-600), var(--esmeralda-700));
+    }
+
+    .contact-btn:active {
+      transform: translateY(0);
+    }
+
+    /* Contact Modal */
+    .contact-modal {
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background: rgba(0, 0, 0, 0.65);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      z-index: 1000;
+      backdrop-filter: blur(4px);
+      -webkit-backdrop-filter: blur(4px);
+      animation: fadeIn 0.3s ease;
+    }
+
+    @keyframes fadeIn {
+      from { opacity: 0; }
+      to { opacity: 1; }
+    }
+
+    .contact-modal-content {
+      background: rgba(255, 255, 255, 0.98);
+      backdrop-filter: blur(20px) saturate(140%);
+      -webkit-backdrop-filter: blur(20px) saturate(140%);
+      border-radius: 16px;
+      padding: 40px;
+      max-width: 500px;
+      width: 90%;
+      max-height: 85vh;
+      overflow-y: auto;
+      box-shadow: 0 32px 64px rgba(0, 0, 0, 0.35);
+      border: 1px solid rgba(255, 255, 255, 0.5);
+      position: relative;
+      animation: slideUp 0.3s ease;
+    }
+
+    @keyframes slideUp {
+      from {
+        transform: translateY(40px);
+        opacity: 0;
+      }
+      to {
+        transform: translateY(0);
+        opacity: 1;
+      }
+    }
+
+    .close-modal {
+      position: absolute;
+      top: 16px;
+      right: 16px;
+      background: none;
+      border: none;
+      font-size: 28px;
+      color: #666;
+      cursor: pointer;
+      transition: color 0.2s ease;
+      padding: 0;
+      width: 32px;
+      height: 32px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .close-modal:hover {
+      color: var(--esmeralda-700);
+    }
+
+    .contact-modal-content h2 {
+      margin: 0 0 24px;
+      color: var(--esmeralda-700);
+      font-size: 28px;
+      font-weight: 700;
+    }
+
+    .contact-form {
+      display: flex;
+      flex-direction: column;
+      gap: 20px;
+    }
+
+    .form-group {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+
+    .form-group label {
+      color: #2b3b33;
+      font-weight: 600;
+      font-size: 14px;
+    }
+
+    .form-group input,
+    .form-group textarea {
+      padding: 12px 14px;
+      border: 1px solid rgba(52, 196, 143, 0.3);
+      border-radius: 8px;
+      font-size: 14px;
+      color: #21382f;
+      transition: all 0.3s ease;
+      font-family: inherit;
+    }
+
+    .form-group input:focus,
+    .form-group textarea:focus {
+      outline: none;
+      border-color: var(--esmeralda-500);
+      box-shadow: 0 0 0 3px rgba(52, 196, 143, 0.1);
+      background: rgba(52, 196, 143, 0.02);
+    }
+
+    .form-group textarea {
+      resize: vertical;
+      min-height: 120px;
+    }
+
+    #recaptcha-container {
+      display: flex;
+      justify-content: center;
+      padding: 10px 0;
+    }
+
+    .submit-btn {
+      background: linear-gradient(135deg, #34c48f, #2ba570);
+      color: var(--white);
+      border: none;
+      padding: 14px 28px;
+      border-radius: 8px;
+      font-size: 16px;
+      font-weight: 700;
+      cursor: pointer;
+      transition: all 0.3s ease;
+      box-shadow: 0 8px 24px rgba(52, 196, 143, 0.3);
+      width: 100%;
+    }
+
+    .submit-btn:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 12px 32px rgba(52, 196, 143, 0.5);
+      background: linear-gradient(135deg, #2ba570, #1f8a5a);
+    }
+
+    .submit-btn:active {
+      transform: translateY(0);
+    }
+
+    .submit-btn:disabled {
+      opacity: 0.7;
+      cursor: not-allowed;
+    }
+
+    .form-note {
+      margin: 0;
+      color: #999;
+      font-size: 12px;
+      text-align: center;
+    }
+
+    .form-status {
+      text-align: center;
+      padding: 12px;
+      border-radius: 8px;
+      font-size: 14px;
+      margin-top: 8px;
+      display: none;
+    }
+
+    .form-status.success {
+      background: rgba(52, 196, 143, 0.15);
+      color: #046b3f;
+      display: block;
+      border: 1px solid rgba(52, 196, 143, 0.3);
+    }
+
+    .form-status.error {
+      background: rgba(239, 68, 68, 0.15);
+      color: #991b1b;
+      display: block;
+      border: 1px solid rgba(239, 68, 68, 0.3);
+    }
+
     /* Footer */
     footer{
       margin-top:40px;
@@ -775,13 +979,7 @@
   </style>
 </head>
 <body>
-
-  <!-- El canvas 3D se crea desde JS (Three.js) y se posiciona fijo de fondo -->
-
-  <!-- Canvas para animación de partículas en costados -->
   <canvas id="particles-canvas" class="particles-canvas"></canvas>
-
-  <!-- Navbar fija -->
   <nav class="navbar" role="navigation" aria-label="Navegación principal">
     <a href="#" class="navbar-logo-link" title="Ir al inicio">
       <img class="navbar-logo" src="assets/logo.png" alt="Logo Evalutia" onerror="this.onerror=null; this.src='logo.png';">
@@ -793,7 +991,6 @@
     <div class="navbar-nav" aria-label="Navegación rápida">
       <a href="https://app.evalutia.net" title="Abrir aplicación">Abrir aplicación</a>
       <a href="https://api.evalutia.net/swagger/index.html" title="Documentación API">API / Swagger</a>
-      <a href="mailto:evalutia.uy@gmail.com" title="Contacto">Contacto</a>
     </div>
   </nav>
 
@@ -808,14 +1005,12 @@
 
         <p id="hero-lead" class="lead">
           Muchos comercios no proyectan compras de forma sistemática: eso genera faltantes, ventas perdidas y exceso de stock.
-          <strong>Evalutia</strong> transforma tus ventas en decisiones concretas: te indica <strong>cuánto venderá cada SKU, cuándo reponer y cuánto pedir</strong> para optimizar caja y evitar rupturas.
+          <strong>Evalutia</strong> transforma tus ventas en decisiones concretas: te indica <strong>cuánto venderá cada producto, cuándo reponer y cuánto pedir</strong> para optimizar caja y evitar rupturas.
           Recibís reportes listos (lista de pedido recomendada por producto, calendario de reabastecimiento, informe de riesgo por producto) y acompañamiento humano para implementarlo.
         </p>
 
         <div class="contact" aria-hidden="false">
-          <strong>Contacto:</strong>
-          <a href="mailto:evalutia.uy@gmail.com">evalutia.uy@gmail.com</a>
-          <span class="muted">• Demos personalizadas y asesoramiento</span>
+          <button id="contact-btn" type="button" class="contact-btn" title="Abrir formulario de contacto">Contacto: Demos personalizadas y asesoramiento</button>
         </div>
       </div>
 
@@ -837,8 +1032,6 @@
             </div>
           </div>
         </div>
-
-        <!-- Nota lateral: misma info, mejor presentada -->
         <div class="side-note">
           <strong>¿Por qué Evalutia?</strong>
           <div style="margin-top:6px; color:#3b4a42; line-height:1.4;">
@@ -847,6 +1040,36 @@
         </div>
       </aside>
     </section>
+
+    <!-- Contact Form Modal -->
+    <div id="contact-modal" class="contact-modal" style="display:none;">
+      <div class="contact-modal-content">
+        <button id="close-contact-modal" class="close-modal" title="Cerrar formulario">&times;</button>
+        <h2>Contactanos</h2>
+        <form id="contact-form" class="contact-form">
+          <div class="form-group">
+            <label for="contact-email">Tu correo electrónico *</label>
+            <input type="email" id="contact-email" name="email" required placeholder="tu.email@ejemplo.com">
+          </div>
+          
+          <div class="form-group">
+            <label for="contact-subject">Asunto (opcional)</label>
+            <input type="text" id="contact-subject" name="subject" placeholder="Ej: Consulta sobre demo">
+          </div>
+          
+          <div class="form-group">
+            <label for="contact-message">Descripción *</label>
+            <textarea id="contact-message" name="message" required placeholder="Cuéntanos más sobre tu consulta..." rows="5"></textarea>
+          </div>
+
+          <div id="recaptcha-container" class="g-recaptcha" data-sitekey="6LfsJyAsAAAAAFMlVwJvamtKUJzNF4WcwFpKP2Sc"></div>
+
+          <button type="submit" class="submit-btn">Enviar mensaje</button>
+          <p class="form-note">* Campos requeridos</p>
+        </form>
+        <div id="form-status" class="form-status"></div>
+      </div>
+    </div>
 
     <!-- En otras palabras -->
     <section class="outro reveal-on-scroll" role="region" aria-labelledby="outro-title">
@@ -982,16 +1205,144 @@
     </footer>
 
   </div>
-
-  <!-- Script original (no modificado) -->
   <script>
     document.getElementById('year').innerText = new Date().getFullYear();
   </script>
+  <script src="https://www.google.com/recaptcha/api.js" async defer></script>
+  <script type="text/javascript" src="https://cdn.jsdelivr.net/npm/@emailjs/browser@3/dist/index.min.js"></script>
+  <script>
+    // Variables globales para el formulario
+    const contactBtn = document.getElementById('contact-btn');
+    const contactModal = document.getElementById('contact-modal');
+    const closeBtn = document.getElementById('close-contact-modal');
+    const contactForm = document.getElementById('contact-form');
+    const formStatus = document.getElementById('form-status');
 
-  <!-- Three.js desde CDN para el modelo 3D -->
+    console.log('Script iniciado. Button:', contactBtn, 'Modal:', contactModal);
+
+    // Abrir modal
+    if (contactBtn) {
+      contactBtn.onclick = function(e) {
+        e.preventDefault();
+        e.stopPropagation();
+        console.log('Click en botón de contacto!');
+        contactModal.style.display = 'flex';
+        document.body.style.overflow = 'hidden';
+      };
+    }
+
+    // Cerrar modal
+    function closeModal() {
+      contactModal.style.display = 'none';
+      document.body.style.overflow = 'auto';
+      formStatus.textContent = '';
+      formStatus.classList.remove('success', 'error');
+    }
+
+    // Botón cerrar
+    closeBtn.onclick = closeModal;
+
+    // Cerrar al hacer clic en el fondo
+    contactModal.onclick = function(e) {
+      if (e.target === contactModal) {
+        closeModal();
+      }
+    };
+
+    // Cerrar con tecla Esc
+    document.onkeydown = function(e) {
+      if (e.key === 'Escape' && contactModal.style.display === 'flex') {
+        closeModal();
+      }
+    };
+
+    // Manejar envío del formulario
+    contactForm.onsubmit = async function(e) {
+      e.preventDefault();
+
+      const email = document.getElementById('contact-email').value.trim();
+      const subject = document.getElementById('contact-subject').value.trim() || 'Consulta desde Evalutia';
+      const message = document.getElementById('contact-message').value.trim();
+
+      // Validar campos
+      if (!email || !message) {
+        formStatus.textContent = 'Por favor completa los campos requeridos.';
+        formStatus.classList.add('error');
+        formStatus.classList.remove('success');
+        formStatus.style.display = 'block';
+        return;
+      }
+
+      // Validar reCAPTCHA
+      const recaptchaResponse = grecaptcha.getResponse();
+      if (!recaptchaResponse) {
+        formStatus.textContent = 'Por favor, verifica el reCAPTCHA.';
+        formStatus.classList.add('error');
+        formStatus.classList.remove('success');
+        formStatus.style.display = 'block';
+        return;
+      }
+
+      // Deshabilitar botón
+      const submitBtn = contactForm.querySelector('.submit-btn');
+      const originalText = submitBtn.textContent;
+      submitBtn.disabled = true;
+      submitBtn.textContent = 'Enviando...';
+
+      try {
+        // Esperar a que EmailJS esté disponible
+        while (typeof emailjs === 'undefined') {
+          await new Promise(resolve => setTimeout(resolve, 100));
+        }
+
+        // Inicializar EmailJS
+        if (!emailjs.publicKey) {
+          emailjs.init('58Toqh-hGlxdi6D_-');
+        }
+
+        console.log('Enviando email...');
+
+        // Enviar con EmailJS
+        const response = await emailjs.send(
+          'service_kpc8scu',
+          'template_quzbq2e',
+          {
+            to_email: 'evalutia.uy@gmail.com',
+            from_email: email,
+            subject: subject,
+            message: message,
+            user_message: message
+          }
+        );
+
+        console.log('Email enviado:', response);
+
+        formStatus.textContent = '¡Mensaje enviado exitosamente! Nos contactaremos pronto.';
+        formStatus.classList.add('success');
+        formStatus.classList.remove('error');
+        formStatus.style.display = 'block';
+        contactForm.reset();
+        grecaptcha.reset();
+        
+        setTimeout(() => {
+          closeModal();
+          submitBtn.disabled = false;
+          submitBtn.textContent = originalText;
+        }, 2000);
+      } catch (error) {
+        console.error('Error al enviar:', error);
+        formStatus.textContent = 'Error al enviar el mensaje. Intenta de nuevo.';
+        formStatus.classList.add('error');
+        formStatus.classList.remove('success');
+        formStatus.style.display = 'block';
+        submitBtn.disabled = false;
+        submitBtn.textContent = originalText;
+        grecaptcha.reset();
+      }
+    };
+  </script>
   <script src="https://unpkg.com/three@0.158.0/build/three.min.js"></script>
 
-  <!-- Animación 3D + scroll reveal (nuevo, sin romper nada existente) -->
   <script>
     // Scroll reveal con blur
     (function() {
