@@ -1218,14 +1218,70 @@
     const contactForm = document.getElementById('contact-form');
     const formStatus = document.getElementById('form-status');
 
-    console.log('Script iniciado. Button:', contactBtn, 'Modal:', contactModal);
+    // Función para mostrar notificación
+    function showNotification(message, type = 'success') {
+      const notification = document.createElement('div');
+      notification.style.cssText = `
+        position: fixed;
+        top: 24px;
+        right: 24px;
+        padding: 16px 24px;
+        border-radius: 8px;
+        font-weight: 600;
+        font-size: 14px;
+        z-index: 2000;
+        animation: slideInRight 0.4s ease;
+        box-shadow: 0 8px 24px rgba(0, 0, 0, 0.3);
+      `;
+      
+      if (type === 'success') {
+        notification.style.background = 'linear-gradient(135deg, #34c48f, #2ba570)';
+        notification.style.color = 'white';
+      } else {
+        notification.style.background = '#ef4444';
+        notification.style.color = 'white';
+      }
+      
+      notification.textContent = message;
+      document.body.appendChild(notification);
+      
+      setTimeout(() => {
+        notification.style.animation = 'slideOutRight 0.4s ease';
+        setTimeout(() => notification.remove(), 400);
+      }, 3000);
+    }
+
+    // Agregar animaciones CSS
+    const style = document.createElement('style');
+    style.textContent = `
+      @keyframes slideInRight {
+        from {
+          transform: translateX(400px);
+          opacity: 0;
+        }
+        to {
+          transform: translateX(0);
+          opacity: 1;
+        }
+      }
+      @keyframes slideOutRight {
+        from {
+          transform: translateX(0);
+          opacity: 1;
+        }
+        to {
+          transform: translateX(400px);
+          opacity: 0;
+        }
+      }
+    `;
+    document.head.appendChild(style);
 
     // Abrir modal
     if (contactBtn) {
       contactBtn.onclick = function(e) {
         e.preventDefault();
         e.stopPropagation();
-        console.log('Click en botón de contacto!');
         contactModal.style.display = 'flex';
         document.body.style.overflow = 'hidden';
       };
@@ -1237,6 +1293,8 @@
       document.body.style.overflow = 'auto';
       formStatus.textContent = '';
       formStatus.classList.remove('success', 'error');
+      contactForm.reset();
+      grecaptcha.reset();
     }
 
     // Botón cerrar
@@ -1290,17 +1348,22 @@
       submitBtn.textContent = 'Enviando...';
 
       try {
-        // Esperar a que EmailJS esté disponible
-        while (typeof emailjs === 'undefined') {
+        // Esperar a que EmailJS esté disponible (máximo 5 segundos)
+        let attempts = 0;
+        while (typeof emailjs === 'undefined' && attempts < 50) {
           await new Promise(resolve => setTimeout(resolve, 100));
+          attempts++;
         }
 
-        // Inicializar EmailJS
-        if (!emailjs.publicKey) {
+        if (typeof emailjs === 'undefined') {
+          throw new Error('EmailJS no se cargó correctamente');
+        }
+
+        // Inicializar EmailJS si no está inicializado
+        if (!window.emailjsInitialized) {
           emailjs.init('58Toqh-hGlxdi6D_-');
+          window.emailjsInitialized = true;
         }
-
-        console.log('Enviando email...');
 
         // Enviar con EmailJS
         const response = await emailjs.send(
@@ -1315,26 +1378,23 @@
           }
         );
 
-        console.log('Email enviado:', response);
-
-        formStatus.textContent = '¡Mensaje enviado exitosamente! Nos contactaremos pronto.';
-        formStatus.classList.add('success');
-        formStatus.classList.remove('error');
-        formStatus.style.display = 'block';
-        contactForm.reset();
-        grecaptcha.reset();
+        // Mostrar notificación de éxito
+        showNotification('¡Mensaje enviado exitosamente! Nos contactaremos pronto.', 'success');
         
+        // Cerrar modal después de 1 segundo
         setTimeout(() => {
           closeModal();
           submitBtn.disabled = false;
           submitBtn.textContent = originalText;
-        }, 2000);
+        }, 1000);
+
       } catch (error) {
         console.error('Error al enviar:', error);
-        formStatus.textContent = 'Error al enviar el mensaje. Intenta de nuevo.';
-        formStatus.classList.add('error');
-        formStatus.classList.remove('success');
-        formStatus.style.display = 'block';
+        
+        // Mostrar notificación de error
+        showNotification('Error al enviar el mensaje. Intenta de nuevo.', 'error');
+        
+        // Restaurar botón
         submitBtn.disabled = false;
         submitBtn.textContent = originalText;
         grecaptcha.reset();
