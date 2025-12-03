@@ -222,9 +222,11 @@
 
     .hero-head {
       display:flex;
-      align-items:flex-start;
+      flex-direction:column;
+      align-items:center;
       gap:14px;
       margin-bottom:8px;
+      text-align:center;
     }
     .hero h1 {
       margin:0;
@@ -354,7 +356,7 @@
 
     .grid {
       display:grid;
-      grid-template-columns:repeat(2, minmax(0,1fr));
+      grid-template-columns:1fr;
       gap:28px;
       margin-top:10px;
       margin-bottom:8px;
@@ -367,16 +369,69 @@
       border-radius:14px;
       padding:26px 26px 24px;
       box-shadow: 0 16px 38px rgba(9,45,25,0.14);
-      min-height:160px;
+      min-height:auto;
       border:1px solid rgba(255,255,255,0.44);
       position:relative;
       overflow:hidden;
       transition: transform 0.3s cubic-bezier(0.34, 1.56, 0.64, 1), box-shadow 0.3s ease, border-color 0.3s ease;
+      cursor: pointer;
     }
     .feature:hover {
       transform: scale(1.12);
       box-shadow: 0 32px 64px rgba(9,45,25,0.35);
       border-color: rgba(52,196,143,0.5);
+    }
+
+    .feature-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      cursor: pointer;
+    }
+
+    .feature-header h5 {
+      margin: 0;
+      font-size: 15px;
+      font-weight: 700;
+      flex: 1;
+    }
+
+    .feature-toggle {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 24px;
+      height: 24px;
+      border-radius: 50%;
+      background: rgba(52, 196, 143, 0.15);
+      color: var(--esmeralda-700);
+      font-weight: 700;
+      font-size: 18px;
+      transition: all 0.3s ease;
+      flex-shrink: 0;
+      margin-left: 12px;
+    }
+
+    .feature.expanded .feature-toggle {
+      background: rgba(52, 196, 143, 0.3);
+      transform: rotate(45deg);
+    }
+
+    .feature-content {
+      margin: 0;
+      color:#3b4a42;
+      font-size:15px;
+      line-height:1.6;
+      position:relative;
+      z-index:1;
+      max-height: 0;
+      overflow: hidden;
+      transition: max-height 0.4s ease, margin-top 0.4s ease;
+    }
+
+    .feature.expanded .feature-content {
+      max-height: 200px;
+      margin-top: 16px;
     }
     .feature::before{
       content:"";
@@ -397,6 +452,7 @@
       color:var(--esmeralda-700);
       font-size:17px;
       font-weight:700;
+      text-align:center;
     }
     .feature p{
       margin:0;
@@ -587,32 +643,32 @@
     }
 
     .outro-box {
-      background: rgba(255, 255, 255, 0.93);
+      background: rgba(255, 255, 255, 0.12);
       backdrop-filter: blur(18px) saturate(135%);
       -webkit-backdrop-filter: blur(18px) saturate(135%);
       border-radius: 16px;
       padding: 32px 32px 28px;
       box-shadow: 0 18px 40px rgba(9, 45, 25, 0.16);
-      color: #21382f;
+      color: var(--white);
       max-width: 900px;
       border: 1px solid rgba(255, 255, 255, 0.45);
     }
 
     .outro-box h2 {
       margin: 0 0 12px;
-      color: var(--esmeralda-700);
+      color: var(--esmeralda-500);
       font-size: 22px;
       font-weight: 700;
     }
 
     .outro-box p {
       margin: 0 0 18px;
-      color: #2b3b33;
+      color: var(--white);
       font-size: 15px;
       line-height: 1.6;
     }
     .outro-box p strong {
-      color: var(--esmeralda-700);
+      color: var(--esmeralda-500);
     }
 
     .outro-grid {
@@ -638,35 +694,35 @@
     }
 
     .outro-item strong {
-      color: var(--esmeralda-700);
+      color: var(--esmeralda-500);
       display: block;
       margin-bottom: 6px;
       font-size: 14px;
     }
 
     .outro-item div {
-      color: #3b4a42;
+      color: var(--white);
       font-size: 13px;
       line-height: 1.5;
     }
 
     .outro-note {
-      background: rgba(52, 196, 143, 0.08);
+      background: rgba(52, 196, 143, 0.12);
       border-left: 3px solid var(--esmeralda-500);
       border-radius: 8px;
       padding: 14px 16px;
-      color: #21382f;
+      color: var(--white);
     }
 
     .outro-note strong {
-      color: var(--esmeralda-700);
+      color: var(--esmeralda-500);
       display: block;
       margin-bottom: 6px;
       font-size: 14px;
     }
 
     .outro-note div {
-      color: #3b4a42;
+      color: var(--white);
       font-size: 13px;
       line-height: 1.5;
     }
@@ -747,12 +803,13 @@
     <section class="hero reveal-on-scroll" role="region" aria-labelledby="hero-title">
       <div class="left">
         <div class="hero-head" aria-hidden="false">
-          <h1 id="hero-title">Predicciones que transforman operación en ahorro y ventas</h1>
+          <h1 id="hero-title">Evita faltantes y reduce costos<br>Predicción de ventas para PYMEs</h1>
         </div>
 
         <p id="hero-lead" class="lead">
-          Convertimos tus datos de ventas en respuestas claras: <strong>cuánto vas a vender, cuándo pedir stock y cómo planificar compras</strong> para gastar menos y vender más.
-          Entregamos resultados listos para usar en tu operación —sin jerga técnica— con reportes periódicos y planes accionables.
+          Muchos comercios no proyectan compras de forma sistemática: eso genera faltantes, ventas perdidas y exceso de stock.
+          <strong>Evalutia</strong> transforma tus ventas en decisiones concretas: te indica <strong>cuánto venderá cada SKU, cuándo reponer y cuánto pedir</strong> para optimizar caja y evitar rupturas.
+          Recibís reportes listos (lista de pedido recomendada por producto, calendario de reabastecimiento, informe de riesgo por producto) y acompañamiento humano para implementarlo.
         </p>
 
         <div class="contact" aria-hidden="false">
@@ -794,56 +851,83 @@
     <!-- En otras palabras -->
     <section class="outro reveal-on-scroll" role="region" aria-labelledby="outro-title">
       <div class="outro-box">
-        <h2 id="outro-title">En otras palabras</h2>
-        <p><strong>Evalutia</strong> predice futuras ventas y te indica: cuándo comprar, cuánto producir y cómo evitar faltantes o sobrantes. Todo pensado para operaciones reales.</p>
-        <div class="outro-grid">
-          <div class="outro-item">
-            <strong>Entregas</strong>
-            <div>Predicciones periódicas y reportes operativos, listos para ejecutar.</div>
-          </div>
-          <div class="outro-item">
-            <strong>Seguridad</strong>
-            <div>Acceso seguro con cuentas y permisos, integraciones administrativas.</div>
-          </div>
-        </div>
-        <div class="outro-note">
-          <strong>¿Por qué Evalutia?</strong>
-          <div>Modelos combinados en producción, integración mediante CSV o API, y soporte humano para poner la predicción en acción dentro de tu operación diaria.</div>
+        <h2 id="outro-title">Problema — Solución — Beneficios</h2>
+
+        <h3 style="margin-top:8px; color:var(--esmeralda-500);">Problema</h3>
+        <p>Muchas PYMEs no proyectan compras de forma sistemática. El resultado: faltantes que generan ventas perdidas, exceso de stock que inmoviliza capital, y compras por urgencia con menor margen.</p>
+
+        <h3 style="margin-top:12px; color:var(--esmeralda-500);">Solución</h3>
+        <p><strong>Evalutia</strong> predice la demanda por artículo y recomienda cuándo y cuánto comprar. Entregamos listas de pedido por producto, un calendario de reabastecimiento y reportes de riesgo, listos para ejecutar o integrar con tu flujo actual.</p>
+
+        <h3 style="margin-top:12px; color:var(--esmeralda-500);">Beneficios</h3>
+        <ul style="margin:8px 0 12px 18px; color:var(--white);">
+          <li>Menos faltantes — mayor disponibilidad para vender.</li>
+          <li>Menos exceso de stock — menor costo financiero e inventario.</li>
+          <li>Decisiones operativas rápidas con reportes accionables.</li>
+        </ul>
+
+        <h3 style="margin-top:8px; color:var(--esmeralda-500);">Funcionamiento y público</h3>
+        <p>Funciona con uploads simples (CSV), integración por API o con ayuda de nuestro equipo para conectar tu sistema de gestión. Está pensado para PYMEs comerciales y mayoristas (alimentos, bebidas, ferretería, perfumería, repuestos) que buscan planificar compras sin depender de hojas manuales.</p>
+
+        <h3 style="margin-top:12px; color:var(--esmeralda-500);">Prueba rápida (caso)</h3>
+        <p>Ejemplo: una tienda promedio que adoptó Evalutia redujo faltantes en ~60% y disminuyó exceso de stock en ~18% en 3 meses, con una mejora de ~12% en la rentabilidad sobre el inventario gestionado (valores orientativos, dependen del negocio).</p>
+
+        <div class="outro-note" style="margin-top:14px;">
+          <strong>Soporte humano</strong>
+          <div>Nuestro equipo ayuda a interpretar los reportes y configurar la solución: "te ayudo a usarlo" — clave para comercios sin experiencia previa en previsión o ERPs.</div>
         </div>
       </div>
     </section>
 
     <!-- Características -->
-    <h2 class="section-title">Características y beneficios</h2>
+    <h2 class="section-title">Características</h2>
     <section class="grid" role="list" aria-label="Características y beneficios">
       <div class="feature reveal-on-scroll" role="listitem">
-        <h5>Predicciones fáciles de entender</h5>
-        <p>Resultados con números claros y explicaciones: <strong>cuánto, cuándo y con qué confianza</strong>. Diseñado para decisiones operativas rápidas.</p>
+          <div class="feature-header">
+            <h5>Reportes operativos claros</h5>
+            <span class="feature-toggle">+</span>
+          </div>
+          <p class="feature-content">Reportes listos: lista de pedido recomendada por producto, calendario de reabastecimiento y resumen de riesgo por producto — todo en formatos fáciles de leer para tomar decisión operativa.</p>
       </div>
 
       <div class="feature reveal-on-scroll" role="listitem">
-        <h5>Integración sin dolor</h5>
-        <p>Subí tus CSV o conectá tu base de datos. También contamos con una API documentada para integrarlo con tus sistemas actuales.</p>
+        <div class="feature-header">
+          <h5>Integración flexible</h5>
+          <span class="feature-toggle">+</span>
+        </div>
+        <p class="feature-content">Funciona por upload de CSV, por integración API o vía asistencia manual de nuestro equipo para conectar tu gestión actual — elegí lo que te resulte más cómodo.</p>
       </div>
 
       <div class="feature reveal-on-scroll" role="listitem">
-        <h5>Robusto y confiable</h5>
-        <p>Modelos probados en producción que se combinan para obtener mejores resultados y reducir el riesgo de pronósticos erráticos.</p>
+        <div class="feature-header">
+          <h5>Modelos en producción</h5>
+          <span class="feature-toggle">+</span>
+        </div>
+        <p class="feature-content">Combinamos modelos y validamos el resultado en producción, con monitoreo continuo para mantener precisión y detectar desviaciones.</p>
       </div>
 
       <div class="feature reveal-on-scroll" role="listitem">
-        <h5>Automatización</h5>
-        <p>Programamos ejecuciones periódicas y entregamos reportes listos para usar, con recomendaciones prácticas para la operación.</p>
+        <div class="feature-header">
+          <h5>Automatización práctica</h5>
+          <span class="feature-toggle">+</span>
+        </div>
+        <p class="feature-content">Programá ejecuciones diarias o semanales; recibí alertas y reportes automáticos para incorporar directamente en tus compras y planificación.</p>
       </div>
 
       <div class="feature reveal-on-scroll" role="listitem">
-        <h5>Soporte humano</h5>
-        <p>Te ayudamos a interpretar las predicciones, ajustar parámetros y desplegar la solución dentro de tu flujo operativo.</p>
+        <div class="feature-header">
+          <h5>Soporte humano dedicado</h5>
+          <span class="feature-toggle">+</span>
+        </div>
+        <p class="feature-content">Acompañamiento práctico: demos guiadas, capacitación y soporte para ajustar parámetros — ideal para comercios pequeños que nunca trabajaron con previsión.</p>
       </div>
 
       <div class="feature reveal-on-scroll" role="listitem">
-        <h5>Despliegue sencillo</h5>
-        <p>Instalación y operación con contenedores (Docker) y servicios preparados para escalar según tus necesidades.</p>
+        <div class="feature-header">
+          <h5>Despliegue flexible</h5>
+          <span class="feature-toggle">+</span>
+        </div>
+        <p class="feature-content">Implantación por servicio gestionado o con contenedores (Docker) si preferís operar en tu infraestructura. Escalamos según tu crecimiento.</p>
       </div>
     </section>
 
@@ -856,7 +940,7 @@
             <div class="step-number">1</div>
             <h4>Traemos tus datos</h4>
           </div>
-          <p>Subís un archivo o conectamos tu base. Nosotros limpiamos y preparamos los datos para análisis confiable.</p>
+          <p>Subís un archivo o conectamos tu base. Nosotros limpiamos y transformamos los datos para que veas inmediatamente: tablas por producto, historial ajustado y un archivo de pedidos sugeridos.</p>
         </div>
 
         <div class="step reveal-on-scroll" style="--step-delay: 1">
@@ -864,7 +948,7 @@
             <div class="step-number">2</div>
             <h4>Generamos predicciones</h4>
           </div>
-          <p>Ejecutamos análisis que estiman ventas y picos de demanda, comparando modelos para elegir la mejor opción.</p>
+          <p>Generamos predicciones con intervalos de confianza y visuales sencillos: series temporales, pronóstico por línea y alertas de picos o tendencias.</p>
         </div>
 
         <div class="step reveal-on-scroll" style="--step-delay: 2">
@@ -872,7 +956,7 @@
             <div class="step-number">3</div>
             <h4>Entregamos planes prácticos</h4>
           </div>
-          <p>Recomendaciones accionables: cantidades a pedir, fechas y riesgo estimado, listas para tu equipo.</p>
+          <p>Recibís listas de pedido recomendadas por producto, fechas sugeridas y un resumen con el nivel de riesgo para priorizar acciones.</p>
         </div>
 
         <div class="step reveal-on-scroll" style="--step-delay: 3">
@@ -880,7 +964,7 @@
             <div class="step-number">4</div>
             <h4>Lo dejamos automático</h4>
           </div>
-          <p>Programamos ejecuciones periódicas y recibís reportes sin intervención manual, con soporte cuando lo necesites.</p>
+          <p>Dejamos los procesos automáticos: ejecuciones programadas, reportes automáticos y paneles para monitorear desempeño y decidir con rapidez.</p>
         </div>
       </div>
     </section>
@@ -930,7 +1014,28 @@
       }
     })();
 
-    // Fondo 3D interactivo
+    // Características expandibles
+    (function() {
+      const features = document.querySelectorAll('.feature');
+      
+      features.forEach(feature => {
+        const header = feature.querySelector('.feature-header');
+        
+        header.addEventListener('click', (e) => {
+          e.stopPropagation();
+          
+          // Cerrar otros features abiertos
+          features.forEach(f => {
+            if (f !== feature && f.classList.contains('expanded')) {
+              f.classList.remove('expanded');
+            }
+          });
+          
+          // Toggle el feature actual
+          feature.classList.toggle('expanded');
+        });
+      });
+    })();    // Fondo 3D interactivo
     (function() {
       if (!window.THREE) return;
 
@@ -1088,16 +1193,16 @@
             line.y = -line.length;
           }
 
-          // Dibujar línea con gradiente muy sutil
+          // Dibujar línea con gradiente muy sutil (verde oscuro)
           const gradient = ctx.createLinearGradient(line.x, line.y, line.x, line.y + line.length);
-          gradient.addColorStop(0, `rgba(52, 196, 143, 0)`);
-          gradient.addColorStop(0.3, `rgba(52, 196, 143, ${line.opacity * 0.4})`);
-          gradient.addColorStop(0.5, `rgba(52, 196, 143, ${line.opacity})`);
-          gradient.addColorStop(0.7, `rgba(52, 196, 143, ${line.opacity * 0.4})`);
-          gradient.addColorStop(1, `rgba(52, 196, 143, 0)`);
+          gradient.addColorStop(0, `rgba(4, 107, 63, 0)`);
+          gradient.addColorStop(0.3, `rgba(4, 107, 63, ${line.opacity * 0.4})`);
+          gradient.addColorStop(0.5, `rgba(4, 107, 63, ${line.opacity})`);
+          gradient.addColorStop(0.7, `rgba(4, 107, 63, ${line.opacity * 0.4})`);
+          gradient.addColorStop(1, `rgba(4, 107, 63, 0)`);
 
-          // Glow ultra suave
-          ctx.shadowColor = 'rgba(52, 196, 143, 0.1)';
+          // Glow ultra suave (verde oscuro)
+          ctx.shadowColor = 'rgba(4, 107, 63, 0.1)';
           ctx.shadowBlur = 4;
           ctx.shadowOffsetX = 0;
           ctx.shadowOffsetY = 0;
