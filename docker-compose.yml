@@ -67,16 +67,14 @@ services:
       JWT__Secret: ${JWT_SECRET}
       CORS__AllowedOrigins: ${CORS_ORIGINS}
       TZ: ${TZ}
-    depends_on:
-      mysql:
-        condition: service_healthy
-    ports:
-      - "8081:8080"
     healthcheck:
       test: ["CMD-SHELL", "curl -fsS http://localhost:8080/swagger/index.html || exit 1"]
       interval: 15s
       timeout: 5s
       retries: 20
+    depends_on:
+      mysql:
+        condition: service_healthy
     networks:
       - evalutia_net
     restart: unless-stopped
@@ -129,8 +127,45 @@ services:
       - TZ=America/Montevideo
     restart: unless-stopped
 
+  webapp:
+    build:
+      context: ./apps/frontend
+      dockerfile: Dockerfile
+      args:
+        VITE_API_BASE_URL: ${VITE_API_BASE_URL}
+    container_name: evalutia-webapp
+    env_file:
+      - .env
+    environment:
+      - TZ=${TZ}
+    depends_on:
+      webapi:
+        condition: service_healthy
+    networks:
+      - evalutia_net
+    restart: unless-stopped
+
+  caddy:
+    image: caddy:latest
+    container_name: caddy
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+      - ./webpage:/opt/evalutia/webpage:ro
+    networks:
+      - evalutia_net
+
 networks:
   evalutia_net:
+    external: true
+    name: evalutia_evalutia_net
 
 volumes:
+  caddy_data:
+  caddy_config:
   mysql_data:
