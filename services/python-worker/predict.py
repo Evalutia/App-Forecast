@@ -28,6 +28,7 @@ from ml.evaluate import rmse, r2_score
 from ml.models import (
     fit_rf_insample,
     fit_xgb_insample,
+    fit_prophet_insample,
     ModelResult,
 )
 from utils.logging_conf import setup_logging
@@ -48,7 +49,7 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--skus", type=str, default=None)
     p.add_argument("--min-history", type=int, default=24, help="Min history en meses (mantener en meses)")
     p.add_argument("--version", type=str, required=True)
-    p.add_argument("--model-set", type=str, default="tree", choices=["full","classic","tree"])
+    p.add_argument("--model-set", type=str, default="tree", choices=["full","classic","tree","prophet"])
     p.add_argument("--mysql-host", type=str, default=os.getenv("MYSQL_HOST"))
     p.add_argument("--mysql-port", type=int, default=int(os.getenv("MYSQL_PORT", "3306")))
     p.add_argument("--mysql-db", type=str, default=os.getenv("MYSQL_DB", "evalutia"))
@@ -63,8 +64,8 @@ def parse_args() -> argparse.Namespace:
     p.add_argument(
         "--top-n",
         type=int,
-        default=20,
-        help="Considerar solo los N SKUs con mayor venta total histórica."
+        default=0,  # 0 ó negativo => sin límite, procesar todos los SKUs
+        help="Considerar solo los N SKUs con mayor venta total histórica. 0 = sin límite.",
     )
     # NUEVO: forzar fecha final (la que usó el ETL). El script predice empezando en (FORCE_END + 1 día)'s period.
     p.add_argument(
@@ -150,6 +151,10 @@ def main() -> None:
     setup_logging(level="INFO")
     log = logging.getLogger("predict")
 
+    # silenciar un poco cmdstanpy/prophet en logs
+    logging.getLogger("cmdstanpy").setLevel(logging.WARNING)
+    logging.getLogger("prophet").setLevel(logging.WARNING)
+
     db_cfg = DBConfig(
         host=args.mysql_host or "localhost",
         port=args.mysql_port,
@@ -183,15 +188,13 @@ def main() -> None:
             if prev_det and isinstance(prev_det, dict):
                 prev_rule = prev_det.get("resample_rule")
                 prev_periods = prev_det.get("forecast_periods") or prev_det.get("requested_periods")
-                if prev_rule and prev_rule != None and prev_rule != " " and prev_rule != "":
-                    if prev_rule != None and prev_rule != "" and prev_rule != None and prev_rule != None:
-                        # sólo comprobar si hay cambio
-                        if prev_rule != None and prev_rule != "" and prev_rule != args.resample_rule:
-                            log.warning(
-                                "Cambio detectado en resample_rule: ultima ejecución usó '%s' y ahora se pide '%s'. Verifique que '--periods' esté definido correctamente para la nueva frecuencia.",
-                                prev_rule,
-                                args.resample_rule,
-                            )
+                if prev_rule and prev_rule.strip():
+                    if prev_rule != args.resample_rule:
+                        log.warning(
+                            "Cambio detectado en resample_rule: ultima ejecución usó '%s' y ahora se pide '%s'. Verifique que '--periods' esté definido correctamente para la nueva frecuencia.",
+                            prev_rule,
+                            args.resample_rule,
+                        )
                 # advertencia si periods difiere de lo anterior (puede implicar distinto horizonte en nueva freq)
                 if prev_periods is not None:
                     try:
@@ -207,6 +210,9 @@ def main() -> None:
     # parse force_end once
     force_end_dt = _parse_force_end(args.force_end)
 
+    # top_n efectivo: 0 o negativo => sin límite
+    top_n_effective: Optional[int] = args.top_n if (args.top_n and args.top_n > 0) else None
+
     try:
         only_skus = [s.strip() for s in args.skus.split(",")] if args.skus else None
 
@@ -218,14 +224,14 @@ def main() -> None:
                 schema=args.mysql_schema,
                 freq=args.freq,
                 only_skus=only_skus,
-                top_n=args.top_n,
+                top_n=top_n_effective,
             )
         else:
             sku_series = load_series_by_sku(
                 args.csv,
                 freq=args.freq,
                 only_skus=only_skus,
-                top_n=args.top_n,
+                top_n=top_n_effective,
             )
 
         rows_buffer: List[Dict] = []
@@ -259,19 +265,14 @@ def main() -> None:
 
                 # ============================
                 # Lógica para decidir el TRAIN y el primer periodo a predecir (fidx_start)
-                # - Si se pasó --force-end: usamos FORCE_END + 1 día para calcular el periodo inicial.
-                # - Sino si se pasó --include-current-period: quitamos la última fila y el primer periodo
-                #   será el que queda eliminado (comportamiento legacy).
-                # - Si no, comportamiento original (predecir desde siguiente periodo calendario).
                 # ============================
                 train = train_full.copy()
                 fidx_start = None
                 freq_str = None
 
                 if force_end_dt is not None:
-                    # Día siguiente a la última venta
+                    # Día siguiente a la última venta considerada por el ETL
                     day_after = force_end_dt + pd.Timedelta(days=1)
-                    # Usar exactamente el día siguiente (no alineado al inicio de periodo)
                     fidx_start = day_after
                     freq_str = "QS" if args.resample_rule.upper().startswith("Q") else "MS"
                     # entrenamos con todos los periodos STRICTAMENTE anteriores a fidx_start
@@ -287,15 +288,10 @@ def main() -> None:
                         continue
                     train = train_full.iloc[:-1].copy()
                     if args.resample_rule.upper().startswith("Q"):
-                        # Para frecuencia trimestral: arrancar en el trimestre que contiene
-                        # (última venta efectiva + 1 mes). Esto garantiza que la predicción
-                        # empiece al menos 1 mes después de la última venta del SKU,
-                        # y alinee al inicio del trimestre correspondiente.
                         last_sale = train_full[train_full > 0].last_valid_index()
                         if last_sale is None:
                             warnings_list.append(f"SKU {sku} omitido: sin ventas efectivas para calcular inicio trimestral")
                             continue
-                        # empezar en el periodo que contiene (última venta + 1 día)
                         day_after = last_sale + pd.Timedelta(days=1)
                         fidx_start = day_after.to_period("Q").to_timestamp()
                         freq_str = "QS"
@@ -314,13 +310,10 @@ def main() -> None:
                     # entrenamos con la serie completa y predecimos a partir del periodo siguiente al último observado
                     train = train_full.copy()
                     if args.resample_rule.upper().startswith("Q"):
-                        # Para trimestral: arrancar en el trimestre que contiene
-                        # (última venta efectiva + 1 mes) por SKU.
                         last_sale = train_full[train_full > 0].last_valid_index()
                         if last_sale is None:
                             warnings_list.append(f"SKU {sku} omitido: sin ventas efectivas para calcular inicio trimestral")
                             continue
-                        # empezar en el periodo que contiene (última venta + 1 día)
                         day_after = last_sale + pd.Timedelta(days=1)
                         fidx_start = day_after.to_period("Q").to_timestamp()
                         freq_str = "QS"
@@ -329,8 +322,6 @@ def main() -> None:
                         freq_str = "MS"
 
                 # ahora construimos fidx a partir de fidx_start
-                # Si se pasó --force-end, queremos que el primer periodo comience
-                # exactamente en la fecha indicada (no alineada al inicio de mes/trimestre).
                 if force_end_dt is not None:
                     if args.resample_rule.upper().startswith("Q"):
                         fidx_model = pd.to_datetime([fidx_start + pd.DateOffset(months=3 * i) for i in range(forecast_periods)])
@@ -343,22 +334,69 @@ def main() -> None:
                 lags = 8 if args.resample_rule.upper().startswith("Q") else 12
 
                 # Entrenamiento de modelos sobre 'train'
-                results: List[ModelResult] = []
-                want_rf = True
-                want_xgb = True
+                all_results: List[ModelResult] = []
+
+                # Selección explícita de modelos según --model-set
+                if args.model_set == "prophet":
+                    want_rf = False
+                    want_xgb = False
+                    want_prophet = True
+                elif args.model_set == "tree":
+                    want_rf = True
+                    want_xgb = True
+                    want_prophet = False
+                elif args.model_set in ("full", "classic"):
+                    # full / classic => RF + XGB + PROPHET
+                    want_rf = True
+                    want_xgb = True
+                    want_prophet = True
+                else:
+                    # default safety: RF + XGB
+                    want_rf = True
+                    want_xgb = True
+                    want_prophet = False
 
                 if want_rf:
                     r = fit_rf_insample(train, steps_forecast=forecast_periods, lags=lags, freq=args.resample_rule)
                     if r:
-                        results.append(r)
+                        all_results.append(r)
                 if want_xgb:
                     r = fit_xgb_insample(train, steps_forecast=forecast_periods, lags=lags, freq=args.resample_rule)
                     if r:
-                        results.append(r)
+                        all_results.append(r)
+
+                if want_prophet:
+                    try:
+                        r = fit_prophet_insample(
+                            sku=sku,
+                            train=train,
+                            steps_forecast=forecast_periods,
+                            lags=lags,
+                            freq=args.resample_rule,
+                        )
+                        if r:
+                            all_results.append(r)
+                    except Exception:
+                        log.exception("Prophet error for sku %s", sku)
+
+                if not all_results:
+                    warnings_list.append(f"SKU {sku} omitido: ningún modelo produjo resultado")
+                    continue
 
                 # Sanitizar forecasts
-                for r in results:
+                for r in all_results:
                     r.forecast = _sanitize_forecast(r.forecast)
+
+                # Elegir el mejor modelo por RMSE
+                best_result: Optional[ModelResult] = None
+                for r in all_results:
+                    if r.rmse is None or not np.isfinite(r.rmse):
+                        continue
+                    if best_result is None or r.rmse < best_result.rmse:
+                        best_result = r
+                # Si todas las métricas vienen nulas/NaN, quedarnos con el primero
+                if best_result is None:
+                    best_result = all_results[0]
 
                 # ----------------------------
                 # Construir las fechas que SE VAN A PERSISTIR: la primera fecha es
@@ -367,48 +405,44 @@ def main() -> None:
                 # ----------------------------
                 fecha_preds: List = []
                 if args.resample_rule.upper().startswith("Q"):
-                    # avanzar 3 meses por horizonte
                     for i in range(forecast_periods):
                         fecha_preds.append((run_date + pd.DateOffset(months=3 * i)).date())
                 else:
                     for i in range(forecast_periods):
                         fecha_preds.append((run_date + pd.DateOffset(months=1 * i)).date())
 
-                # Persistir filas de predicciones por modelo/horizonte
-                # Usamos fidx_model para mantener la correspondencia correcta entre el forecast
-                # del modelo (r.forecast[i]) y el horizonte lógico del modelo, pero guardamos
-                # como "fecha_predicha" las fechas calculadas en fecha_preds (que empiezan en run_date).
-                for r in results:
-                    for h, (dt_model, yhat, fecha_pred) in enumerate(zip(fidx_model, r.forecast, fecha_preds), start=1):
-                        rows_buffer.append(
-                            {
-                                "sku": sku,
-                                "fecha_predicha": fecha_pred,
-                                "cantidad_predicha": as_decimal2(float(yhat)),
-                                "modelo": r.name,
-                                "version_modelo": version,
-                                "horizonte": h,
-                                "rmse": safe_metric(r.rmse),
-                                "r2": safe_metric(r.r2),
-                            }
-                        )
-
-                # Resumen por modelo
-                for r in results:
-                    summary_rows.append(
+                # Persistir filas de predicciones SOLO del mejor modelo
+                for h, (dt_model, yhat, fecha_pred) in enumerate(
+                    zip(fidx_model, best_result.forecast, fecha_preds), start=1
+                ):
+                    rows_buffer.append(
                         {
                             "sku": sku,
-                            "modelo": r.name,
-                            "rmse": r.rmse,
-                            "r2": r.r2,
-                            "features": getattr(r, "features", None),
+                            "fecha_predicha": fecha_pred,
+                            "cantidad_predicha": as_decimal2(float(yhat)),
+                            "modelo": best_result.name,
+                            "version_modelo": version,
+                            "horizonte": h,
+                            "rmse": safe_metric(best_result.rmse),
+                            "r2": safe_metric(best_result.r2),
                         }
                     )
+
+                # Resumen por modelo (solo el ganador)
+                summary_rows.append(
+                    {
+                        "sku": sku,
+                        "modelo": best_result.name,
+                        "rmse": best_result.rmse,
+                        "r2": best_result.r2,
+                        "features": getattr(best_result, "features", None),
+                    }
+                )
 
                 # Dump opcional para inspección
                 if args.debug_dump:
                     df_dump = pd.DataFrame({"fecha": train_full.index, "y_true": train_full.values})
-                    for r in results:
+                    for r in all_results:
                         if r.holdout_pred is not None:
                             df_dump[r.name] = r.holdout_pred.reindex(train_full.index).values
                     df_dump.to_csv(f"eval_{sku}.csv", index=False)
@@ -442,7 +476,9 @@ def main() -> None:
         if summary_rows:
             df_sum = pd.DataFrame(summary_rows)
             for c in ["rmse", "r2"]:
-                df_sum[c] = df_sum[c].apply(lambda x: f"{float(x):.6f}" if x is not None and np.isfinite(x) else "")
+                df_sum[c] = df_sum[c].apply(
+                    lambda x: f"{float(x):.6f}" if x is not None and np.isfinite(x) else ""
+                )
 
             def _feat(f):
                 if isinstance(f, list) and len(f) > 0:
@@ -455,7 +491,11 @@ def main() -> None:
                 df_sum["features"] = df_sum["features"].apply(_feat)
 
             print("\n=== Resumen por modelo/SKU ===")
-            print(df_sum[["sku", "modelo", "rmse", "r2", "features"]].sort_values(["sku", "modelo"]).to_string(index=False))
+            print(
+                df_sum[["sku", "modelo", "rmse", "r2", "features"]]
+                .sort_values(["sku", "modelo"])
+                .to_string(index=False)
+            )
 
     except Exception as e:
         try:
