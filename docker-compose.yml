@@ -1,4 +1,6 @@
+version: "3.8"
 name: evalutia
+
 services:
   mysql:
     image: mysql:8.0
@@ -33,7 +35,7 @@ services:
     environment:
       TZ: ${TZ}
     ports:
-      - "8082:8080"
+      - "${ADMINER_PORT}:8080"
     networks:
       - evalutia_net
     restart: unless-stopped
@@ -67,8 +69,11 @@ services:
       JWT__Secret: ${JWT_SECRET}
       CORS__AllowedOrigins: ${CORS_ORIGINS}
       TZ: ${TZ}
+      ASPNETCORE_URLS: "http://0.0.0.0:${WEBAPI_PORT}"
+    ports:
+      - "${WEBAPI_PORT}:${WEBAPI_PORT}"
     healthcheck:
-      test: ["CMD-SHELL", "curl -fsS http://localhost:8080/swagger/index.html || exit 1"]
+      test: ["CMD-SHELL", "curl -fsS http://localhost:${WEBAPI_PORT}/swagger/index.html || exit 1"]
       interval: 15s
       timeout: 5s
       retries: 20
@@ -87,9 +92,6 @@ services:
     env_file:
       - .env
     environment:
-      # Opción B para evitar el bug de la variable en predict.py:
-      # Descomenta si NO vas a pasar --mysql-pass en el comando
-      # MYSQL_PASS: ${MYSQL_PASSWORD}
       TZ: ${TZ}
     depends_on:
       mysql:
@@ -114,7 +116,6 @@ services:
       - evalutia_net
     restart: unless-stopped
 
-
   ofelia:
     image: mcuadros/ofelia:latest
     container_name: evalutia-ofelia
@@ -126,18 +127,22 @@ services:
     environment:
       - TZ=America/Montevideo
     restart: unless-stopped
+    networks:
+      - evalutia_net
 
   webapp:
     build:
       context: ./apps/frontend
       dockerfile: Dockerfile
       args:
-        VITE_API_BASE_URL: ${VITE_API_BASE_URL}
+        VITE_API_BASE_URL: "http://webapi:${WEBAPI_PORT}"
     container_name: evalutia-webapp
     env_file:
       - .env
     environment:
       - TZ=${TZ}
+    ports:
+      - "${WEBAPP_PORT}:${WEBAPP_PORT}"
     depends_on:
       webapi:
         condition: service_healthy

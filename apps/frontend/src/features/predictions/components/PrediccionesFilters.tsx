@@ -4,7 +4,6 @@ import { useSearchParams } from 'react-router-dom';
 type Props = {
   onChange?: (filtros: {
     sku?: string;
-    modelo?: string;
     desde?: string;
     hasta?: string;
   }) => void;
@@ -22,7 +21,6 @@ export default function PrediccionesFilters({ onChange }: Props) {
   const initial = useMemo(
     () => ({
       sku: getParam(sp, 'sku') ?? '',
-      modelo: getParam(sp, 'modelo') ?? '',
       desde: getParam(sp, 'desde') ?? '',
       hasta: getParam(sp, 'hasta') ?? '',
     }),
@@ -30,7 +28,6 @@ export default function PrediccionesFilters({ onChange }: Props) {
   );
 
   const [sku, setSku] = useState(initial.sku);
-  const [modelo, setModelo] = useState(initial.modelo);
   const [desde, setDesde] = useState(initial.desde);
   const [hasta, setHasta] = useState(initial.hasta);
 
@@ -38,13 +35,12 @@ export default function PrediccionesFilters({ onChange }: Props) {
     const t = setTimeout(() => {
       onChange?.({
         sku: sku || undefined,
-        modelo: modelo || undefined,
         desde: desde || undefined,
         hasta: hasta || undefined,
       });
     }, 200);
     return () => clearTimeout(t);
-  }, [sku, modelo, desde, hasta, onChange]);
+  }, [sku, desde, hasta, onChange]);
 
   const applyToUrl = useCallback(() => {
     const next = new URLSearchParams(sp);
@@ -53,20 +49,18 @@ export default function PrediccionesFilters({ onChange }: Props) {
       else next.delete(k);
     };
     setOrDel('sku', sku);
-    setOrDel('modelo', modelo);
     setOrDel('desde', desde);
     setOrDel('hasta', hasta);
     next.set('page', '1');
     setSp(next, { replace: true });
-  }, [sp, setSp, sku, modelo, desde, hasta]);
+  }, [sp, setSp, sku, desde, hasta]);
 
   const reset = useCallback(() => {
     setSku('');
-    setModelo('');
     setDesde('');
     setHasta('');
     const next = new URLSearchParams(sp);
-    ['sku', 'modelo', 'desde', 'hasta', 'page'].forEach((k) => next.delete(k));
+    ['sku', 'desde', 'hasta', 'page'].forEach((k) => next.delete(k));
     next.set('page', '1');
     setSp(next, { replace: true });
   }, [sp, setSp]);
@@ -82,16 +76,6 @@ export default function PrediccionesFilters({ onChange }: Props) {
             value={sku}
             onChange={(e) => setSku(e.target.value)}
             placeholder="p.ej. I01497"
-          />
-        </div>
-
-        <div className="form-row">
-          <label className="label">Modelo</label>
-          <input
-            className="input"
-            value={modelo}
-            onChange={(e) => setModelo(e.target.value)}
-            placeholder="RF / XGB"
           />
         </div>
 

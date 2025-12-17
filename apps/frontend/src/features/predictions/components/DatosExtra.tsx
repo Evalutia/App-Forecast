@@ -1,9 +1,9 @@
 // apps/frontend/src/apps/predicciones/components/DatosExtra.tsx
 import { useMemo, useState, useEffect } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { usePrediccionesSearch } from '../hooks/usePredicciones';
+import { usePrediccionesSearch, useVentaSkuResumen } from '../hooks/usePredicciones';
+import { formatNumber } from '../utils/format';
 import type { PrediccionSearchParams } from '../types/predicciones';
-import ModelPerformanceChart from './charts/ModelPerformanceChart';
 import ProjectedSalesChart from './charts/ProjectedSalesChart';
 import { getSkuBase } from '../utils/format';
 
@@ -18,7 +18,6 @@ export default function DatosExtra() {
   // ---- CARGA 1: dataset amplio para combo + rendimiento por modelo ----
   const paramsListado: PrediccionSearchParams = useMemo(() => ({
     sku:    getParam(sp, 'sku'),
-    modelo: getParam(sp, 'modelo'),
     desde:  getParam(sp, 'desde'),
     hasta:  getParam(sp, 'hasta'),
     page: 1,
@@ -80,11 +79,21 @@ export default function DatosExtra() {
     [dataSku, skuSel]
   );
 
+  const { data: resumenSku, isLoading: loadingResumen, isError: errorResumen } = useVentaSkuResumen(skuSel);
+
+  const fmtNum = (v: number | null | undefined) => {
+    return formatNumber(v);
+  };
+  const fmtPct = (v: number | null | undefined) => {
+    if (typeof v !== 'number' || Number.isNaN(v)) return '—';
+    return `${v.toFixed(2)}%`;
+  };
+
   return (
     <section className="extra-card">
       <p className="extra-subtitle">
-        Indicadores calculados sobre las predicciones listadas (arriba).
-        Ajustá los filtros para cambiar estas vistas.
+        Seleccione un SKU para ver un resumen de las ventas y la proyección trimestral 
+        o esriba el nombre del SKU en el filtro de la sección "Historial de predicciones".
       </p>
 
       {isLoading ? (
@@ -95,15 +104,7 @@ export default function DatosExtra() {
         <div className="chart-empty">Sin datos para graficar con los filtros actuales.</div>
       ) : (
         <div className="charts-grid">
-          {/* Rendimiento por modelo (dataset amplio) */}
-          <div className="chart-card">
-            <h4 className="chart-title">Rendimiento por modelo</h4>
-            <div className="chart-body">
-              <ModelPerformanceChart data={itemsListado} />
-            </div>
-          </div>
-
-          {/* Ventas proyectadas por SKU (dataset focalizado del SKU) */}
+          {/* Resumen de ventas por SKU */}
           <div className="chart-card">
             <div className="chart-controls">
               <span className="chart-label">SKU</span>
@@ -117,6 +118,103 @@ export default function DatosExtra() {
                 ))}
               </select>
             </div>
+            <div className="chart-body sku-resumen-body">
+              {!skuSel ? (
+                <div className="chart-empty" style={{ width: '100%' }}>
+                  No hay SKUs disponibles.
+                </div>
+              ) : loadingResumen ? (
+                <div className="chart-loading">Cargando resumen…</div>
+              ) : errorResumen ? (
+                <div className="chart-error">Error cargando el resumen del SKU.</div>
+              ) : !resumenSku ? (
+                <div className="chart-empty" style={{ width: '100%' }}>
+                  Sin resumen disponible.
+                </div>
+              ) : (
+                <div className="table-wrap">
+                  <table className="table">
+                    <thead>
+                      <tr>
+                        <th>Métrica</th>
+                        <th>Valor</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      <tr>
+                        <td>Fecha de la primera primera observación para predecir</td>
+                        <td className="mono">{resumenSku.fechaPrimerObservacion ?? '—'}</td>
+                      </tr>
+                      <tr>
+                        <td>Fecha de la última observación para predecir</td>
+                        <td className="mono">{resumenSku.fechaUltimaObservacion ?? '—'}</td>
+                      </tr>
+                      <tr>
+                        <td>Cantidad observaciones</td>
+                        <td>{fmtNum(resumenSku.cantidadObservaciones)}</td>
+                      </tr>
+                      <tr>
+                        <td>Mínimo ventas (trimestre)</td>
+                        <td>
+                          {fmtNum(resumenSku.minimoVentasTrimestral)}
+                          {resumenSku.trimestreMinimoVentas ? ` · ${resumenSku.trimestreMinimoVentas}` : ''}
+                        </td>
+                      </tr>
+                      <tr>
+                        <td>Máximo ventas (trimestre)</td>
+                        <td>
+                          {fmtNum(resumenSku.maximoVentasTrimestral)}
+                          {resumenSku.trimestreMaximoVentas ? ` · ${resumenSku.trimestreMaximoVentas}` : ''}
+                        </td>
+                      </tr>
+                      <tr>
+                        <td>Promedio de ventas por trimestre</td>
+                        <td>{fmtNum(resumenSku.promedioVentasTrimestral)}</td>
+                      </tr>
+                      <tr>
+                        <td>Ventas del último trimestre completo</td>
+                        <td>
+                          {fmtNum(resumenSku.ventasUltimoTrimestre)}
+                          {resumenSku.ultimoTrimestre ? ` · ${resumenSku.ultimoTrimestre}` : ''}
+                        </td>
+                      </tr>
+                      <tr>
+                        <td>Ventas del último año (12m)</td>
+                        <td>{fmtNum(resumenSku.ventasUltimoAnioCalendario)}</td>
+                      </tr>
+                      <tr>
+                        <td>Crecimiento de ventas en el último año</td>
+                        <td>{fmtPct(resumenSku.crecimientoVentasUltimoAnio)}</td>
+                      </tr>
+                      <tr>
+                        <td>Crecimiento de ventas en el último trimestre vs mismo trimestre del año anterior</td>
+                        <td>{fmtPct(resumenSku.crecimientoVentasUltimoTrimestreVsMismoTrimestreAnioAnterior)}</td>
+                      </tr>
+                      <tr>
+                        <td>Incidencia en porcentaje de ventas totales del último año</td>
+                        <td>{fmtPct(resumenSku.incidenciaVentasUltimoAnioPorcentaje)}</td>
+                      </tr>
+                      <tr>
+                        <td>Incidencia en porcentaje de ventas totales del último trimestre</td>
+                        <td>{fmtPct(resumenSku.incidenciaVentasUltimoTrimestrePorcentaje)}</td>
+                      </tr>
+                      <tr>
+                        <td>Ranking del producto</td>
+                        <td>
+                          {typeof resumenSku.rankingUltimoAnio === 'number'
+                            ? `${resumenSku.rankingUltimoAnio} de ${resumenSku.totalSkusUltimoAnio}`
+                            : '—'}
+                        </td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* Ventas proyectadas por SKU (dataset focalizado del SKU) */}
+          <div className="chart-card">
             <div className="chart-body">
               {skuSel ? (
                 itemsSku.length > 0 ? (

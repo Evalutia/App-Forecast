@@ -1,10 +1,10 @@
 using WebApi.Models;
-using DataAccess.Repositories.VentaDataAccess;
 
 namespace Services.Ventas
 {
   public interface IVentasService
   {
+    // Operaciones básicas con validaciones
     (IReadOnlyList<VentaHistorica> Items, int Total) Search(
         DateOnly? fechaDesde,
         DateOnly? fechaHasta,
@@ -23,5 +23,10 @@ namespace Services.Ventas
     );
 
     IReadOnlyList<string> DistinctSkus(string? filtro);
+
+    // Métodos con lógica de negocio compleja
+    IReadOnlyList<(string Sku, ulong TotalCantidad, double PorcentajeVentas, int? PronosticoProximoTrimestre)> TopSkusByVentas(DateOnly fechaDesde, DateOnly fechaHasta, int take);
+
+    VentaSkuResumen GetSkuResumen(string sku, DateOnly today);
   }
 }

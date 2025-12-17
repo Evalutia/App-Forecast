@@ -18,6 +18,16 @@ using WebApi.Filters;
 
 var builder = WebApplication.CreateBuilder(args);
 
+// Forzamos Kestrel a escuchar en 0.0.0.0:${WEBAPI_PORT} si la variable está presente
+var portEnv = Environment.GetEnvironmentVariable("WEBAPI_PORT") ?? builder.Configuration["WEBAPI_PORT"] ?? "8081";
+if (int.TryParse(portEnv, out var webapiPort))
+{
+    builder.WebHost.ConfigureKestrel(options =>
+    {
+        options.ListenAnyIP(webapiPort);
+    });
+}
+
 // DbContext (Pomelo MySQL)
 builder.Services.AddDbContextPool<EvalutiaDbContext>(opt =>
 {
@@ -101,18 +111,32 @@ builder.Services.AddAuthorization();
 
 // CORS - lee la variable (soporta varios orígenes separados por comas)
 var corsPolicy = "Frontend";
-var allowedOrigins = builder.Configuration["CORS__AllowedOrigins"]
-                     ?? builder.Configuration["CORS_ORIGINS"]
-                     ?? "http://localhost:5173";
+var allowedOriginsEnv = builder.Configuration["CORS__AllowedOrigins"]
+                      ?? builder.Configuration["CORS_ORIGINS"]
+                      ?? "http://localhost:5173";
 
-var origins = allowedOrigins.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+var origins = allowedOriginsEnv.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+
 builder.Services.AddCors(options =>
 {
     options.AddPolicy(corsPolicy, policy =>
-        policy.WithOrigins(origins)
-              .AllowAnyHeader()
-              .AllowAnyMethod()
-              .AllowCredentials());
+    {
+        // Si el dev especificó "*" o un patrón para permitir todo, lo permitimos explícitamente (solo dev)
+        if (origins.Length == 1 && (origins[0] == "*" || origins[0] == "http://localhost:*"))
+        {
+            policy.SetIsOriginAllowed(_ => true)
+                  .AllowAnyHeader()
+                  .AllowAnyMethod()
+                  .AllowCredentials();
+        }
+        else
+        {
+            policy.WithOrigins(origins)
+                  .AllowAnyHeader()
+                  .AllowAnyMethod()
+                  .AllowCredentials();
+        }
+    });
 });
 
 var app = builder.Build();
@@ -128,6 +152,7 @@ if (!app.Environment.IsDevelopment())
     app.UseHsts();
 }
 
+// IMPORTANT: UseCors BEFORE authentication/authorization so preflight is handled
 app.UseCors(corsPolicy);
 app.UseSwagger();
 app.UseSwaggerUI();

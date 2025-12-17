@@ -6,6 +6,7 @@ namespace DataAccess.Repositories.VentaDataAccess
 {
   public interface IVentaRepository
   {
+    // Operaciones básicas de datos - CRUD
     (IReadOnlyList<VentaHistorica> Items, int Total) Search(
         DateOnly? fechaDesde,
         DateOnly? fechaHasta,
@@ -24,5 +25,10 @@ namespace DataAccess.Repositories.VentaDataAccess
     );
 
     IReadOnlyList<string> DistinctSkus(string? filtro);
+    
+    // Datos brutos para cálculos en el service
+    IQueryable<VentaHistorica> GetVentasBySku(string sku);
+    IQueryable<VentaHistorica> GetAllVentas();
+    IQueryable<Prediccion> GetAllPredicciones();
   }
 }

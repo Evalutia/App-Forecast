@@ -88,6 +88,25 @@ export function toQuarterLabelFromDate(d: string): string {
   return d;
 }
 
+
+export function quarterRangeFromDate(fechaPredicha: string): { desde: string; hasta: string } {
+  // desde = fecha_predicha exacta de esa predicción (SIN MODIFICAR)
+  const desde = fechaPredicha; // Mantener el string original
+  
+  // hasta = fecha_predicha + 3 meses (exactamente 3 meses después para trimestre completo)
+  const fecha = new Date(fechaPredicha + 'T00:00:00'); // Asegurar medianoche para evitar problemas de zona horaria
+  const hasta = new Date(fecha);
+  hasta.setMonth(fecha.getMonth() + 3);
+  hasta.setDate(hasta.getDate() - 1); // Último día del trimestre
+  
+  const formatDate = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  
+  return { 
+    desde: desde, // Usar el string original sin modificar
+    hasta: formatDate(hasta) 
+  };
+}
+
 export function pickQuarterlyProjection(items: Prediccion[], preferModelo: string | null = 'COMBINADA') {
   const byQ = new Map<string, Prediccion>();
 
@@ -107,4 +126,32 @@ export function pickQuarterlyProjection(items: Prediccion[], preferModelo: strin
   const labels = Array.from(byQ.keys()).sort();
   const values = labels.map((lab) => byQ.get(lab)!.cantidadPredicha);
   return { labels, values };
+}
+
+// Función para formatear números según las reglas especificadas
+export function formatNumber(value: number | null | undefined): string {
+  if (value === null || value === undefined) return '—';
+  
+  // Si tiene 4+ cifras, mostrar sin comas
+  if (Math.abs(value) >= 1000) {
+    return Math.floor(value).toString();
+  }
+  
+  // Si tiene menos de 4 cifras, mostrar con una coma si es decimal
+  if (value % 1 !== 0) {
+    return value.toFixed(1).replace('.', ',');
+  }
+  
+  return value.toString();
+}
+
+// Función para redondear hacia arriba y formatear pronósticos
+export function formatPronostico(value: number | null | undefined): string {
+  if (value === null || value === undefined) return 'DATOS INSUFICIENTES';
+  
+  // Redondear hacia arriba
+  const roundedUp = Math.ceil(value);
+  
+  // Aplicar el mismo formato de números
+  return formatNumber(roundedUp);
 }

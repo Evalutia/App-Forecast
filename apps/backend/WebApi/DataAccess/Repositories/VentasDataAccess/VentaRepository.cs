@@ -1,3 +1,6 @@
+using System;
+using System.Collections.Generic;
+using System.Linq;
 using WebApi.Data;
 using WebApi.Models;
 
@@ -59,9 +62,47 @@ namespace DataAccess.Repositories.VentaDataAccess
       if (!string.IsNullOrWhiteSpace(sku))
         q = q.Where(v => v.Sku == sku);
 
-      // Proyectamos siempre a un tipo anónimo consistente: Year, Month, Day, Sku, TotalCantidad
-      // De esta forma la expresión tiene un único tipo y puede ser traducida por EF.
       var lowerPeriodo = periodo?.ToLower();
+
+      // Si el periodo es trimestral, para evitar translaciones inconsistentes de EF
+      // materializamos los registros y agrupamos en memoria asegurando UNA fila por (Year,Quarter).
+      if (lowerPeriodo == "trimestral")
+      {
+        var rows = q.ToList(); // materializa
+        var grouped = rows
+            .GroupBy(v => new { Year = v.Fecha.Year, Quarter = (v.Fecha.Month - 1) / 3 + 1, v.Sku })
+            .Select(g => new
+            {
+              Year = g.Key.Year,
+              Month = 0,
+              Day = 0,
+              Sku = g.Key.Sku,
+              TotalCantidad = (uint)g.Sum(x => (long)x.Cantidad),
+              Quarter = g.Key.Quarter
+            })
+            .OrderByDescending(x => x.Year)
+            .ThenByDescending(x => x.Quarter)
+            .ToList();
+
+        var total = grouped.Count();
+        var pageItems = grouped
+            .OrderBy(x => x.Year)
+            .ThenBy(x => x.Quarter)
+            .Skip((page - 1) * pageSize)
+            .Take(pageSize)
+            .ToList();
+
+        var items = pageItems.Select(x => new VentaAgregada
+        {
+          Periodo = $"{x.Year:D4}-Q{x.Quarter}",
+          Sku = x.Sku,
+          TotalCantidad = x.TotalCantidad
+        }).ToList();
+
+        return (items, total);
+      }
+
+      // Para los otros periodos usamos la agrupación traducida por EF (mensual/anual/dia)
       var agrupado = lowerPeriodo == "mensual"
         ? q.GroupBy(v => new { v.Sku, Year = v.Fecha.Year, Month = v.Fecha.Month })
             .Select(g => new
@@ -70,7 +111,8 @@ namespace DataAccess.Repositories.VentaDataAccess
               Month = g.Key.Month,
               Day = 1,
               Sku = g.Key.Sku,
-              TotalCantidad = (uint)g.Sum(x => x.Cantidad)
+              TotalCantidad = (uint)g.Sum(x => x.Cantidad),
+              Quarter = 0
             })
         : lowerPeriodo == "anual"
           ? q.GroupBy(v => new { v.Sku, Year = v.Fecha.Year })
@@ -80,7 +122,8 @@ namespace DataAccess.Repositories.VentaDataAccess
                 Month = 0,
                 Day = 0,
                 Sku = g.Key.Sku,
-                TotalCantidad = (uint)g.Sum(x => x.Cantidad)
+                TotalCantidad = (uint)g.Sum(x => x.Cantidad),
+                Quarter = 0
               })
           : q.GroupBy(v => new { v.Sku, Fecha = v.Fecha })
               .Select(g => new
@@ -89,21 +132,20 @@ namespace DataAccess.Repositories.VentaDataAccess
                 Month = g.Key.Fecha.Month,
                 Day = g.Key.Fecha.Day,
                 Sku = g.Key.Sku,
-                TotalCantidad = (uint)g.Sum(x => x.Cantidad)
+                TotalCantidad = (uint)g.Sum(x => x.Cantidad),
+                Quarter = 0
               });
 
-      var total = agrupado.Count();
+      var totalCount = agrupado.Count();
 
-      // materializamos la página antes de formatear la fecha (evita llamadas a DateOnly.ToString en la traducción SQL)
-      var pageItems = agrupado.OrderBy(a => a.Year)
+      var pageItemsGeneral = agrupado.OrderBy(a => a.Year)
                             .ThenBy(a => a.Month)
                             .ThenBy(a => a.Day)
                             .Skip((page - 1) * pageSize)
                             .Take(pageSize)
                             .ToList();
 
-      // Convertir la proyección anónima a VentaAgregada formateando el periodo según 'periodo'
-      List<VentaAgregada> items = pageItems.Select(x => new VentaAgregada
+      List<VentaAgregada> outItems = pageItemsGeneral.Select(x => new VentaAgregada
       {
         Periodo = lowerPeriodo == "mensual"
                     ? $"{x.Year:D4}-{x.Month:D2}"
@@ -114,7 +156,7 @@ namespace DataAccess.Repositories.VentaDataAccess
         TotalCantidad = x.TotalCantidad
       }).ToList();
 
-      return (items, total);
+      return (outItems, totalCount);
     }
 
     public IReadOnlyList<string> DistinctSkus(string? filtro)
@@ -129,6 +171,22 @@ namespace DataAccess.Repositories.VentaDataAccess
               .OrderBy(s => s)
               .Take(50)
               .ToList();
+    }
+
+    // Solo operaciones de datos básicos - sin lógica de negocio
+    public IQueryable<VentaHistorica> GetVentasBySku(string sku)
+    {
+      return _db.VentasHistoricas.Where(v => v.Sku == sku);
+    }
+
+    public IQueryable<VentaHistorica> GetAllVentas()
+    {
+      return _db.VentasHistoricas;
+    }
+
+    public IQueryable<Prediccion> GetAllPredicciones()
+    {
+      return _db.Predicciones;
     }
   }
 }

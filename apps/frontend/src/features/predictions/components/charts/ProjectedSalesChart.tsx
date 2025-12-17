@@ -1,7 +1,7 @@
 import './ChartSetup';
 import { Line } from 'react-chartjs-2';
 import type { Prediccion } from '../../types/predicciones';
-import { getSkuBase, pickQuarterlyProjection, toQuarterLabelFromDate } from '../../utils/format';
+import { getSkuBase, pickQuarterlyProjection } from '../../utils/format';
 import { useVentasAgregadas } from '../../../sales/hooks/useVentas';
 
 type Props = { data: Prediccion[]; sku: string };
@@ -15,21 +15,24 @@ export default function ProjectedSalesChart({ data, sku }: Props) {
   const { labels: predQLabels, values: predQValues } = pickQuarterlyProjection(serieSku, 'COMBINADA');
 
   // Ventas históricas agregadas trimestralmente (desde endpoint de ventas)
-  // pedimos agregación mensual al backend y la convertimos a trimestres en cliente
-  // limitar histórico a los últimos 3 años
+  // pedimos agregación trimestral al backend que ya agrupa por trimestre
+  // limitar histórico a los últimos 3 años pero asegurando incluir 2022-Q4
   const now = new Date();
   const cutoff = new Date(now);
   cutoff.setFullYear(now.getFullYear() - 3);
+  // Asegurar que el cutoff no sea posterior a 2022-Q4
+  const cutoff2022Q4 = new Date('2022-10-01'); // Inicio de Q4 2022
+  const finalCutoff = cutoff > cutoff2022Q4 ? cutoff2022Q4 : cutoff;
   const fmt = (d: Date) => d.toISOString().slice(0, 10); // YYYY-MM-DD
 
   const { data: ventasAg } = useVentasAgregadas(
-    { sku: skuBase, agregado: 'mensual', pageSize: 200, fechaDesde: fmt(cutoff) },
+    { sku: skuBase, agregado: 'trimestral', pageSize: 200, fechaDesde: fmt(finalCutoff) },
     { enabled: true }
   );
 
   const ventasRows = (ventasAg?.items ?? []).map((r: any) => ({
-    // r.periodo viene como "YYYY-MM" para agregado mensual
-    label: toQuarterLabelFromDate(r.periodo),
+    // r.periodo viene como "YYYY-QX" para agregado trimestral
+    label: r.periodo,
     value: r.totalCantidad,
   }));
 
@@ -54,7 +57,7 @@ export default function ProjectedSalesChart({ data, sku }: Props) {
     return a.localeCompare(b);
   });
 
-  // sumamos por trimestre (ventasRows puede contener varios meses del mismo trimestre)
+  // sumamos por trimestre (ventasRows ya viene agrupado por trimestre desde backend)
   const ventasMap = new Map<string, number>();
   for (const r of ventasRows) {
     const prev = ventasMap.get(r.label) ?? 0;

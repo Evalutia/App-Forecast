@@ -57,5 +57,49 @@ namespace WebApi.Controllers.Ventas
       var skus = _ventasService.DistinctSkus(filtro);
       return Ok(skus);
     }
+
+
+    [HttpGet("top-skus")]
+    public ActionResult<IEnumerable<object>> TopSkus([FromQuery] int take = 20)
+    {
+      var today = DateOnly.FromDateTime(DateTime.UtcNow.Date);
+      var desde = today.AddYears(-1);
+      var rows = _ventasService.TopSkusByVentas(desde, today, take);
+      return Ok(rows.Select(r => new { 
+        sku = r.Sku, 
+        ventasTotales = r.TotalCantidad,
+        porcentajeVentas = r.PorcentajeVentas,
+        pronosticoProximoTrimestre = r.PronosticoProximoTrimestre
+      }));
+    }
+
+
+    [HttpGet("sku-resumen")]
+    public ActionResult<object> SkuResumen([FromQuery] string sku)
+    {
+      var today = DateOnly.FromDateTime(DateTime.UtcNow.Date);
+      var r = _ventasService.GetSkuResumen(sku, today);
+      return Ok(new
+      {
+        sku = r.Sku,
+        fechaPrimerObservacion = r.FechaPrimerObservacion?.ToString("yyyy-MM-dd"),
+        fechaUltimaObservacion = r.FechaUltimaObservacion?.ToString("yyyy-MM-dd"),
+        cantidadObservaciones = r.CantidadObservaciones,
+        minimoVentasTrimestral = r.MinimoVentasTrimestral,
+        trimestreMinimoVentas = r.TrimestreMinimoVentas,
+        maximoVentasTrimestral = r.MaximoVentasTrimestral,
+        trimestreMaximoVentas = r.TrimestreMaximoVentas,
+        promedioVentasTrimestral = r.PromedioVentasTrimestral,
+        ventasUltimoTrimestre = r.VentasUltimoTrimestre,
+        ultimoTrimestre = r.UltimoTrimestre,
+        ventasUltimoAnioCalendario = r.VentasUltimoAnioCalendario,
+        crecimientoVentasUltimoAnio = r.CrecimientoVentasUltimoAnio,
+        crecimientoVentasUltimoTrimestreVsMismoTrimestreAnioAnterior = r.CrecimientoVentasUltimoTrimestreVsMismoTrimestreAnioAnterior,
+        incidenciaVentasUltimoAnioPorcentaje = r.IncidenciaVentasUltimoAnioPorcentaje,
+        incidenciaVentasUltimoTrimestrePorcentaje = r.IncidenciaVentasUltimoTrimestrePorcentaje,
+        rankingUltimoAnio = r.RankingUltimoAnio,
+        totalSkusUltimoAnio = r.TotalSkusUltimoAnio
+      });
+    }
   }
 }

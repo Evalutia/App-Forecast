@@ -58,7 +58,7 @@ export default function TablaJobs({ query, onQueryChange }: { query: JobsQuery; 
               <th>Estado</th>
               <th>Inicio</th>
               <th>Fin</th>
-              <th style={{ textAlign: 'right' }}>Acciones</th>
+              <th>Acciones</th>
             </tr>
           </thead>
           <tbody>
@@ -87,10 +87,9 @@ export default function TablaJobs({ query, onQueryChange }: { query: JobsQuery; 
                   <td><EstadoBadge estado={j.estado} /></td>
                   <td>{formatDateTime(j.fechaInicio)}</td>
                   <td>{formatDateTime(j.fechaFin)}</td>
-                  <td style={{ textAlign: 'right' }}>
-                    <div style={{ display:'inline-flex', gap:'.8rem' }}>
+                  <td>
+                    <div style={{ display:'flex', justifyContent: 'center', gap:'.8rem' }}>
                       <Link to={`/jobs/${j.id}`}>Detalle</Link>
-                      <Link to={`/predicciones?jobId=${j.id}&page=1`}>Ver predicciones</Link>
                     </div>
                   </td>
                 </tr>

@@ -1,6 +1,7 @@
 import * as XLSX from 'xlsx';
 import { searchPredicciones } from './api';
 import type { PrediccionSearchParams, Prediccion } from '../types/predicciones';
+import { quarterRangeFromDate } from './format';
 
 export async function exportAllPredicciones(
   filters: PrediccionSearchParams = {},
@@ -23,15 +24,11 @@ export async function exportAllPredicciones(
 
   const rows = all.map((p) => ({
     SKU: p.sku,
-    Fecha: p.fechaPredicha,
-    Cantidad: p.cantidadPredicha,
-    Modelo: p.modelo,
-    Version: p.versionModelo,
-    Horizonte: p.horizonte,
     R2: p.r2 ?? '',
     RMSE: p.rmse ?? '',
-    Generacion: p.tsGeneracion,
-    Job: p.jobId ?? ''
+    'Fecha predicha desde': quarterRangeFromDate(p.fechaPredicha).desde,
+    'Fecha predicha hasta': quarterRangeFromDate(p.fechaPredicha).hasta,
+    'Cantidad predicha': p.cantidadPredicha,
   }));
 
   const ws = XLSX.utils.json_to_sheet(rows);

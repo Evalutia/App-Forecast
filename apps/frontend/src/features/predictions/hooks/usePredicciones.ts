@@ -1,6 +1,12 @@
 import { useQuery } from '@tanstack/react-query';
-import { fetchUltimasPredicciones, searchPredicciones, fetchPrediccionesByJob } from '../utils/api';
-import type { Prediccion, PrediccionPagedResponse, PrediccionSearchParams } from '../types/predicciones';
+import { fetchUltimasPredicciones, searchPredicciones, fetchTopSkusVentas, fetchVentaSkuResumen } from '../utils/api';
+import type {
+  Prediccion,
+  PrediccionPagedResponse,
+  PrediccionSearchParams,
+  TopSkuVentasRow,
+  VentaSkuResumen,
+} from '../types/predicciones';
 
 export function useUltimasPredicciones() {
   return useQuery<Prediccion[], Error>({
@@ -20,11 +26,20 @@ export function usePrediccionesSearch(params: PrediccionSearchParams) {
   });
 }
 
-export function usePrediccionesByJob(jobId: number | null | undefined) {
-  return useQuery<Prediccion[], Error>({
-    queryKey: ['predicciones', 'byJob', jobId],
-    queryFn: () => fetchPrediccionesByJob(jobId as number),
-    enabled: typeof jobId === 'number' && Number.isFinite(jobId) && jobId > 0, 
+export function useTopSkusVentas(take = 20) {
+  return useQuery<TopSkuVentasRow[], Error>({
+    queryKey: ['ventas', 'top-skus', take],
+    queryFn: () => fetchTopSkusVentas(take),
+    staleTime: 5 * 60_000,
+    gcTime: 30 * 60_000,
+  });
+}
+
+export function useVentaSkuResumen(sku: string | undefined) {
+  return useQuery<VentaSkuResumen, Error>({
+    queryKey: ['ventas', 'sku-resumen', sku ?? null],
+    queryFn: () => fetchVentaSkuResumen(sku as string),
+    enabled: Boolean(sku && sku.trim().length),
     staleTime: 60_000,
     gcTime: 10 * 60_000,
   });

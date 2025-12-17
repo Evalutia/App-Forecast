@@ -1,8 +1,9 @@
 import { useMemo, useState } from 'react';
-import { Link, useSearchParams } from 'react-router-dom';
+import { useSearchParams } from 'react-router-dom';
 import { usePrediccionesSearch } from '../hooks/usePredicciones';
 import type { PrediccionSearchParams } from '../types/predicciones';
 import { exportAllPredicciones } from '../utils/exportPredicciones';
+import { quarterRangeFromDate, formatPronostico } from '../utils/format';
 
 type Props = { className?: string };
 
@@ -22,7 +23,6 @@ export default function PrediccionesTable({ className }: Props) {
 
   const params: PrediccionSearchParams = useMemo(() => ({
     sku: getParam(sp, 'sku'),
-    modelo: getParam(sp, 'modelo'),
     desde: getParam(sp, 'desde'),
     hasta: getParam(sp, 'hasta'),
     page: getInt(sp, 'page', 1),
@@ -67,18 +67,9 @@ export default function PrediccionesTable({ className }: Props) {
   return (
     <section className={['card table-card', className].filter(Boolean).join(' ')}>
       <div style={{ marginBottom: '.5rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-        <div className="muted">{isFetching ? 'Actualizando…' : 'Historial de predicciones'}</div>
+        <div className="muted">{isFetching ? 'Actualizando…' : ''}</div>
         <div style={{ display: 'flex', alignItems: 'center', gap: '.5rem' }}>
-          <div className="muted">Total: <strong>{total}</strong></div>
-          <button
-            className="pager-btn"
-            disabled={exporting || isFetching || isLoading}
-            onClick={handleExport}
-            title="Descargar todas las predicciones en Excel"
-            type="button"
-          >
-            {exporting ? 'Exportando…' : 'Descargar Excel'}
-          </button>
+          <div className="muted"></div>
         </div>
       </div>
 
@@ -86,16 +77,12 @@ export default function PrediccionesTable({ className }: Props) {
         <table className="table">
           <thead>
             <tr>
-              <th>SKU</th>
-              <th>Fecha</th>
-              <th style={{ textAlign: 'right' }}>Cantidad</th>
-              <th>Modelo</th>
-              <th>Versión</th>
-              <th style={{ textAlign: 'right' }}>h</th>
-              <th style={{ textAlign: 'right' }}>R²</th>
-              <th style={{ textAlign: 'right' }}>RMSE</th>
-              <th>Generación</th>
-              <th>Job</th>
+              <th className="sku-column">SKU</th>
+              <th>Fecha predicha desde</th>
+              <th>Fecha predicha hasta</th>
+              <th>R²</th>
+              <th>RMSE</th>
+              <th className="cantidad-column">Cantidad predicha</th>
             </tr>
           </thead>
           <tbody>
@@ -103,47 +90,55 @@ export default function PrediccionesTable({ className }: Props) {
               Array.from({ length: 8 }).map((_, i) => (
                 <tr key={i}>
                   <td><span className="skeleton skel-28" /></td>
-                  <td><span className="skeleton skel-24" /></td>
-                  <td><span className="skeleton skel-12" /></td>
-                  <td><span className="skeleton skel-24" /></td>
                   <td><span className="skeleton skel-20" /></td>
-                  <td><span className="skeleton skel-10" /></td>
+                  <td><span className="skeleton skel-20" /></td>
                   <td><span className="skeleton skel-12" /></td>
                   <td><span className="skeleton skel-12" /></td>
-                  <td><span className="skeleton skel-24" /></td>
                   <td><span className="skeleton skel-12" /></td>
                 </tr>
               ))
+            ) : isError ? (
+              <tr>
+                <td colSpan={6} className="muted" style={{ textAlign: 'center', padding: '1.2rem 0' }}>
+                  No se pudieron cargar las predicciones.
+                </td>
+              </tr>
             ) : (data?.items?.length ?? 0) === 0 ? (
               <tr>
-                <td colSpan={10} className="muted" style={{ textAlign: 'center', padding: '1.2rem 0' }}>
-                  No se encontraron predicciones para los filtros seleccionados.
+                <td colSpan={6} className="muted" style={{ textAlign: 'center', padding: '1.2rem 0' }}>
+                  No se encontraron predicciones.
                 </td>
               </tr>
             ) : (
-              (data?.items ?? []).map((p) => (
-                <tr key={p.id}>
-                  <td className="mono">{p.sku}</td>
-                  <td>{p.fechaPredicha}</td>
-                  <td style={{ textAlign: 'right' }}>{p.cantidadPredicha}</td>
-                  <td>{p.modelo}</td>
-                  <td>{p.versionModelo}</td>
-                  <td style={{ textAlign: 'right' }}>{p.horizonte}</td>
-                  <td style={{ textAlign: 'right' }}>{p.r2 ?? '-'}</td>
-                  <td style={{ textAlign: 'right' }}>{p.rmse ?? '-'}</td>
-                  <td>{p.tsGeneracion}</td>
-                  <td>
-                    {typeof p.jobId === 'number' ? (
-                      <Link to={`/predicciones?jobId=${p.jobId}&page=1`} title="Ver predicciones de este job">
-                        #{p.jobId}
-                      </Link>
-                    ) : <span className="muted">—</span>}
-                  </td>
-                </tr>
-              ))
+              data?.items?.map((prediccion) => {
+                const { desde, hasta } = quarterRangeFromDate(prediccion.fechaPredicha);
+                return (
+                  <tr key={prediccion.id}>
+                    <td className="sku-column">{prediccion.sku}</td>
+                    <td>{desde}</td>
+                    <td>{hasta}</td>
+                    <td>{prediccion.r2 ? prediccion.r2.toFixed(3) : '—'}</td>
+                    <td>{prediccion.rmse ? prediccion.rmse.toFixed(2) : '—'}</td>
+                    <td className="cantidad-column">{formatPronostico(prediccion.cantidadPredicha)}</td>
+                  </tr>
+                );
+              }) ?? []
             )}
           </tbody>
         </table>
+      </div>
+
+      {/* Fila separadora para el botón Descargar Excel */}
+      <div className="export-row">
+        <button
+          className="pager-btn export-btn"
+          disabled={exporting || isFetching || isLoading}
+          onClick={handleExport}
+          title="Descargar todas las predicciones en Excel"
+          type="button"
+        >
+          {exporting ? 'Exportando…' : 'Descargar Excel'}
+        </button>
       </div>
 
       {/* Paginador */}

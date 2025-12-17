@@ -3,6 +3,8 @@ import type {
   Prediccion,
   PrediccionPagedResponse,
   PrediccionSearchParams,
+  TopSkuVentasRow,
+  VentaSkuResumen,
 } from '../types/predicciones';
 
 const BASE = '/api/predicciones';
@@ -42,5 +44,19 @@ export async function searchPredicciones(params: PrediccionSearchParams = {}) {
 
 export async function fetchPrediccionesByJob(jobId: number) {
   const { data } = await api.get<Prediccion[]>(`${BASE}/jobs/${jobId}`);
+  return data;
+}
+
+export async function fetchTopSkusVentas(take = 20) {
+  const { data } = await api.get<TopSkuVentasRow[]>('/api/ventas/top-skus', {
+    params: { take },
+  });
+  return data;
+}
+
+export async function fetchVentaSkuResumen(sku: string) {
+  const { data } = await api.get<VentaSkuResumen>('/api/ventas/sku-resumen', {
+    params: { sku },
+  });
   return data;
 }
