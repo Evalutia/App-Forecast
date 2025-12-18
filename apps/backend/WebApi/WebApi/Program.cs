@@ -141,12 +141,18 @@ builder.Services.AddCors(options =>
 
 var app = builder.Build();
 
-// Forwarded headers (para proxys como Caddy) - debe aplicarse antes de HTTPS redirection / HSTS
-app.UseForwardedHeaders(new ForwardedHeadersOptions
+// === Forwarded headers - aceptar X-Forwarded-* desde proxys en docker ===
+// IMPORTANTE: Clear KnownNetworks/KnownProxies para aceptar cabeceras desde Caddy
+var forwardedOptions = new ForwardedHeadersOptions
 {
     ForwardedHeaders = ForwardedHeaders.XForwardedFor | ForwardedHeaders.XForwardedProto
-});
+};
+// permitir forwarded headers desde cualquier proxy (dentro del Docker network)
+forwardedOptions.KnownNetworks.Clear();
+forwardedOptions.KnownProxies.Clear();
+app.UseForwardedHeaders(forwardedOptions);
 
+// HSTS si no es dev
 if (!app.Environment.IsDevelopment())
 {
     app.UseHsts();
@@ -157,6 +163,7 @@ app.UseCors(corsPolicy);
 app.UseSwagger();
 app.UseSwaggerUI();
 
+// HTTPS redirection (Kestrel está sirviendo HTTP; Caddy termina TLS)
 app.UseHttpsRedirection();
 
 app.UseAuthentication();
