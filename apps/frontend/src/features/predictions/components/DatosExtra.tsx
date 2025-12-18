@@ -172,30 +172,30 @@ export default function DatosExtra() {
                         <td>{fmtNum(resumenSku.promedioVentasTrimestral)}</td>
                       </tr>
                       <tr>
-                        <td>Ventas del último trimestre completo</td>
+                        <td>Ventas del último trimestre móvil completo</td>
                         <td>
                           {fmtNum(resumenSku.ventasUltimoTrimestre)}
                           {resumenSku.ultimoTrimestre ? ` · ${resumenSku.ultimoTrimestre}` : ''}
                         </td>
                       </tr>
                       <tr>
-                        <td>Ventas del último año (12m)</td>
+                        <td>Ventas del último año (12m) móvil</td>
                         <td>{fmtNum(resumenSku.ventasUltimoAnioCalendario)}</td>
                       </tr>
                       <tr>
-                        <td>Crecimiento de ventas en el último año</td>
+                        <td>Crecimiento de ventas en el último año móvil</td>
                         <td>{fmtPct(resumenSku.crecimientoVentasUltimoAnio)}</td>
                       </tr>
                       <tr>
-                        <td>Crecimiento de ventas en el último trimestre vs mismo trimestre del año anterior</td>
+                        <td>Crecimiento de ventas en el último trimestre vs mismo trimestre del año móvil anterior</td>
                         <td>{fmtPct(resumenSku.crecimientoVentasUltimoTrimestreVsMismoTrimestreAnioAnterior)}</td>
                       </tr>
                       <tr>
-                        <td>Incidencia en porcentaje de ventas totales del último año</td>
+                        <td>Incidencia en porcentaje de ventas totales del último año móvil</td>
                         <td>{fmtPct(resumenSku.incidenciaVentasUltimoAnioPorcentaje)}</td>
                       </tr>
                       <tr>
-                        <td>Incidencia en porcentaje de ventas totales del último trimestre</td>
+                        <td>Incidencia en porcentaje de ventas totales del último trimestre móvil</td>
                         <td>{fmtPct(resumenSku.incidenciaVentasUltimoTrimestrePorcentaje)}</td>
                       </tr>
                       <tr>
