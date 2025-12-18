@@ -2,7 +2,7 @@
 <html lang="es">
 <head>
   <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
   <title>Evalutia — Automatización inteligente & Predicción</title>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;700;800&display=swap" rel="stylesheet">
 
@@ -19,6 +19,7 @@
       --fw-regular: 400;
       --fw-semibold: 600;
       --fw-bold: 800;
+      --navbar-height: 72px;
     }
 
     *{ box-sizing: border-box; }
@@ -33,6 +34,11 @@
       -webkit-tap-highlight-color: transparent;
       overflow-x:hidden;
       scroll-behavior:smooth;
+
+      /* Empujar el contenido por debajo de la navbar + safe-area (iOS) */
+      padding-top: calc(var(--navbar-height) + env(safe-area-inset-top));
+      padding-top: calc(var(--navbar-height) + constant(safe-area-inset-top));
+      transition: padding-top .12s ease;
     }
     a{ color:inherit; text-decoration:none; outline-offset:4px; }
 
@@ -119,54 +125,31 @@
       font-weight: 600;
       padding: 8px 14px;
       border-radius: 8px;
-      border: 1px solid rgba(255, 255, 255, 0.12);
-      background: rgba(255, 255, 255, 0.08);
+      border: 1px solid rgba(255,255,255,0.12);
+      background: rgba(255,255,255,0.08);
       transition: background .14s ease, transform .14s ease, box-shadow .14s ease;
       font-size: 13px;
     }
     .navbar-nav a:hover {
-      background: rgba(255, 255, 255, 0.15);
+      background: rgba(255,255,255,0.15);
       transform: translateY(-2px);
-      box-shadow: 0 8px 18px rgba(0, 0, 0, 0.25);
+      box-shadow: 0 8px 18px rgba(0,0,0,0.25);
     }
 
     .page {
       position: relative;
       z-index: 2;
       max-width: var(--max-width);
-      margin: 80px auto 36px;
+      margin: 0 auto 36px;
       padding: 28px;
     }
 
-    header.global-header {
-      display: none;
-    }
+    header.global-header { display: none; }
 
-    .logo {
-      width:86px;
-      height:86px;
-      object-fit:contain;
-      border-radius:14px;
-      background:var(--white);
-      padding:8px;
-      box-shadow: 0 6px 22px rgba(0,0,0,0.22);
-      flex-shrink:0;
-    }
+    .logo { width:86px; height:86px; object-fit:contain; border-radius:14px; background:var(--white); padding:8px; box-shadow: 0 6px 22px rgba(0,0,0,0.22); flex-shrink:0; }
     .global-title { display:flex; flex-direction:column; line-height:1; }
-    .site-title{
-      margin:0;
-      font-size:30px;
-      font-weight:800;
-      color:var(--white);
-      text-shadow:0 8px 28px rgba(0,0,0,0.52);
-      letter-spacing:-0.5px;
-    }
-    .site-sub{
-      margin:6px 0 0;
-      color:rgba(255,255,255,0.92);
-      font-weight:600;
-      font-size:14px;
-    }
+    .site-title{ margin:0; font-size:30px; font-weight:800; color:var(--white); text-shadow:0 8px 28px rgba(0,0,0,0.52); letter-spacing:-0.5px; }
+    .site-sub{ margin:6px 0 0; color:rgba(255,255,255,0.92); font-weight:600; font-size:14px; }
 
     nav.top-nav { margin-left:auto; display:flex; gap:12px; align-items:center; }
     nav.top-nav a {
@@ -290,9 +273,7 @@
       text-underline-offset:2px;
     }
 
-    .side {
-      display:none;
-    }
+    .side { display:none; }
     .summary {
       background: rgba(255,255,255,0.96);
       backdrop-filter: blur(18px) saturate(135%);
@@ -724,10 +705,6 @@
       background: linear-gradient(135deg, var(--esmeralda-600), var(--esmeralda-700));
     }
 
-    .contact-btn:active {
-      transform: translateY(0);
-    }
-
     .contact-modal {
       position: fixed;
       top: 0;
@@ -931,9 +908,7 @@
 
     @media (max-width:1080px){
       .grid{ grid-template-columns:repeat(2, minmax(0,1fr)); }
-      .hero{
-        padding:36px 24px;
-      }
+      .hero{ padding:36px 24px; }
       .hero h1{ font-size:26px; }
       nav.top-nav{ display:none; }
     }
@@ -942,19 +917,16 @@
     }
     @media (max-width:640px){
       .grid{ grid-template-columns:1fr; }
-      .page{ padding:18px; margin:22px auto 26px; }
+      .page{ padding:18px; margin:0 auto 26px; }
       .site-title{ font-size:22px; }
       .lead{ font-size:15px; }
       .summary{ padding:14px 14px 13px; }
       .feature{ padding:16px; min-height:unset; }
       .hero{ padding:24px 18px; }
       .hero-head{ flex-direction:column; }
-      .contact{ 
-        align-items: center;
-        max-width: 100%;
-        padding: 0 16px;
-      }
+      .contact{ align-items: center; max-width: 100%; padding: 0 16px; }
       .steps-grid{ grid-template-columns:1fr; }
+      .main-cta-button { font-size: 1rem !important; padding: 12px 28px !important; }
     }
   </style>
 </head>
@@ -967,12 +939,11 @@
       <h1>Evalutia</h1>
       <p>Automatización & Predicción</p>
     </div>
-    <div class="navbar-nav" aria-label="Navegación rápida">
-    </div>
+    <div class="navbar-nav" aria-label="Navegación rápida"></div>
   </nav>
 
   <div class="page" role="main">
-    <div class="app-cta-container" style="text-align: center; margin: 20px 0 40px; padding: 0 20px;">
+    <div class="app-cta-container" style="text-align: center; margin: 8px 0 36px; padding: 0 20px;">
       <a href="https://app.evalutia.net" class="main-cta-button" style="
         display: inline-block; 
         background: #023927; 
@@ -988,6 +959,7 @@
         position: relative;
         overflow: hidden;
         animation: pulse 2s infinite;
+        z-index: 2;
       " onmouseover="this.style.boxShadow='0 0 25px rgba(52, 196, 143, 0.8)'; this.style.transform='translateY(-3px)';" onmouseout="this.style.boxShadow='0 0 15px rgba(52, 196, 143, 0.5)'; this.style.transform='translateY(0)';">
         <span style="position: relative; z-index: 2;">Abrir aplicación</span>
         <span style="
@@ -1051,7 +1023,7 @@
               <div style="color:#3b4a42; font-size:13px;">Predicciones periódicas y reportes operativos, listos para ejecutar.</div>
             </div>
             <div class="summary-item" aria-hidden="false">
-              <strong>Seguridad</strong>
+              <strong>Seguridad</strong> 
               <div style="color:#3b4a42; font-size:13px;">Acceso seguro con cuentas y permisos, integraciones administrativas.</div>
             </div>
           </div>
@@ -1224,10 +1196,14 @@
     </footer>
 
   </div>
+
   <script>
     document.getElementById('year').innerText = new Date().getFullYear();
   </script>
+
   <script src="https://www.google.com/recaptcha/api.js" async defer></script>
+
+  <!-- Modal & form logic -->
   <script>
     const contactBtn = document.getElementById('contact-btn');
     const contactModal = document.getElementById('contact-modal');
@@ -1267,30 +1243,16 @@
       }, 3000);
     }
 
-    const style = document.createElement('style');
-    style.textContent = `
+    const styleNotif = document.createElement('style');
+    styleNotif.textContent = `
       @keyframes slideInRight {
-        from {
-          transform: translateX(400px);
-          opacity: 0;
-        }
-        to {
-          transform: translateX(0);
-          opacity: 1;
-        }
+        from { transform: translateX(400px); opacity: 0; } to { transform: translateX(0); opacity: 1; }
       }
       @keyframes slideOutRight {
-        from {
-          transform: translateX(0);
-          opacity: 1;
-        }
-        to {
-          transform: translateX(400px);
-          opacity: 0;
-        }
+        from { transform: translateX(0); opacity: 1; } to { transform: translateX(400px); opacity: 0; }
       }
     `;
-    document.head.appendChild(style);
+    document.head.appendChild(styleNotif);
 
     if (contactBtn) {
       contactBtn.onclick = function(e) {
@@ -1307,7 +1269,9 @@
       formStatus.textContent = '';
       formStatus.classList.remove('success', 'error');
       contactForm.reset();
-      grecaptcha.reset();
+      if (window.grecaptcha && typeof grecaptcha.reset === 'function') {
+        grecaptcha.reset();
+      }
     }
 
     closeBtn.onclick = closeModal;
@@ -1339,7 +1303,7 @@
         return;
       }
 
-      const recaptchaResponse = grecaptcha.getResponse();
+      const recaptchaResponse = (window.grecaptcha && typeof grecaptcha.getResponse === 'function') ? grecaptcha.getResponse() : '';
       if (!recaptchaResponse) {
         formStatus.textContent = 'Por favor, verifica el reCAPTCHA.';
         formStatus.classList.add('error');
@@ -1363,14 +1327,11 @@
         const response = await fetch('https://formspree.io/f/xblnyvly', {
           method: 'POST',
           body: formData,
-          headers: {
-            'Accept': 'application/json'
-          }
+          headers: { 'Accept': 'application/json' }
         });
 
         if (response.ok) {
           showNotification('¡Mensaje enviado exitosamente! Nos contactaremos pronto.', 'success');
-          
           setTimeout(() => {
             closeModal();
             submitBtn.disabled = false;
@@ -1382,17 +1343,298 @@
 
       } catch (error) {
         console.error('Error al enviar:', error);
-        
         showNotification('Error al enviar el mensaje. Intenta de nuevo.', 'error');
-        
         submitBtn.disabled = false;
         submitBtn.textContent = originalText;
-        grecaptcha.reset();
+        if (window.grecaptcha && typeof grecaptcha.reset === 'function') grecaptcha.reset();
       }
     };
   </script>
-  <script src="https://unpkg.com/three@0.158.0/build/three.min.js"></script>
 
+  <!-- THREE.JS responsive y con corrección para navbar (globe más pequeño en desktop) -->
+  <script src="https://unpkg.com/three@0.158.0/build/three.min.js"></script>
+  <script>
+  (function() {
+    if (!window.THREE) return;
+
+    let scene, camera, renderer, group, mesh, wire;
+    let light, light2, ambient;
+    let mouseX = 0, mouseY = 0, targetMouseX = 0, targetMouseY = 0;
+    let animateId = null;
+    let reducedMotion = false;
+    let lastIsSmall = null;
+
+    function isSmall() { return window.innerWidth < 640; }
+
+    // RADIO: reducido para desktop >=1080 para evitar solapamiento
+    function getRadius() {
+      if (window.innerWidth >= 1080) return 1.3; // <-- reducido (antes 1.7)
+      return isSmall() ? 1.35 : 1.6;
+    }
+
+    function getDetail() { return window.innerWidth < 420 ? 1 : (isSmall() ? 1 : 2); }
+    function getPixelRatio() { return Math.min(window.devicePixelRatio || 1, isSmall() ? 1.2 : 2); }
+    function getWireOpacity() { return isSmall() ? 0.05 : 0.08; }
+    function getLightIntensity() { return isSmall() ? 0.9 : 1.4; }
+    function getLight2Intensity() { return isSmall() ? 0.6 : 0.9; }
+
+    function getMarginFactor() {
+      // aumentar la holgura en desktop para que la cámara se aleje un poco más
+      return (window.innerWidth >= 1080) ? 1.35 : 1.25; // <-- desktop: 1.35 (antes 1.15)
+    }
+    function getYOffsetRatio() {
+      return (window.innerWidth >= 1080) ? 0.02 : 0.12;
+    }
+
+    function createMeshes() {
+      if (!group) return;
+
+      if (mesh) {
+        try { mesh.geometry.dispose(); mesh.material.dispose(); } catch(e){}
+        group.remove(mesh);
+        mesh = null;
+      }
+      if (wire) {
+        try { wire.geometry.dispose(); wire.material.dispose(); } catch(e){}
+        group.remove(wire);
+        wire = null;
+      }
+
+      const detail = getDetail();
+      const radius = getRadius();
+
+      const geometry = new THREE.IcosahedronGeometry(radius, detail);
+      const material = new THREE.MeshStandardMaterial({
+        color: 0x34c48f,
+        emissive: 0x023927,
+        metalness: 0.45,
+        roughness: 0.25
+      });
+      mesh = new THREE.Mesh(geometry, material);
+      group.add(mesh);
+
+      const wireGeom = new THREE.IcosahedronGeometry(radius + 0.02, Math.max(detail,1));
+      const wireMat = new THREE.MeshBasicMaterial({
+        color: 0xffffff,
+        wireframe: true,
+        transparent: true,
+        opacity: getWireOpacity()
+      });
+      wire = new THREE.Mesh(wireGeom, wireMat);
+      group.add(wire);
+    }
+
+    /**
+     * Versión navbar-aware de frameObjectToView (mejorada).
+     * Calcula un "worldShift" equivalente al padding-top (navbar + safe-area)
+     * y mueve la cámara en Y hacia arriba en unidades del mundo para que
+     * el objeto quede visualmente más abajo y no sea tapado por la navbar.
+     */
+    function frameObjectToView(object, camera, renderer, marginFactor = 1.25, yOffsetRatio = 0.12) {
+      const box = new THREE.Box3().setFromObject(object);
+      const size = box.getSize(new THREE.Vector3());
+      const center = box.getCenter(new THREE.Vector3());
+
+      if (size.x === 0 && size.y === 0 && size.z === 0) return;
+
+      const fov = camera.fov * (Math.PI / 180);
+      const aspect = renderer.domElement.clientWidth / renderer.domElement.clientHeight;
+
+      // Distancias necesarias para cubrir el ancho/alto del objeto
+      const distanceY = (size.y / 2) / Math.tan(fov / 2);
+      const hFov = 2 * Math.atan(Math.tan(fov / 2) * aspect);
+      const distanceX = (size.x / 2) / Math.tan(hFov / 2);
+
+      let distance = Math.max(distanceX, distanceY);
+      distance *= marginFactor;
+
+      // Visible world height at this distance
+      const visibleHeight = 2 * distance * Math.tan(fov / 2);
+      const canvasHeight = renderer.domElement.clientHeight || window.innerHeight;
+
+      // obtener padding-top efectivo (navbar + safe-area) en px
+      let topInsetPx = 0;
+      try {
+        const cs = getComputedStyle(document.body);
+        topInsetPx = parseFloat(cs.paddingTop) || 0;
+      } catch (e) {
+        const nav = document.querySelector('.navbar');
+        topInsetPx = nav ? nav.getBoundingClientRect().height : 0;
+      }
+
+      // multiplicador extra para desktop (garantizar holgura)
+      const worldShiftMultiplier = (window.innerWidth >= 1080) ? 1.4 : 1.0; // <-- desktop mayor compensación
+
+      // convertimos píxeles a unidades del "mundo"
+      let worldShift = (topInsetPx * visibleHeight / canvasHeight) * worldShiftMultiplier;
+
+      // Limitar el shift para no mover demasiado la cámara (por si el navbar es enorme)
+      const maxShift = Math.max(size.y * 0.85, size.y); // evita desplazar más de la altura del objeto
+      worldShift = Math.min(worldShift, maxShift);
+
+      // MOVEMOS LA CÁMARA EN Y (hacia arriba): esto hace que el objeto se vea más abajo en pantalla,
+      // y por ende quede por debajo de la navbar.
+      camera.position.set(center.x, center.y + worldShift, center.z + distance);
+
+      // Ajuste visual: mirar un poco por debajo del centro del objeto para dar sensación de "elevación"
+      const lookAt = center.clone();
+      lookAt.y -= size.y * yOffsetRatio;
+
+      camera.lookAt(lookAt);
+      camera.updateProjectionMatrix();
+
+      camera.near = Math.min(0.1, distance * 0.001);
+      camera.updateProjectionMatrix();
+    }
+
+    function init() {
+      reducedMotion = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+      scene = new THREE.Scene();
+      camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 1000);
+
+      renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+      renderer.setPixelRatio(getPixelRatio());
+      renderer.setSize(window.innerWidth, window.innerHeight);
+      renderer.setClearColor(0x000000, 0);
+      renderer.domElement.classList.add('bg-3d-canvas');
+      // CORRECCIÓN: dejar el canvas por encima del fondo del body
+      // pero por debajo de la .page y .navbar (la .page tiene z-index:2 y la navbar 999)
+      renderer.domElement.style.zIndex = '0';
+      renderer.domElement.style.pointerEvents = 'none';
+
+      if (!document.querySelector('.bg-3d-canvas')) {
+        document.body.appendChild(renderer.domElement);
+      } else {
+        const existing = document.querySelector('.bg-3d-canvas');
+        existing.parentElement.replaceChild(renderer.domElement, existing);
+      }
+
+      group = new THREE.Group();
+      scene.add(group);
+
+      createMeshes();
+
+      light = new THREE.PointLight(0xffffff, getLightIntensity(), 50);
+      light.position.set(3, 2, 4);
+      light2 = new THREE.PointLight(0x34c48f, getLight2Intensity(), 30);
+      light2.position.set(-3, -1, -3);
+      ambient = new THREE.AmbientLight(0xffffff, isSmall() ? 0.5 : 0.6);
+      scene.add(light, light2, ambient);
+
+      frameObjectToView(group, camera, renderer, getMarginFactor(), getYOffsetRatio());
+
+      window.addEventListener('resize', onWindowResize, { passive: true });
+      window.addEventListener('pointermove', onPointerMove, { passive: true });
+      document.addEventListener('visibilitychange', onVisibilityChange);
+
+      lastIsSmall = isSmall();
+
+      animate();
+    }
+
+    function onPointerMove(event) {
+      const x = (event.clientX / window.innerWidth) * 2 - 1;
+      const y = (event.clientY / window.innerHeight) * 2 - 1;
+      targetMouseX = x;
+      targetMouseY = y;
+    }
+
+    function onWindowResize() {
+      if (!camera || !renderer) return;
+      camera.aspect = window.innerWidth / window.innerHeight;
+      camera.updateProjectionMatrix();
+
+      renderer.setPixelRatio(getPixelRatio());
+      renderer.setSize(window.innerWidth, window.innerHeight);
+
+      const nowSmall = isSmall();
+      if (nowSmall !== lastIsSmall) {
+        createMeshes();
+        if (light) light.intensity = getLightIntensity();
+        if (light2) light2.intensity = getLight2Intensity();
+        if (ambient) ambient.intensity = isSmall() ? 0.5 : 0.6;
+        lastIsSmall = nowSmall;
+      }
+
+      frameObjectToView(group, camera, renderer, getMarginFactor(), getYOffsetRatio());
+    }
+
+    function onVisibilityChange() {
+      if (document.hidden) {
+        if (animateId) cancelAnimationFrame(animateId);
+        animateId = null;
+      } else {
+        if (!animateId) animate();
+      }
+    }
+
+    function animate() {
+      const slowFactor = reducedMotion ? 0.08 : 1;
+
+      mouseX += (targetMouseX - mouseX) * 0.08 * slowFactor;
+      mouseY += (targetMouseY - mouseY) * 0.08 * slowFactor;
+
+      if (group) {
+        if (reducedMotion) {
+          group.rotation.y += 0.0006 * slowFactor;
+          group.rotation.x += 0.0004 * slowFactor;
+        } else {
+          group.rotation.y += 0.0025 * slowFactor;
+          group.rotation.x += 0.0015 * slowFactor;
+          group.rotation.y += mouseX * 0.0008 * slowFactor;
+          group.rotation.x += mouseY * 0.0008 * slowFactor;
+        }
+
+        const t = performance.now() * 0.001;
+        const s = 1 + Math.sin(t * 0.6) * (reducedMotion ? 0.01 : 0.03);
+        group.scale.set(s, s, s);
+      }
+
+      renderer.render(scene, camera);
+      animateId = requestAnimationFrame(animate);
+    }
+
+    init();
+
+    window.addEventListener('beforeunload', () => {
+      if (animateId) cancelAnimationFrame(animateId);
+      try {
+        if (mesh) { mesh.geometry.dispose(); mesh.material.dispose(); }
+        if (wire) { wire.geometry.dispose(); wire.material.dispose(); }
+        if (renderer) { renderer.dispose(); }
+      } catch (e) {}
+    });
+  })();
+  </script>
+
+  <!-- Sync navbar height (con safe-area) -->
+  <script>
+    (function syncNavbarHeight() {
+      const nav = document.querySelector('.navbar');
+      if (!nav) return;
+
+      function update() {
+        const h = Math.ceil(nav.getBoundingClientRect().height);
+        const offsetUp = 18;
+        const minPadding = 48;
+        const pad = Math.max(h - offsetUp, minPadding);
+        document.documentElement.style.setProperty('--navbar-height', pad + 'px');
+        document.body.style.paddingTop = `calc(${pad}px + env(safe-area-inset-top))`;
+      }
+
+      update();
+      window.addEventListener('resize', update);
+      if (window.ResizeObserver) {
+        const ro = new ResizeObserver(update);
+        ro.observe(nav);
+      } else {
+        window.addEventListener('load', update);
+      }
+    })();
+  </script>
+
+  <!-- Reveal on scroll + feature toggles -->
   <script>
     (function() {
       const revealEls = document.querySelectorAll('.reveal-on-scroll');
@@ -1416,119 +1658,14 @@
 
     (function() {
       const features = document.querySelectorAll('.feature');
-      
       features.forEach(feature => {
         const header = feature.querySelector('.feature-header');
-        
         header.addEventListener('click', (e) => {
           e.stopPropagation();
-          
-          features.forEach(f => {
-            if (f !== feature && f.classList.contains('expanded')) {
-              f.classList.remove('expanded');
-            }
-          });
-          
- 
+          features.forEach(f => { if (f !== feature && f.classList.contains('expanded')) f.classList.remove('expanded'); });
           feature.classList.toggle('expanded');
         });
       });
-    })(); 
-    (function() {
-      if (!window.THREE) return;
-
-      const scene = new THREE.Scene();
-      const camera = new THREE.PerspectiveCamera(
-        45,
-        window.innerWidth / window.innerHeight,
-        0.1,
-        50
-      );
-      camera.position.z = 5;
-
-      const renderer = new THREE.WebGLRenderer({
-        antialias: true,
-        alpha: true
-      });
-      renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
-      renderer.setSize(window.innerWidth, window.innerHeight);
-      renderer.setClearColor(0x000000, 0); 
-      const canvas = renderer.domElement;
-      canvas.classList.add('bg-3d-canvas');
-      document.body.appendChild(canvas);
-
-      
-      const geometry = new THREE.IcosahedronGeometry(1.6, 2);
-      const material = new THREE.MeshStandardMaterial({
-        color: 0x34c48f,
-        emissive: 0x023927,
-        metalness: 0.45,
-        roughness: 0.25
-      });
-
-      const mesh = new THREE.Mesh(geometry, material);
-      const group = new THREE.Group();
-      group.add(mesh);
-      scene.add(group);
-
-      const wireGeom = new THREE.IcosahedronGeometry(1.62, 2);
-      const wireMat = new THREE.MeshBasicMaterial({
-        color: 0xffffff,
-        wireframe: true,
-        transparent: true,
-        opacity: 0.08
-      });
-      const wire = new THREE.Mesh(wireGeom, wireMat);
-      group.add(wire);
-
-      const light = new THREE.PointLight(0xffffff, 1.4, 10);
-      light.position.set(3, 2, 4);
-      const light2 = new THREE.PointLight(0x34c48f, 0.9, 8);
-      light2.position.set(-3, -1, -3);
-      const ambient = new THREE.AmbientLight(0xffffff, 0.6);
-      scene.add(light, light2, ambient);
-
-      let mouseX = 0;
-      let mouseY = 0;
-      let targetMouseX = 0;
-      let targetMouseY = 0;
-      
-      window.addEventListener('pointermove', (event) => {
-        const x = (event.clientX / window.innerWidth) * 2 - 1;
-        const y = (event.clientY / window.innerHeight) * 2 - 1;
-        targetMouseX = x;
-        targetMouseY = y;
-      });
-
-      window.addEventListener('resize', () => {
-        const w = window.innerWidth;
-        const h = window.innerHeight;
-        camera.aspect = w / h;
-        camera.updateProjectionMatrix();
-        renderer.setSize(w, h);
-      });
-
-      const clock = new THREE.Clock();
-      function animate() {
-        requestAnimationFrame(animate);
-        const t = clock.getElapsedTime();
-
-        mouseX += (targetMouseX - mouseX) * 0.08;
-        mouseY += (targetMouseY - mouseY) * 0.08;
-
-        group.rotation.y += 0.0025;
-        group.rotation.x += 0.0015;
-        
-        group.rotation.y += mouseX * 0.0008;
-        group.rotation.x += mouseY * 0.0008;
-
-        
-        const scale = 1 + Math.sin(t * 0.6) * 0.03;
-        group.scale.set(scale, scale, scale);
-
-        renderer.render(scene, camera);
-      }
-      animate();
     })();
   </script>
 </body>

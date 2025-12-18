@@ -147,7 +147,7 @@ export function formatNumber(value: number | null | undefined): string {
 
 // Función para redondear hacia arriba y formatear pronósticos
 export function formatPronostico(value: number | null | undefined): string {
-  if (value === null || value === undefined) return 'DATOS INSUFICIENTES';
+  if (value === null || value === undefined) return 'Se necesitan 24 meses de ventas para pronosticar';
   
   // Redondear hacia arriba
   const roundedUp = Math.ceil(value);
