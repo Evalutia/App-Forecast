@@ -113,7 +113,7 @@ builder.Services.AddAuthorization();
 var corsPolicy = "Frontend";
 var allowedOriginsEnv = builder.Configuration["CORS__AllowedOrigins"]
                       ?? builder.Configuration["CORS_ORIGINS"]
-                      ?? "http://localhost:5173";
+                      ?? "https://app.evalutia.net"; // default a production frontend
 
 var origins = allowedOriginsEnv.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
 
@@ -141,7 +141,7 @@ builder.Services.AddCors(options =>
 
 var app = builder.Build();
 
-// Forwarded headers (para proxys como Caddy)
+// Forwarded headers (para proxys como Caddy) - debe aplicarse antes de HTTPS redirection / HSTS
 app.UseForwardedHeaders(new ForwardedHeadersOptions
 {
     ForwardedHeaders = ForwardedHeaders.XForwardedFor | ForwardedHeaders.XForwardedProto

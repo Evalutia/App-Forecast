@@ -69,7 +69,12 @@ services:
       JWT__Secret: ${JWT_SECRET}
       CORS__AllowedOrigins: ${CORS_ORIGINS}
       TZ: ${TZ}
+      # Indicar a ASP.NET Core que escuche HTTP en el puerto interno (Kestrel)
       ASPNETCORE_URLS: "http://0.0.0.0:${WEBAPI_PORT}"
+      # Informar el puerto HTTPS externo (terminado por Caddy)
+      ASPNETCORE_HTTPS_PORT: "443"
+      # (opcional) si querés ambiente
+      # ASPNETCORE_ENVIRONMENT: "Production"
     ports:
       - "${WEBAPI_PORT}:${WEBAPI_PORT}"
     healthcheck:
@@ -135,12 +140,15 @@ services:
       context: ./apps/frontend
       dockerfile: Dockerfile
       args:
-        VITE_API_BASE_URL: "http://webapi:${WEBAPI_PORT}"
+        # Construir el frontend para usar la URL pública segura del API
+        VITE_API_BASE_URL: "https://api.evalutia.net"
     container_name: evalutia-webapp
     env_file:
       - .env
     environment:
       - TZ=${TZ}
+      # También exponer la variable en runtime por si la app la consulta
+      - VITE_API_BASE_URL=https://api.evalutia.net
     ports:
       - "${WEBAPP_PORT}:${WEBAPP_PORT}"
     depends_on:
