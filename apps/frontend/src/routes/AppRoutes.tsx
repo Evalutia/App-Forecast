@@ -8,12 +8,15 @@ import JobsPage from '../features/jobs/pages/JobsPage';
 import JobDetailPage from '../features/jobs/pages/JobDetailPage';
 import LogoutButton from '../features/auth/components/LogoutButton';
 import AdminUsersButton from '../features/auth/components/AdminUsersButton';
+import { useAuthUser } from '../features/auth/hooks/useAuthUser';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { Toaster } from 'sonner';
 
 const queryClient = new QueryClient();
 
 function Dashboard() {
+  const { user } = useAuthUser();
+
   return (
     <div className="home-page">
       {/* Header */}
@@ -44,11 +47,13 @@ function Dashboard() {
             Ver las ventas cargadas
           </a>
         </div>
-        <div>
-          <a href="/jobs" className="btn">
-            Ver historial de ejecuciones 
-          </a>
-        </div>
+        {user && user.role === 'administrador' && (
+          <div>
+            <a href="/jobs" className="btn">
+              Ver historial de ejecuciones 
+            </a>
+          </div>
+        )}
       </div>
     </div>
   );
