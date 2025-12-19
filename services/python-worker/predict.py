@@ -67,12 +67,12 @@ def parse_args() -> argparse.Namespace:
         default=0,  # 0 ó negativo => sin límite, procesar todos los SKUs
         help="Considerar solo los N SKUs con mayor venta total histórica. 0 = sin límite.",
     )
-    # NUEVO: forzar fecha final (la que usó el ETL). El script predice empezando en (FORCE_END + 1 día)'s period.
+    # NUEVO: forzar fecha final (la que usó el ETL). El script predice empezando en (FORCE_END)'s día + X meses.
     p.add_argument(
         "--force-end",
         type=str,
         default=None,
-        help="Fecha límite usada por el ETL (ej. '03/10/2025' o '2025-10-03'). La predicción arrancará en el periodo que contiene FORCE_END + 1 día.",
+        help="Fecha límite usada por el ETL (ej. '03/10/2025' o '2025-10-03'). La predicción arrancará en base a esta fecha (día preservado).",
     )
     # NUEVO compatibilidad: si se pasa, se entrena sin la última fila como antes.
     p.add_argument(
@@ -248,6 +248,10 @@ def main() -> None:
         # forecast_periods := cantidad de periodos en la frecuencia elegida (args.periods ya se interpreta así)
         forecast_periods = args.periods
 
+        # Si la frecuencia es trimestral, limitar a 2 trimestres (requerimiento)
+        if args.resample_rule.upper().startswith("Q"):
+            forecast_periods = min(forecast_periods, 2)
+
         # compute run_date once so all SKUs use the same 'today' anchor
         run_date = pd.Timestamp.now().normalize()
 
@@ -264,23 +268,32 @@ def main() -> None:
                 train_full = serie.copy()
 
                 # ============================
-                # Lógica para decidir el TRAIN y el primer periodo a predecir (fidx_start)
+                # Lógica para decidir el TRAIN y el primer periodo a predecir (fidx_start / fidx_model)
                 # ============================
                 train = train_full.copy()
                 fidx_start = None
                 freq_str = None
+                fidx_model = None
 
                 if force_end_dt is not None:
-                    # Día siguiente a la última venta considerada por el ETL
-                    day_after = force_end_dt + pd.Timedelta(days=1)
-                    fidx_start = day_after
-                    freq_str = "QS" if args.resample_rule.upper().startswith("Q") else "MS"
-                    # entrenamos con todos los periodos STRICTAMENTE anteriores a fidx_start
-                    train = train_full[train_full.index < fidx_start].copy()
-                    if len(train) < min_history_periods:
-                        warnings_list.append(f"SKU {sku} omitido por pocos datos ({len(train)} periodos tras aplicar force-end)")
-                        continue
-
+                    # Usamos force_end_dt como ancla y preservamos el día (ej: si FORCE_END=18/12 -> +3 meses => 18/03)
+                    anchor = force_end_dt
+                    if args.resample_rule.upper().startswith("Q"):
+                        freq_str = "QS"
+                        # entrenamos con todos los periodos <= anchor
+                        train = train_full[train_full.index <= anchor].copy()
+                        if len(train) < min_history_periods:
+                            warnings_list.append(f"SKU {sku} omitido por pocos datos ({len(train)} periodos tras aplicar force-end)")
+                            continue
+                        # fidx_model: anchor + 3, 6, ... meses (preservando día)
+                        fidx_model = pd.to_datetime([anchor + pd.DateOffset(months=3 * (i + 1)) for i in range(forecast_periods)])
+                    else:
+                        freq_str = "MS"
+                        train = train_full[train_full.index <= anchor].copy()
+                        if len(train) < min_history_periods:
+                            warnings_list.append(f"SKU {sku} omitido por pocos datos ({len(train)} periodos tras aplicar force-end)")
+                            continue
+                        fidx_model = pd.to_datetime([anchor + pd.DateOffset(months=1 * (i + 1)) for i in range(forecast_periods)])
                 elif args.include_current_period:
                     # legacy behavior: quitar la última fila y predecir a partir de esa fila eliminada
                     if len(train_full) <= 1:
@@ -301,7 +314,6 @@ def main() -> None:
                     if len(train) < min_history_periods:
                         warnings_list.append(f"SKU {sku} omitido por pocos datos ({len(train)} periodos tras quitar el último periodo)")
                         continue
-
                 else:
                     # comportamiento original: requerimos min_history + horizon sobre la serie completa
                     if len(train_full) < (min_history_periods + forecast_periods):
@@ -321,14 +333,13 @@ def main() -> None:
                         fidx_start = train.index[-1] + pd.offsets.MonthBegin()
                         freq_str = "MS"
 
-                # ahora construimos fidx a partir de fidx_start
-                if force_end_dt is not None:
+                # ahora construimos fidx_model si no fue construido en el bloque force_end
+                if fidx_model is None:
                     if args.resample_rule.upper().startswith("Q"):
-                        fidx_model = pd.to_datetime([fidx_start + pd.DateOffset(months=3 * i) for i in range(forecast_periods)])
+                        # construimos desde fidx_start, períodos con inicio de trimestre
+                        fidx_model = pd.date_range(start=fidx_start, periods=forecast_periods, freq=freq_str)
                     else:
-                        fidx_model = pd.to_datetime([fidx_start + pd.DateOffset(months=1 * i) for i in range(forecast_periods)])
-                else:
-                    fidx_model = pd.date_range(start=fidx_start, periods=forecast_periods, freq=freq_str)
+                        fidx_model = pd.date_range(start=fidx_start, periods=forecast_periods, freq=freq_str)
 
                 # determinar lags según frecuencia
                 lags = 8 if args.resample_rule.upper().startswith("Q") else 12
@@ -399,22 +410,11 @@ def main() -> None:
                     best_result = all_results[0]
 
                 # ----------------------------
-                # Construir las fechas que SE VAN A PERSISTIR: la primera fecha es
-                # SIEMPRE "run_date" (fecha exacta de ejecución) y las siguientes avancen
-                # en meses/trimestres.
+                # Las fechas que SE VAN A PERSISTIR en la columna fecha_predicha deben ser
+                # las fechas objetivo que genera el modelo (fidx_model).
                 # ----------------------------
-                fecha_preds: List = []
-                if args.resample_rule.upper().startswith("Q"):
-                    for i in range(forecast_periods):
-                        fecha_preds.append((run_date + pd.DateOffset(months=3 * i)).date())
-                else:
-                    for i in range(forecast_periods):
-                        fecha_preds.append((run_date + pd.DateOffset(months=1 * i)).date())
-
-                # Persistir filas de predicciones SOLO del mejor modelo
-                for h, (dt_model, yhat, fecha_pred) in enumerate(
-                    zip(fidx_model, best_result.forecast, fecha_preds), start=1
-                ):
+                for h, (dt_model, yhat) in enumerate(zip(fidx_model, best_result.forecast), start=1):
+                    fecha_pred = pd.to_datetime(dt_model).date()
                     rows_buffer.append(
                         {
                             "sku": sku,
@@ -444,7 +444,11 @@ def main() -> None:
                     df_dump = pd.DataFrame({"fecha": train_full.index, "y_true": train_full.values})
                     for r in all_results:
                         if r.holdout_pred is not None:
-                            df_dump[r.name] = r.holdout_pred.reindex(train_full.index).values
+                            # reindex puede fallar si índices distintos; defensiva
+                            try:
+                                df_dump[r.name] = r.holdout_pred.reindex(train_full.index).values
+                            except Exception:
+                                pass
                     df_dump.to_csv(f"eval_{sku}.csv", index=False)
 
                 processed += 1

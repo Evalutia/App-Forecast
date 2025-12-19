@@ -14,9 +14,10 @@ namespace DataAccess.Repositories.PrediccionDataAccess
     public IEnumerable<Prediccion> GetUltimasBySku()
     {
       var ultimoJobId = _db.JobsHistoriales
-                           .OrderByDescending(j => j.Id)
-                           .Select(j => j.Id)
-                           .FirstOrDefault();
+                          .Where(j => j.TipoJob.ToLower() == "forecast" && j.Estado.ToLower() == "exitoso")
+                          .OrderByDescending(j => j.Id)
+                          .Select(j => j.Id)
+                          .FirstOrDefault();
 
       if (ultimoJobId == 0)
         return Enumerable.Empty<Prediccion>();

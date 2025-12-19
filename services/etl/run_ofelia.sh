@@ -9,5 +9,5 @@ exec /opt/pentaho/data-integration/kitchen.sh \
   "-param:ID_EMPRESA=1" "-param:S_DEPOSITOS=1,5" "-param:GROUPS=201" \
   "-param:MYSQL_HOST=mysql" "-param:MYSQL_DB=evalutia" \
   "-param:MYSQL_USER=evalutia" "-param:MYSQL_PASSWORD=evalutia" "-param:MYSQL_PORT=3306" \
-  "-param:PREDICT_PERIODS=6" "-param:PREDICT_MODEL_SET=classic" "-param:PREDICT_VERSION=mvp-001" \
+  "-param:PREDICT_PERIODS=2" "-param:PREDICT_MODEL_SET=classic" "-param:PREDICT_RESAMPLE_RULE=QS" "-param:PREDICT_VERSION=mvp-001" \
   "-param:FORCE_START=$Y" "-param:FORCE_END=$Y"
