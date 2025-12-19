@@ -64,13 +64,13 @@ def upsert_predicciones(engine: Engine, rows: List[Dict], job_id: Optional[int] 
     INSERT INTO predicciones
         (sku, fecha_predicha, cantidad_predicha, modelo, version_modelo, horizonte, rmse, r2, job_id, ts_generacion)
     VALUES
-        (:sku, :fecha_predicha, :cantidad_predicha, :modelo, :version_modelo, :horizonte, :rmse, :r2, :job_id, NOW(6))
+        (:sku, :fecha_predicha, :cantidad_predicha, :modelo, :version_modelo, :horizonte, :rmse, :r2, :job_id, CURRENT_DATE)
     ON DUPLICATE KEY UPDATE
         cantidad_predicha = VALUES(cantidad_predicha),
         horizonte         = VALUES(horizonte),
         rmse              = VALUES(rmse),
         r2                = VALUES(r2),
-        ts_generacion     = NOW(6),
+        ts_generacion     = CURRENT_DATE,
         job_id            = VALUES(job_id)
     """
     )
