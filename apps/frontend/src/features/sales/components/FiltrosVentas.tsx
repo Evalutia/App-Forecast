@@ -74,7 +74,7 @@ export default function FiltrosVentas({ initial, onApply, onClear }: Props) {
             list="ventas-sku-list"
             value={sku}
             onChange={(e) => setSku(e.target.value)}
-            placeholder={skusLoading ? "Buscando..." : "Escribí para sugerencias"}
+            placeholder={skusLoading ? "Buscando..." : "p.ej. I01497"}
             className="input"
           />
           <datalist id="ventas-sku-list">

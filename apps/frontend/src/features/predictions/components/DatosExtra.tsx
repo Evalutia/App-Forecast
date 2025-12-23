@@ -142,7 +142,7 @@ export default function DatosExtra() {
                     </thead>
                     <tbody>
                       <tr>
-                        <td>Fecha de la primera primera observación para predecir</td>
+                        <td>Fecha de la primera observación para predecir</td>
                         <td className="mono">{resumenSku.fechaPrimerObservacion ?? '—'}</td>
                       </tr>
                       <tr>
@@ -179,7 +179,7 @@ export default function DatosExtra() {
                         </td>
                       </tr>
                       <tr>
-                        <td>Ventas del último año (12m) móvil</td>
+                        <td>Ventas del último año móvil</td>
                         <td>{fmtNum(resumenSku.ventasUltimoAnioCalendario)}</td>
                       </tr>
                       <tr>
@@ -187,7 +187,7 @@ export default function DatosExtra() {
                         <td>{fmtPct(resumenSku.crecimientoVentasUltimoAnio)}</td>
                       </tr>
                       <tr>
-                        <td>Crecimiento de ventas en el último trimestre vs mismo trimestre del año móvil anterior</td>
+                        <td>Crecimiento de las ventas del último trimestre respecto al mismo período del año anterior</td>
                         <td>{fmtPct(resumenSku.crecimientoVentasUltimoTrimestreVsMismoTrimestreAnioAnterior)}</td>
                       </tr>
                       <tr>
