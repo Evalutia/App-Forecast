@@ -71,7 +71,8 @@ def upsert_predicciones(engine: Engine, rows: List[Dict], job_id: Optional[int] 
         rmse              = VALUES(rmse),
         r2                = VALUES(r2),
         ts_generacion     = CURRENT_DATE,
-        job_id            = VALUES(job_id)
+        job_id            = VALUES(job_id),
+        fecha_predicha = VALUES(fecha_predicha)
     """
     )
     with engine.begin() as conn:
