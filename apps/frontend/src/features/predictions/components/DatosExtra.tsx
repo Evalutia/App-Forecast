@@ -183,7 +183,7 @@ export default function DatosExtra() {
                         <td>{fmtNum(resumenSku.ventasUltimoAnioCalendario)}</td>
                       </tr>
                       <tr>
-                        <td>Crecimiento de ventas en el último año móvil</td>
+                        <td>Crecimiento de las ventas del último año móvil respecto al mismo período anterior</td>
                         <td>{fmtPct(resumenSku.crecimientoVentasUltimoAnio)}</td>
                       </tr>
                       <tr>
