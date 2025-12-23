@@ -35,6 +35,7 @@ CREATE TABLE IF NOT EXISTS predicciones (
   r2                 DOUBLE            NULL,
   ts_generacion      DATE    NOT NULL,
   PRIMARY KEY (id),
+  UNIQUE KEY uq_pred_sku_modelo_version_fecha (sku, modelo, version_modelo, fecha_predicha),
   CONSTRAINT chk_pred_cantidad CHECK (cantidad_predicha >= 0),
   CONSTRAINT chk_pred_horizonte CHECK (horizonte BETWEEN 1 AND 36)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
