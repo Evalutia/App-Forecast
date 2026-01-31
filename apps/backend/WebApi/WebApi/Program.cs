@@ -1,4 +1,7 @@
 using DataAccess.Repositories.JobDataAccess;
+using DataAccess.Repositories.ArticuloDataAccess;
+using DataAccess.Repositories.StockDiarioDataAccess;
+using DataAccess.Repositories.VentasMensualesDataAccess;
 using DataAccess.Repositories.PrediccionDataAccess;
 using DataAccess.Repositories.UsuarioDataAccess;
 using DataAccess.Repositories.VentaDataAccess;
@@ -10,6 +13,8 @@ using Microsoft.OpenApi.Models;
 using Services.Jobs;
 using Services.Predicciones;
 using Services.Security.Auth;
+using Services.Stock;
+using Services.Admin;
 using Services.Usuarios;
 using Services.Ventas;
 using System.Text;
@@ -18,15 +23,18 @@ using WebApi.Filters;
 
 var builder = WebApplication.CreateBuilder(args);
 
-// Forzamos Kestrel a escuchar en 0.0.0.0:${WEBAPI_PORT} si la variable está presente
-var portEnv = Environment.GetEnvironmentVariable("WEBAPI_PORT") ?? builder.Configuration["WEBAPI_PORT"] ?? "8081";
-if (int.TryParse(portEnv, out var webapiPort))
+// Puerto
+var portEnv = Environment.GetEnvironmentVariable("WEBAPI_PORT")
+              ?? builder.Configuration["WEBAPI_PORT"]
+              ?? "8081";
+if (!int.TryParse(portEnv, out var webapiPort))
 {
-    builder.WebHost.ConfigureKestrel(options =>
-    {
-        options.ListenAnyIP(webapiPort);
-    });
+    webapiPort = 8081;
 }
+builder.WebHost.ConfigureKestrel(options =>
+{
+    options.ListenAnyIP(webapiPort);
+});
 
 // DbContext (Pomelo MySQL)
 builder.Services.AddDbContextPool<EvalutiaDbContext>(opt =>
@@ -37,8 +45,12 @@ builder.Services.AddDbContextPool<EvalutiaDbContext>(opt =>
 });
 
 // JWT
-builder.Services.Configure<JwtOptions>(builder.Configuration.GetSection("Jwt"));
-builder.Services.AddScoped<IJwtService, JwtService>();
+var jwt = builder.Configuration.GetSection("Jwt").Get<JwtOptions>() ?? new JwtOptions();
+var jwtSecret = jwt.Secret ?? builder.Configuration["Jwt:Secret"] ?? builder.Configuration["Jwt:SecretKey"];
+if (string.IsNullOrEmpty(jwtSecret))
+{
+    throw new InvalidOperationException("JWT secret not configured. Set Jwt:Secret (or Jwt:SecretKey) in configuration.");
+}
 
 // DI Usuarios (sync)
 builder.Services.AddScoped<IUsuarioRepository, UsuarioRepository>();
@@ -50,6 +62,11 @@ builder.Services.AddScoped<IPrediccionRepository, PrediccionRepository>();
 builder.Services.AddScoped<IPrediccionService, PrediccionService>();
 builder.Services.AddScoped<IVentaRepository, VentaRepository>();
 builder.Services.AddScoped<IVentasService, VentasService>();
+builder.Services.AddScoped<IArticuloRepository, ArticuloRepository>();
+builder.Services.AddScoped<IStockDiarioRepository, StockDiarioRepository>();
+builder.Services.AddScoped<IVentasMensualesRepository, VentasMensualesRepository>();
+builder.Services.AddScoped<IStockService, StockService>();
+builder.Services.AddScoped<IAdminService, AdminService>();
 
 // Exception filter global
 builder.Services.AddControllers(o =>
@@ -91,7 +108,6 @@ builder.Services.AddSwaggerGen(c =>
 });
 
 // AuthN/AuthZ
-var jwt = builder.Configuration.GetSection("Jwt").Get<JwtOptions>()!;
 builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
     .AddJwtBearer(o =>
     {
@@ -102,7 +118,7 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
             ValidateAudience = true,
             ValidAudience = jwt.Audience,
             ValidateIssuerSigningKey = true,
-            IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(jwt.Secret)),
+            IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(jwtSecret)),
             ValidateLifetime = true,
             ClockSkew = TimeSpan.FromMinutes(2)
         };

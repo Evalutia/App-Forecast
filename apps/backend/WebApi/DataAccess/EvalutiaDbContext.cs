@@ -1,4 +1,5 @@
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Pomelo.EntityFrameworkCore.MySql.Scaffolding.Internal;
 using System;
 using System.Collections.Generic;
@@ -7,7 +8,7 @@ using WebApi.Models;
 
 namespace WebApi.Data;
 
-public partial class EvalutiaDbContext : DbContext
+public class EvalutiaDbContext : DbContext
 {
   public EvalutiaDbContext()
   {
@@ -24,6 +25,12 @@ public partial class EvalutiaDbContext : DbContext
 
   public virtual DbSet<Usuario> Usuarios { get; set; }
 
+  public virtual DbSet<Articulo> Articulos { get; set; }
+
+  public virtual DbSet<StockDiario> StockDiario { get; set; }
+
+  public virtual DbSet<VentasMensuales> VentasMensuales { get; set; }
+
   public virtual DbSet<VentaHistorica> VentasHistoricas { get; set; }
 
   protected override void OnModelCreating(ModelBuilder modelBuilder)
@@ -31,6 +38,52 @@ public partial class EvalutiaDbContext : DbContext
     modelBuilder
         .UseCollation("utf8mb4_0900_ai_ci")
         .HasCharSet("utf8mb4");
+
+    var dateOnlyConverter = new ValueConverter<DateOnly, DateTime>(
+        d => d.ToDateTime(TimeOnly.MinValue),
+        dt => DateOnly.FromDateTime(dt));
+
+    modelBuilder.Entity<Articulo>(entity =>
+    {
+      entity.HasKey(e => e.Sku).HasName("PRIMARY");
+
+      entity.ToTable("articulos");
+
+      entity.Property(e => e.Sku)
+          .HasMaxLength(120)
+          .HasColumnName("sku");
+      entity.Property(e => e.Barcode)
+          .HasMaxLength(64)
+          .HasColumnName("barcode");
+      entity.Property(e => e.Descripcion)
+          .HasMaxLength(512)
+          .HasColumnName("descripcion");
+      entity.Property(e => e.FamiliaId)
+          .HasColumnName("familia_id");
+      entity.Property(e => e.FamiliaNombre)
+          .HasMaxLength(255)
+          .HasColumnName("familia_nombre");
+      entity.Property(e => e.GeneroId)
+          .HasColumnName("genero_id");
+      entity.Property(e => e.GeneroDescripcion)
+          .HasMaxLength(255)
+          .HasColumnName("genero_descripcion");
+      entity.Property(e => e.StockMinimo)
+          .HasColumnName("stock_minimo");
+      entity.Property(e => e.FrecuenciaMensual)
+          .HasColumnName("frecuencia_mensual");
+      entity.Property(e => e.Fuente)
+          .HasMaxLength(64)
+          .HasColumnName("fuente");
+      entity.Property(e => e.TsCarga)
+          .HasDefaultValueSql("CURRENT_TIMESTAMP(6)")
+          .HasColumnType("timestamp(6)")
+          .HasColumnName("ts_carga");
+      entity.Property(e => e.ActualizadoEn)
+          .ValueGeneratedOnAddOrUpdate()
+          .HasColumnType("timestamp(6)")
+          .HasColumnName("actualizado_en");
+    });
 
     modelBuilder.Entity<JobHistorial>(entity =>
     {
@@ -122,6 +175,74 @@ public partial class EvalutiaDbContext : DbContext
           .HasColumnName("rol");
     });
 
+    modelBuilder.Entity<StockDiario>(entity =>
+    {
+      entity.HasKey(e => e.Id).HasName("PRIMARY");
+
+      entity.ToTable("stock_diario");
+
+      entity.HasIndex(e => new { e.Sku, e.Fecha, e.DepositoId }, "uq_stock_sku_fecha_deposito").IsUnique();
+
+      entity.Property(e => e.Id).HasColumnName("id");
+      entity.Property(e => e.Sku)
+          .HasMaxLength(120)
+          .HasColumnName("sku");
+      entity.Property(e => e.Fecha)
+          .HasConversion(dateOnlyConverter)
+          .HasColumnType("date")
+          .HasColumnName("fecha");
+      entity.Property(e => e.Cantidad)
+          .HasDefaultValueSql("0")
+          .HasColumnName("cantidad");
+      entity.Property(e => e.DepositoId)
+          .HasMaxLength(64)
+          .HasColumnName("deposito_id");
+      entity.Property(e => e.Fuente)
+          .HasMaxLength(64)
+          .HasColumnName("fuente");
+      entity.Property(e => e.TsCarga)
+          .HasDefaultValueSql("CURRENT_TIMESTAMP(6)")
+          .HasColumnType("timestamp(6)")
+          .HasColumnName("ts_carga");
+    });
+
+    modelBuilder.Entity<VentasMensuales>(entity =>
+    {
+      entity.HasKey(e => e.Id).HasName("PRIMARY");
+
+      entity.ToTable("ventas_mensuales");
+
+      entity.HasIndex(e => new { e.Sku, e.Year, e.Month }, "uq_ventasmens_sku_ym").IsUnique();
+
+      entity.Property(e => e.Id).HasColumnName("id");
+      entity.Property(e => e.Sku)
+          .HasMaxLength(120)
+          .HasColumnName("sku");
+      entity.Property(e => e.Year)
+          .HasColumnType("smallint unsigned")
+          .HasColumnName("year");
+      entity.Property(e => e.Month)
+          .HasColumnType("tinyint unsigned")
+          .HasColumnName("month");
+      entity.Property(e => e.VentasCantidad)
+          .HasDefaultValueSql("0")
+          .HasColumnName("ventas_cantidad");
+      entity.Property(e => e.DiasConStock)
+          .HasDefaultValueSql("0")
+          .HasColumnName("dias_con_stock");
+      entity.Property(e => e.Fuente)
+          .HasColumnType("enum('ws','calculado')")
+          .HasColumnName("fuente");
+      entity.Property(e => e.TsCarga)
+          .HasDefaultValueSql("CURRENT_TIMESTAMP(6)")
+          .HasColumnType("timestamp(6)")
+          .HasColumnName("ts_carga");
+      entity.Property(e => e.ActualizadoEn)
+          .ValueGeneratedOnAddOrUpdate()
+          .HasColumnType("timestamp(6)")
+          .HasColumnName("actualizado_en");
+    });
+
     modelBuilder.Entity<VentaHistorica>(entity =>
     {
       entity.HasKey(e => e.Id).HasName("PRIMARY");
@@ -131,14 +252,37 @@ public partial class EvalutiaDbContext : DbContext
       entity.HasIndex(e => new { e.Fecha, e.Sku, e.Fuente }, "uq_ventas_fecha_sku_fuente").IsUnique();
 
       entity.Property(e => e.Id).HasColumnName("id");
+      entity.Property(e => e.Barcode)
+          .HasMaxLength(64)
+          .HasColumnName("barcode");
       entity.Property(e => e.Cantidad).HasColumnName("cantidad");
-      entity.Property(e => e.Fecha).HasColumnName("fecha");
+      entity.Property(e => e.DescripcionArticulo)
+          .HasMaxLength(512)
+          .HasColumnName("descripcion_articulo");
+      entity.Property(e => e.FamiliaId)
+          .HasColumnName("familia_id");
+      entity.Property(e => e.FamiliaNombre)
+          .HasMaxLength(255)
+          .HasColumnName("familia_nombre");
+      entity.Property(e => e.Fecha)
+          .HasConversion(dateOnlyConverter)
+          .HasColumnType("date")
+          .HasColumnName("fecha");
+      entity.Property(e => e.FrecuenciaMensual)
+          .HasColumnName("frecuencia_mensual");
       entity.Property(e => e.Fuente)
           .HasMaxLength(64)
           .HasColumnName("fuente");
+      entity.Property(e => e.GeneroDescripcion)
+          .HasMaxLength(255)
+          .HasColumnName("genero_descripcion");
+      entity.Property(e => e.GeneroId)
+          .HasColumnName("genero_id");
       entity.Property(e => e.Sku)
           .HasMaxLength(120)
           .HasColumnName("sku");
+      entity.Property(e => e.StockMinimo)
+          .HasColumnName("stock_minimo");
       entity.Property(e => e.TsCarga)
           .HasDefaultValueSql("CURRENT_TIMESTAMP(6)")
           .HasColumnType("timestamp(6)")
