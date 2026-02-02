@@ -52,6 +52,9 @@ if (string.IsNullOrEmpty(jwtSecret))
     throw new InvalidOperationException("JWT secret not configured. Set Jwt:Secret (or Jwt:SecretKey) in configuration.");
 }
 
+builder.Services.Configure<JwtOptions>(builder.Configuration.GetSection("Jwt"));
+builder.Services.AddScoped<IJwtService, JwtService>();
+
 // DI Usuarios (sync)
 builder.Services.AddScoped<IUsuarioRepository, UsuarioRepository>();
 builder.Services.AddScoped<IAuthService, AuthService>();

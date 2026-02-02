@@ -33,7 +33,7 @@ namespace DataAccess.Repositories.StockDiarioDataAccess
         for (var i = 0; i < list.Count; i += chunkSize)
         {
           var chunk = list.Skip(i).Take(chunkSize).ToList();
-          ExecuteUpsertChunk(chunk, tx.GetDbTransaction());
+          ExecuteUpsertChunk(chunk, (DbTransaction)tx);
         }
 
         tx.Commit();

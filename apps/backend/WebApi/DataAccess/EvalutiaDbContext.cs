@@ -288,9 +288,5 @@ public class EvalutiaDbContext : DbContext
           .HasColumnType("timestamp(6)")
           .HasColumnName("ts_carga");
     });
-
-    OnModelCreatingPartial(modelBuilder);
   }
-
-  partial void OnModelCreatingPartial(ModelBuilder modelBuilder);
 }
