@@ -182,8 +182,10 @@ app.UseCors(corsPolicy);
 app.UseSwagger();
 app.UseSwaggerUI();
 
-// HTTPS redirection (Kestrel está sirviendo HTTP; Caddy termina TLS)
-app.UseHttpsRedirection();
+if (!app.Environment.IsDevelopment())
+{
+  app.UseHttpsRedirection();
+}
 
 app.UseAuthentication();
 app.UseAuthorization();
