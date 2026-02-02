@@ -1,7 +1,7 @@
 using Microsoft.AspNetCore.Mvc;
 using DataAccess.Repositories.ArticuloDataAccess;
-using WebApi.Controllers.Articulos.DTOs;
 using WebApi.Models;
+using WebApi.Controllers.Articulos.DTOs;
 
 namespace WebApi.Controllers.Articulos
 {
@@ -22,22 +22,23 @@ namespace WebApi.Controllers.Articulos
       if (!ModelState.IsValid)
         return BadRequest(ModelState);
 
+      // Mapear DTO -> Modelo EF (teniendo en cuenta los nullable)
       var articulo = new Articulo
       {
         Sku = dto.Sku,
         Barcode = dto.Barcode,
         Descripcion = dto.Descripcion,
-        FamiliaId = dto.FamiliaId,
+        FamiliaId = dto.FamiliaId,              // Articulo.FamiliaId es uint?
         FamiliaNombre = dto.FamiliaNombre,
         GeneroId = dto.GeneroId,
         GeneroDescripcion = dto.GeneroDescripcion,
-        StockMinimo = dto.StockMinimo,
+        StockMinimo = dto.StockMinimo!.Value,   // Required asegura que no sea null
         FrecuenciaMensual = dto.FrecuenciaMensual,
         Fuente = dto.Fuente
       };
 
-      var guardado = _repo.Upsert(articulo);
-      return Ok(guardado);
+      var saved = _repo.Upsert(articulo);
+      return Ok(saved);
     }
 
     [HttpGet]

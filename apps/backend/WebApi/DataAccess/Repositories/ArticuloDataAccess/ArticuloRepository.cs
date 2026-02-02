@@ -18,6 +18,8 @@ namespace DataAccess.Repositories.ArticuloDataAccess
 
     public Articulo? FindBySku(string sku)
     {
+      if (string.IsNullOrWhiteSpace(sku)) return null;
+
       return _db.Articulos
                 .FromSqlInterpolated($"SELECT * FROM articulos WHERE sku = {sku} LIMIT 1")
                 .AsNoTracking()
@@ -26,10 +28,18 @@ namespace DataAccess.Repositories.ArticuloDataAccess
 
     public Articulo Upsert(Articulo articulo)
     {
-      using var tx = _db.Database.BeginTransaction();
-      try
+      if (articulo is null) throw new ArgumentNullException(nameof(articulo));
+
+      // Obtener la estrategia de ejecución del DbContext (soporta reintentos)
+      var strategy = _db.Database.CreateExecutionStrategy();
+
+      // Ejecutar todo el bloque (transacción + operaciones) dentro de la estrategia
+      return strategy.Execute(() =>
       {
-        _db.Database.ExecuteSqlInterpolated($@"
+        using var tx = _db.Database.BeginTransaction();
+        try
+        {
+          _db.Database.ExecuteSqlInterpolated($@"
 INSERT INTO articulos
  (sku, barcode, descripcion, familia_id, familia_nombre, genero_id, genero_descripcion, stock_minimo, frecuencia_mensual, fuente)
 VALUES
@@ -45,18 +55,19 @@ ON DUPLICATE KEY UPDATE
  frecuencia_mensual = VALUES(frecuencia_mensual),
  fuente = VALUES(fuente);");
 
-        var saved = FindBySku(articulo.Sku);
-        if (saved is null)
-          throw new InvalidOperationException($"Upsert failed for sku '{articulo.Sku}'.");
+          var saved = FindBySku(articulo.Sku);
+          if (saved is null)
+            throw new InvalidOperationException($"Upsert failed for sku '{articulo.Sku}'.");
 
-        tx.Commit();
-        return saved;
-      }
-      catch
-      {
-        tx.Rollback();
-        throw;
-      }
+          tx.Commit();
+          return saved;
+        }
+        catch
+        {
+          try { tx.Rollback(); } catch { /* swallow rollback errors */ }
+          throw;
+        }
+      });
     }
 
     public IEnumerable<Articulo> FindByFamilyOrGenre(int? familyId, int? genreId, int page, int pageSize)
