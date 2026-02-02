@@ -18,7 +18,9 @@
   </ItemGroup>
 
   <ItemGroup>
+    <Folder Include="Controllers\Articulos\DTOs\" />
     <Folder Include="Controllers\Predicciones\" />
+    <Folder Include="Controllers\StockDiario\DTOs\" />
   </ItemGroup>
 
 </Project>
