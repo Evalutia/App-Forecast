@@ -1,16 +1,15 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <job>
-  <name>ETL Diario Ventas</name>
-  <description>Job diario: SOAP -> staging -> upsert ventas_historicas -> predict.py -> limpiar staging</description>
+  <name>job_etl_diario</name>
+  <description>Job diario: articulos, stockxml, ventas, merges y calculos</description>
 
   <parameters>
     <parameter><name>WS_URL</name><default_value>${WS_URL}</default_value></parameter>
     <parameter><name>DATE_FMT</name><default_value>dmy</default_value></parameter>
     <parameter><name>ID_EMPRESA</name><default_value>1</default_value></parameter>
-    <parameter><name>S_DEPOSITOS</name><default_value></default_value></parameter>
-    <parameter><name>GROUPS</name><default_value>75</default_value></parameter>
-    <parameter><name>FORCE_START</name><default_value></default_value></parameter>
-    <parameter><name>FORCE_END</name><default_value></default_value></parameter>
+    <parameter><name>S_DEPOSITOS</name><default_value>1,5</default_value></parameter>
+    <parameter><name>GROUPS</name><default_value>201</default_value></parameter>
+    <parameter><name>CANTREG</name><default_value>20000</default_value></parameter>
 
     <parameter><name>MYSQL_HOST</name><default_value>${MYSQL_HOST}</default_value></parameter>
     <parameter><name>MYSQL_DB</name><default_value>${MYSQL_DB}</default_value></parameter>
@@ -21,8 +20,10 @@
     <parameter><name>PREDICT_PERIODS</name><default_value>14</default_value></parameter>
     <parameter><name>PREDICT_MODEL_SET</name><default_value>classic</default_value></parameter>
     <parameter><name>PREDICT_VERSION</name><default_value>1</default_value></parameter>
-    <!-- agregado: regla de resample para predict (MS o QS) -->
     <parameter><name>PREDICT_RESAMPLE_RULE</name><default_value>MS</default_value></parameter>
+
+    <parameter><name>FORCE_START</name><default_value></default_value></parameter>
+    <parameter><name>FORCE_END</name><default_value></default_value></parameter>
 
     <parameter><name>LAST_TABLE</name><default_value>ventas_historicas_stage</default_value></parameter>
   </parameters>
@@ -36,13 +37,6 @@
     <port>${MYSQL_PORT}</port>
     <username>${MYSQL_USER}</username>
     <password>${MYSQL_PASSWORD}</password>
-    <using_unique_connections>N</using_unique_connections>
-    <attributes>
-      <attribute><code>EXTRA_OPTION_MYSQL.useSSL</code><attribute>false</attribute></attribute>
-      <attribute><code>EXTRA_OPTION_MYSQL.allowPublicKeyRetrieval</code><attribute>true</attribute></attribute>
-      <attribute><code>EXTRA_OPTION_MYSQL.useUnicode</code><attribute>true</attribute></attribute>
-      <attribute><code>EXTRA_OPTION_MYSQL.characterEncoding</code><attribute>utf8</attribute></attribute>
-    </attributes>
   </connection>
 
   <entries>
@@ -50,85 +44,167 @@
       <name>START</name>
       <type>SPECIAL</type>
       <start>Y</start>
-      <repeat>N</repeat>
-      <schedulerType>0</schedulerType>
       <xloc>64</xloc><yloc>64</yloc><draw>Y</draw>
     </entry>
 
-    <!-- TRUNCATE INICIAL -> DELETE -->
     <entry>
-      <name>TRUNCATE STAGE (start)</name>
+      <name>TRUNCATE VENTAS_STAGE</name>
       <type>SQL</type>
       <connection>MYSQL_EVALUTIA</connection>
       <sql><![CDATA[
 DELETE FROM ventas_historicas_stage;
       ]]></sql>
-      <send_one_statement>Y</send_one_statement>
       <xloc>240</xloc><yloc>64</yloc><draw>Y</draw>
     </entry>
 
-    <!-- EXTRACT vía shell POSIX -->
     <entry>
-      <name>RUN EXTRACT (bash)</name>
+      <name>RUN EXTRACT ARTICULOS</name>
       <type>SHELL</type>
       <filename>/bin/sh</filename>
       <work_directory>${Internal.Entry.Current.Directory}</work_directory>
       <arguments><argument>-c</argument></arguments>
       <insertScript>Y</insertScript>
       <script><![CDATA[
-# POSIX sh
-set -eu
-WS_URL="${WS_URL}"; export WS_URL
-DATE_FMT="${DATE_FMT}"; export DATE_FMT
-ID_EMPRESA="${ID_EMPRESA}"; export ID_EMPRESA
-S_DEPOSITOS="${S_DEPOSITOS}"; export S_DEPOSITOS
-GROUPS="${GROUPS}"; export GROUPS
-[ -n "${FORCE_START:-}" ] && { FORCE_START="${FORCE_START}"; export FORCE_START; } || true
-[ -n "${FORCE_END:-}" ] && { FORCE_END="${FORCE_END}"; export FORCE_END; } || true
-MYSQL_HOST="${MYSQL_HOST}"; export MYSQL_HOST
-MYSQL_DB="${MYSQL_DB}"; export MYSQL_DB
-MYSQL_USER="${MYSQL_USER}"; export MYSQL_USER
-MYSQL_PASSWORD="${MYSQL_PASSWORD}"; export MYSQL_PASSWORD
-MYSQL_PORT="${MYSQL_PORT}"; export MYSQL_PORT
-sed -i 's/\r$//' /app/services/etl/run_etl_daily.sh 2>/dev/null || true
-chmod +x /app/services/etl/run_etl_daily.sh || true
-echo "[JOB][RUN EXTRACT] Lanzando run_etl_daily.sh ..."
-/bin/bash /app/services/etl/run_etl_daily.sh
-echo "[JOB][RUN EXTRACT] Finalizado OK."
+/bin/bash /app/services/etl/run_extract_articulos.sh
       ]]></script>
-      <arg_from_previous>N</arg_from_previous>
-      <exec_per_row>N</exec_per_row>
-      <set_logfile>N</set_logfile>
       <wait>Y</wait>
-      <fail_when_not_success>Y</fail_when_not_success>
       <xloc>480</xloc><yloc>64</yloc><draw>Y</draw>
     </entry>
 
-    <!-- MERGE STAGING -> VENTAS (sin ${MYSQL_DB} en SQL) -->
     <entry>
-      <name>MERGE STAGING -> VENTAS</name>
+      <name>TRUNCATE STOCK_DIARIO_STAGE (opcional)</name>
       <type>SQL</type>
       <connection>MYSQL_EVALUTIA</connection>
       <sql><![CDATA[
-/* requiere UNIQUE(fecha, sku) en ventas_historicas */
-INSERT INTO ventas_historicas (fecha, sku, cantidad, ts_carga, fuente)
-SELECT DATE(s.fecha),
-       TRIM(s.sku),
-       CAST(s.cantidad AS DECIMAL(12,3)),
-       NOW(6),
-       COALESCE(s.fuente,'ws_consstockventa')
+-- si tenés tabla stage para stock, borrar; si no, se omite
+DELETE FROM stock_diario_stage;
+      ]]></sql>
+      <xloc>720</xloc><yloc>64</yloc><draw>Y</draw>
+    </entry>
+
+    <entry>
+      <name>RUN EXTRACT STOCKXML</name>
+      <type>SHELL</type>
+      <filename>/bin/sh</filename>
+      <work_directory>${Internal.Entry.Current.Directory}</work_directory>
+      <arguments><argument>-c</argument></arguments>
+      <insertScript>Y</insertScript>
+      <script><![CDATA[
+/bin/bash /app/services/etl/run_extract_stockxml.sh
+      ]]></script>
+      <wait>Y</wait>
+      <xloc>960</xloc><yloc>64</yloc><draw>Y</draw>
+    </entry>
+
+    <entry>
+      <name>MERGE STAGING -> STOCK_DIARIO</name>
+      <type>SQL</type>
+      <connection>MYSQL_EVALUTIA</connection>
+      <sql><![CDATA[
+-- Inserta/actualiza desde stock_diario (si el extract puso directamente en stock_diario, este paso puede ser noop)
+-- Si optás por tener stock_diario_stage, adaptá FROM accordingly.
+-- Aquí asumimos que run_extract_stockxml.py ya escribió en stock_diario.
+SELECT 1;
+      ]]></sql>
+      <xloc>1200</xloc><yloc>64</yloc><draw>Y</draw>
+    </entry>
+
+    <entry>
+      <name>RUN EXTRACT VENTAS</name>
+      <type>SHELL</type>
+      <filename>/bin/sh</filename>
+      <work_directory>${Internal.Entry.Current.Directory}</work_directory>
+      <arguments><argument>-c</argument></arguments>
+      <insertScript>Y</insertScript>
+      <script><![CDATA[
+/bin/bash /app/services/etl/run_extract_sales_chunk.sh
+      ]]></script>
+      <wait>Y</wait>
+      <xloc>1440</xloc><yloc>64</yloc><draw>Y</draw>
+    </entry>
+
+    <entry>
+      <name>MERGE STAGING -> VENTAS (con snapshot)</name>
+      <type>SQL</type>
+      <connection>MYSQL_EVALUTIA</connection>
+      <sql><![CDATA[
+INSERT INTO ventas_historicas
+  (fecha, sku, cantidad, ts_carga, fuente, barcode, descripcion_articulo,
+   familia_id, familia_nombre, genero_id, genero_descripcion, stock_minimo, frecuencia_mensual)
+SELECT
+  DATE(s.fecha) AS fecha,
+  TRIM(s.sku) AS sku,
+  CAST(s.cantidad AS DECIMAL(12,3)) AS cantidad,
+  NOW(6) AS ts_carga,
+  COALESCE(s.fuente,'ws_consstockventa') AS fuente,
+  a.barcode,
+  a.descripcion AS descripcion_articulo,
+  a.familia_id,
+  a.familia_nombre,
+  a.genero_id,
+  a.genero_descripcion,
+  a.stock_minimo,
+  a.frecuencia_mensual
 FROM ventas_historicas_stage s
+LEFT JOIN articulos a ON a.sku = TRIM(s.sku)
 WHERE s.sku IS NOT NULL
 ON DUPLICATE KEY UPDATE
   cantidad = VALUES(cantidad),
   ts_carga = VALUES(ts_carga),
-  fuente   = VALUES(fuente);
+  fuente   = VALUES(fuente),
+  barcode  = VALUES(barcode),
+  descripcion_articulo = VALUES(descripcion_articulo),
+  familia_id = VALUES(familia_id),
+  familia_nombre = VALUES(familia_nombre),
+  genero_id = VALUES(genero_id),
+  genero_descripcion = VALUES(genero_descripcion),
+  stock_minimo = VALUES(stock_minimo),
+  frecuencia_mensual = VALUES(frecuencia_mensual);
       ]]></sql>
-      <send_one_statement>Y</send_one_statement>
-      <xloc>720</xloc><yloc>64</yloc><draw>Y</draw>
+      <xloc>1680</xloc><yloc>64</yloc><draw>Y</draw>
     </entry>
 
-    <!-- PREDICT -->
+    <entry>
+      <name>CALC_UPSERT_VENTAS_MENSUALES</name>
+      <type>SQL</type>
+      <connection>MYSQL_EVALUTIA</connection>
+      <sql><![CDATA[
+INSERT INTO ventas_mensuales
+  (sku, year, month, ventas_cantidad, dias_con_stock, fuente, ts_carga)
+SELECT
+  u.sku, u.year, u.month,
+  COALESCE(v.ventas_cantidad, 0) as ventas_cantidad,
+  COALESCE(d.dias_con_stock, 0) as dias_con_stock,
+  'calculado',
+  NOW(6)
+FROM (
+  SELECT sku, YEAR(fecha) AS year, MONTH(fecha) AS month
+  FROM ventas_historicas
+  UNION
+  SELECT sku, YEAR(fecha) AS year, MONTH(fecha) AS month
+  FROM stock_diario
+) u
+LEFT JOIN (
+  SELECT sku, YEAR(fecha) AS year, MONTH(fecha) AS month, SUM(cantidad) AS ventas_cantidad
+  FROM ventas_historicas
+  GROUP BY sku, YEAR(fecha), MONTH(fecha)
+) v ON v.sku = u.sku AND v.year = u.year AND v.month = u.month
+LEFT JOIN (
+  SELECT sd.sku, YEAR(sd.fecha) AS year, MONTH(sd.fecha) AS month,
+         COUNT(DISTINCT sd.fecha) AS dias_con_stock
+  FROM stock_diario sd
+  JOIN articulos a ON a.sku = sd.sku
+  WHERE sd.cantidad > COALESCE(a.stock_minimo,0)
+  GROUP BY sd.sku, YEAR(sd.fecha), MONTH(sd.fecha)
+) d ON d.sku = u.sku AND d.year = u.year AND d.month = u.month
+ON DUPLICATE KEY UPDATE
+  ventas_cantidad = VALUES(ventas_cantidad),
+  dias_con_stock  = VALUES(dias_con_stock),
+  actualizado_en = NOW(6);
+      ]]></sql>
+      <xloc>1920</xloc><yloc>64</yloc><draw>Y</draw>
+    </entry>
+
     <entry>
       <name>RUN PREDICT.PY</name>
       <type>SHELL</type>
@@ -137,8 +213,6 @@ ON DUPLICATE KEY UPDATE
       <arguments><argument>-c</argument></arguments>
       <insertScript>Y</insertScript>
       <script><![CDATA[
-set -eu
-echo "[JOB][PREDICT] Ejecutando predict.py ..."
 python3 /app/services/python-worker/predict.py \
   --input-source mysql \
   --mysql-host="${MYSQL_HOST}" \
@@ -151,43 +225,41 @@ python3 /app/services/python-worker/predict.py \
   --model-set="${PREDICT_MODEL_SET}" \
   --version="${PREDICT_VERSION}" \
   --force-end="${FORCE_END}"
-echo "[JOB][PREDICT] Finalizado OK."
       ]]></script>
-      <arg_from_previous>N</arg_from_previous>
-      <exec_per_row>N</exec_per_row>
-      <set_logfile>N</set_logfile>
       <wait>Y</wait>
-      <fail_when_not_success>Y</fail_when_not_success>
-      <xloc>960</xloc><yloc>64</yloc><draw>Y</draw>
+      <xloc>2160</xloc><yloc>64</yloc><draw>Y</draw>
     </entry>
 
-    <!-- TRUNCATE FINAL -> DELETE -->
     <entry>
-      <name>TRUNCATE STAGE (end)</name>
+      <name>TRUNCATE VENTAS_STAGE END</name>
       <type>SQL</type>
       <connection>MYSQL_EVALUTIA</connection>
       <sql><![CDATA[
 DELETE FROM ventas_historicas_stage;
       ]]></sql>
-      <send_one_statement>Y</send_one_statement>
-      <xloc>1200</xloc><yloc>64</yloc><draw>Y</draw>
+      <xloc>2400</xloc><yloc>64</yloc><draw>Y</draw>
     </entry>
 
     <entry>
       <name>SUCCESS</name>
       <type>SPECIAL</type>
       <success>Y</success>
-      <xloc>1440</xloc><yloc>64</yloc><draw>Y</draw>
+      <xloc>2640</xloc><yloc>64</yloc><draw>Y</draw>
     </entry>
   </entries>
 
   <hops>
-    <hop><from>START</from><to>TRUNCATE STAGE (start)</to><enabled>Y</enabled><evaluation>Y</evaluation><unconditional>Y</unconditional></hop>
-    <hop><from>TRUNCATE STAGE (start)</from><to>RUN EXTRACT (bash)</to><enabled>Y</enabled><evaluation>Y</evaluation><unconditional>Y</unconditional></hop>
-    <hop><from>RUN EXTRACT (bash)</from><to>MERGE STAGING -> VENTAS</to><enabled>Y</enabled><evaluation>Y</evaluation><unconditional>Y</unconditional></hop>
-    <hop><from>MERGE STAGING -> VENTAS</from><to>RUN PREDICT.PY</to><enabled>Y</enabled><evaluation>Y</evaluation><unconditional>Y</unconditional></hop>
-    <hop><from>RUN PREDICT.PY</from><to>TRUNCATE STAGE (end)</to><enabled>Y</enabled><evaluation>Y</evaluation><unconditional>Y</unconditional></hop>
-    <hop><from>TRUNCATE STAGE (end)</from><to>SUCCESS</to><enabled>Y</enabled><evaluation>Y</evaluation><unconditional>Y</unconditional></hop>
+    <hop><from>START</from><to>TRUNCATE VENTAS_STAGE</to><enabled>Y</enabled><unconditional>Y</unconditional></hop>
+    <hop><from>TRUNCATE VENTAS_STAGE</from><to>RUN EXTRACT ARTICULOS</to><enabled>Y</enabled><unconditional>Y</unconditional></hop>
+    <hop><from>RUN EXTRACT ARTICULOS</from><to>TRUNCATE STOCK_DIARIO_STAGE (opcional)</to><enabled>Y</enabled><unconditional>Y</unconditional></hop>
+    <hop><from>TRUNCATE STOCK_DIARIO_STAGE (opcional)</from><to>RUN EXTRACT STOCKXML</to><enabled>Y</enabled><unconditional>Y</unconditional></hop>
+    <hop><from>RUN EXTRACT STOCKXML</from><to>MERGE STAGING -> STOCK_DIARIO</to><enabled>Y</enabled><unconditional>Y</unconditional></hop>
+    <hop><from>MERGE STAGING -> STOCK_DIARIO</from><to>RUN EXTRACT VENTAS</to><enabled>Y</enabled><unconditional>Y</unconditional></hop>
+    <hop><from>RUN EXTRACT VENTAS</from><to>MERGE STAGING -> VENTAS (con snapshot)</to><enabled>Y</enabled><unconditional>Y</unconditional></hop>
+    <hop><from>MERGE STAGING -> VENTAS (con snapshot)</from><to>CALC_UPSERT_VENTAS_MENSUALES</to><enabled>Y</enabled><unconditional>Y</unconditional></hop>
+    <hop><from>CALC_UPSERT_VENTAS_MENSUALES</from><to>RUN PREDICT.PY</to><enabled>Y</enabled><unconditional>Y</unconditional></hop>
+    <hop><from>RUN PREDICT.PY</from><to>TRUNCATE VENTAS_STAGE END</to><enabled>Y</enabled><unconditional>Y</unconditional></hop>
+    <hop><from>TRUNCATE VENTAS_STAGE END</from><to>SUCCESS</to><enabled>Y</enabled><unconditional>Y</unconditional></hop>
   </hops>
 
   <job_parameters>

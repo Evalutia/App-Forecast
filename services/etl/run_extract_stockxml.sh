@@ -11,25 +11,26 @@ set -euo pipefail
 
 DATE_FMT="${DATE_FMT:-dmy}"
 WS_NS="${WS_NS:-http://tempuri.org/VSServicioWeb/SWNadWeb}"
-WS_METHOD="${WS_METHOD:-ConsStockVenta}"
-WS_SOAP_ACTION="${WS_SOAP_ACTION:-http://tempuri.org/VSServicioWeb/SWNadWeb/ConsStockVenta}"
+WS_METHOD="${WS_METHOD:-ConsStockXml}"
+WS_SOAP_ACTION="${WS_SOAP_ACTION:-http://tempuri.org/VSServicioWeb/SWNadWeb/ConsStockXml}"
 
 ID_EMPRESA="${ID_EMPRESA:-}"
 ID_GRUPO="${ID_GRUPO:-}"
 S_DEPOSITOS="${S_DEPOSITOS:-}"
+CANTREG="${CANTREG:-20000}"
 
 BASE="$(printf '%s' "${WS_URL}" | sed -E 's,/+$,,')"
 ENDPOINT="${BASE}/VsWebProduccion/SwNadWeb.asmx"
 
-TMP_REQ="/tmp/soap_request_sales.$$.$RANDOM.xml"
-TMP_HDR="/tmp/soap_headers_sales.$$.$RANDOM.txt"
-TMP_XML="/tmp/soap_response_sales.$$.$RANDOM.xml"
-TMP_JSON="/tmp/ws_json_sales.$$.$RANDOM.json"
+TMP_REQ="/tmp/soap_request_stock.$$.$RANDOM.xml"
+TMP_HDR="/tmp/soap_headers_stock.$$.$RANDOM.txt"
+TMP_XML="/tmp/soap_response_stock.$$.$RANDOM.xml"
+TMP_JSON="/tmp/ws_json_stock.$$.$RANDOM.json"
 
-trap 'cp -f "$TMP_REQ" /tmp/last_soap_request_sales.xml 2>/dev/null || true;
-      cp -f "$TMP_HDR" /tmp/soap_headers_sales.txt 2>/dev/null || true;
-      cp -f "$TMP_XML" /tmp/soap_response_sales.xml 2>/dev/null || true;
-      [[ -s "$TMP_JSON" ]] && cp -f "$TMP_JSON" /tmp/last_ws_json_sales.json 2>/dev/null || true' EXIT
+trap 'cp -f "$TMP_REQ" /tmp/last_soap_request_stock.xml 2>/dev/null || true;
+      cp -f "$TMP_HDR" /tmp/soap_headers_stock.txt 2>/dev/null || true;
+      cp -f "$TMP_XML" /tmp/soap_response_stock.xml 2>/dev/null || true;
+      [[ -s "$TMP_JSON" ]] && cp -f "$TMP_JSON" /tmp/last_ws_json_stock.json 2>/dev/null || true' EXIT
 
 {
   cat <<XML
@@ -45,6 +46,7 @@ XML
   echo "      <HastaFec>${CHUNK_END}</HastaFec>"
   [[ -n "$ID_GRUPO"    ]] && echo "      <IdGrupo>${ID_GRUPO}</IdGrupo>"
   [[ -n "$S_DEPOSITOS" ]] && echo "      <sDepositos>${S_DEPOSITOS}</sDepositos>"
+  echo "      <CANTREG>${CANTREG}</CANTREG>"
   cat <<XML
     </${WS_METHOD}>
   </soap:Body>
@@ -61,7 +63,7 @@ curl -sS --http1.1 \
   -o "$TMP_XML"
 
 if [[ ! -s "$TMP_XML" ]]; then
-  echo "[ERROR] Respuesta vacía de ConsStockVenta"
+  echo "[ERROR] Respuesta vacía de ConsStockXml"
   exit 10
 fi
 
@@ -70,7 +72,7 @@ JSON="$(perl -0777 -ne "print \$1 if m{<${WS_METHOD}Result>([\\s\\S]*?)</${WS_ME
 [[ -z "$JSON" ]] && JSON="$(perl -0777 -ne 'print $1 if m{<!\[CDATA\[(.*?)\]\]>}is' "$TMP_XML" || true)"
 
 if [[ -z "$JSON" ]]; then
-  echo "[WARN] No se detectó JSON en ConsStockVenta"
+  echo "[WARN] No se detectó JSON en ConsStockXml"
   echo "[DUMP] Inicio de body (1200 chars):"; head -c 1200 "$TMP_XML"; echo
   exit 11
 fi
@@ -79,4 +81,4 @@ JSON="$(printf "%s" "$JSON" | sed -e 's/&quot;/"/g' -e 's/&amp;/\&/g' -e 's/&lt;
 printf '%s' "$JSON" > "$TMP_JSON"
 export TMP_JSON_PATH="$TMP_JSON"
 
-python3 /app/services/etl/run_extract_sales_chunk.py
+python3 /app/services/etl/run_extract_stockxml.py
