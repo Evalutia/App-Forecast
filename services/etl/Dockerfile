@@ -17,6 +17,7 @@ ARG PDI_VER=9.4.0.0-343
 ARG PDI_ZIP=pdi-ce-${PDI_VER}.zip
 ARG PDI_URL=""
 ENV PENTAHO_HOME=/opt/pentaho
+
 RUN set -eu; \
     mkdir -p "${PENTAHO_HOME}"; \
     urls=""; [ -n "${PDI_URL:-}" ] && urls="${PDI_URL}"; \
@@ -26,16 +27,42 @@ RUN set -eu; \
       https://sourceforge.net/projects/pentaho/files/Pentaho-${PDI_VER}/${PDI_ZIP}/download \
     "; \
     echo "Descargando ${PDI_ZIP}..."; success=0; \
-    for u in $urls; do echo " - $u"; \
-      if curl -fL --retry 3 --retry-delay 3 --connect-timeout 20 -o /tmp/pdi.zip "$u"; then success=1; break; fi; \
-    done; [ "$success" -eq 1 ] && [ -s /tmp/pdi.zip ]; \
-    unzip -t /tmp/pdi.zip >/dev/null; unzip -q /tmp/pdi.zip -d "${PENTAHO_HOME}"; rm -f /tmp/pdi.zip
+    for u in $urls; do \
+      echo " - probando $u"; \
+      for try in 1 2 3; do \
+        echo "   intento $try para $u"; \
+        if curl -fL --retry 3 --retry-delay 3 --connect-timeout 20 -o /tmp/pdi.zip "$u"; then \
+          echo "   OK descargado desde $u"; success=1; break 2; \
+        else \
+          rc=$?; echo "   curl rc=$rc"; \
+          if [ "$rc" -eq 60 ]; then \
+            echo "   fallo SSL (60) detectado, reintentando con -k (inseguro) para $u"; \
+            if curl -k -fL --retry 3 --retry-delay 3 --connect-timeout 20 -o /tmp/pdi.zip "$u"; then \
+              echo "   OK (forzado -k) descargado desde $u"; success=1; break 2; \
+            else \
+              echo "   reintento con -k falló para $u"; \
+            fi; \
+          fi; \
+          echo "   esperando antes de nuevo..."; sleep 2; \
+        fi; \
+      done; \
+    done; \
+    if [ "$success" -ne 1 ] || [ ! -s /tmp/pdi.zip ]; then \
+      echo "ERROR: no se pudo descargar ${PDI_ZIP} desde ninguna de las fuentes probadas."; \
+      echo "Fuentes intentadas:"; for uu in $urls; do echo " - $uu"; done; \
+      echo "Si tenés una copia local del ZIP, volvé a ejecutar el build con --build-arg PDI_URL=https://tu-mirror/${PDI_ZIP}"; \
+      exit 9; \
+    fi; \
+    echo "Verificando ZIP..."; unzip -t /tmp/pdi.zip >/dev/null; \
+    echo "Descomprimiendo Pentaho en ${PENTAHO_HOME} ..."; unzip -q /tmp/pdi.zip -d "${PENTAHO_HOME}"; rm -f /tmp/pdi.zip; \
+    mkdir -p "${PENTAHO_HOME}/data-integration/lib"
 
 ENV PATH="${PENTAHO_HOME}/data-integration:${PATH}"
 
 # ---- MySQL Connector/J 8.x ----
 ARG MYSQL_JVER=8.4.0
-RUN curl -fsSL -o ${PENTAHO_HOME}/data-integration/lib/mysql-connector-j-${MYSQL_JVER}.jar \
+RUN mkdir -p ${PENTAHO_HOME}/data-integration/lib && \
+    curl -fsSL -o ${PENTAHO_HOME}/data-integration/lib/mysql-connector-j-${MYSQL_JVER}.jar \
     "https://repo1.maven.org/maven2/com/mysql/mysql-connector-j/${MYSQL_JVER}/mysql-connector-j-${MYSQL_JVER}.jar" \
  && rm -f ${PENTAHO_HOME}/data-integration/lib/mysql-connector-java-*.jar || true
 
