@@ -2,8 +2,6 @@
 set -euo pipefail
 
 : "${WS_URL:?missing}"
-: "${CHUNK_START:?missing}"
-: "${CHUNK_END:?missing}"
 : "${MYSQL_HOST:?missing}"
 : "${MYSQL_DB:?missing}"
 : "${MYSQL_USER:?missing}"
@@ -17,6 +15,31 @@ WS_SOAP_ACTION="${WS_SOAP_ACTION:-http://tempuri.org/VSServicioWeb/SWNadWeb/Cons
 ID_EMPRESA="${ID_EMPRESA:-}"
 ID_GRUPO="${ID_GRUPO:-}"
 S_DEPOSITOS="${S_DEPOSITOS:-}"
+
+# Si GROUPS no está definido, tomar ID_GRUPO (compatibilidad)
+GROUPS="${GROUPS:-${ID_GRUPO:-}}"
+if [ -z "${GROUPS}" ]; then
+  # fallback razonable
+  GROUPS="201"
+fi
+
+# Derivar CHUNK_START / CHUNK_END si no están provistos
+if [ -z "${CHUNK_START:-}" ] || [ -z "${CHUNK_END:-}" ]; then
+  if [ -n "${FORCE_START:-}" ] && [ -n "${FORCE_END:-}" ]; then
+    CHUNK_START="${FORCE_START}"
+    CHUNK_END="${FORCE_END}"
+  else
+    ISO_END="$(date -d 'yesterday' +%F)"
+    ISO_START="$(date -d "${ISO_END} -6 days" +%F)"
+    if [ "${DATE_FMT}" = "dmy" ]; then
+      CHUNK_START="$(date -d "${ISO_START}" +'%d/%m/%Y')"
+      CHUNK_END="$(date -d "${ISO_END}" +'%d/%m/%Y')"
+    else
+      CHUNK_START="$(date -d "${ISO_START}" +'%Y-%m-%d')"
+      CHUNK_END="$(date -d "${ISO_END}" +'%Y-%m-%d')"
+    fi
+  fi
+fi
 
 BASE="$(printf '%s' "${WS_URL}" | sed -E 's,/+$,,')"
 ENDPOINT="${BASE}/VsWebProduccion/SwNadWeb.asmx"
@@ -43,7 +66,13 @@ XML
   [[ -n "$ID_EMPRESA"  ]] && echo "      <IdEmpresa>${ID_EMPRESA}</IdEmpresa>"
   echo "      <DesdeFec>${CHUNK_START}</DesdeFec>"
   echo "      <HastaFec>${CHUNK_END}</HastaFec>"
-  [[ -n "$ID_GRUPO"    ]] && echo "      <IdGrupo>${ID_GRUPO}</IdGrupo>"
+  # Si GROUPS contiene varios, iterar (el script original iteraba fuera; aquí soportamos solo IdGrupo)
+  if [[ "${GROUPS}" =~ ^[0-9]+(,[0-9]+)*$ ]]; then
+    # pasar como IdGrupo el primer valor si viene coma-separado, o mejor construir multiples llamadas:
+    echo "      <IdGrupo>${GROUPS}</IdGrupo>"
+  else
+    [[ -n "$ID_GRUPO" ]] && echo "      <IdGrupo>${ID_GRUPO}</IdGrupo>"
+  fi
   [[ -n "$S_DEPOSITOS" ]] && echo "      <sDepositos>${S_DEPOSITOS}</sDepositos>"
   cat <<XML
     </${WS_METHOD}>
