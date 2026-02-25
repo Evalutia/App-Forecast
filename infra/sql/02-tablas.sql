@@ -31,7 +31,6 @@ CREATE TABLE IF NOT EXISTS articulos (
   fact_desc_max             VARCHAR(32)             NULL,
   desc_valida               VARCHAR(16)             NULL,
   stock_minimo              INT UNSIGNED    NOT NULL DEFAULT 0,
-  frecuencia_mensual        TINYINT UNSIGNED       NULL,
   fuente                    VARCHAR(64)            NULL,
   ts_carga                  TIMESTAMP(6)   NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
   actualizado_en            TIMESTAMP(6)           NULL ON UPDATE CURRENT_TIMESTAMP(6),
@@ -115,23 +114,27 @@ CREATE TABLE IF NOT EXISTS ventas_mensuales (
   CONSTRAINT chk_ventasmens_dias CHECK (dias_con_stock >= 0)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
-CREATE OR REPLACE VIEW resumen_producto_365 AS
-SELECT
-  vh.sku,
-  COALESCE(SUM(vh.cantidad), 0) AS ventas_365,
-  COALESCE(MAX(vm.dias_con_stock_365), 0) AS dias_con_stock_365,
-  CASE
-    WHEN COALESCE(MAX(vm.dias_con_stock_365), 0) = 0 THEN NULL
-    ELSE ROUND(SUM(vh.cantidad) / MAX(vm.dias_con_stock_365), 4)
-  END AS ventas_por_dia_stock_365
-FROM ventas_historicas vh
-LEFT JOIN (
-  SELECT
-    sku,
-    SUM(dias_con_stock) AS dias_con_stock_365
-  FROM ventas_mensuales
-  WHERE DATE(CONCAT(year,'-',LPAD(month,2,'0'),'-01')) >= DATE_SUB(CURDATE(), INTERVAL 365 DAY)
-  GROUP BY sku
-) vm ON vm.sku = vh.sku
-WHERE vh.fecha >= DATE_SUB(CURDATE(), INTERVAL 365 DAY)
-GROUP BY vh.sku;
+CREATE TABLE IF NOT EXISTS ventas_historicas_stage (
+  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  fecha DATE NOT NULL,
+  sku VARCHAR(128) NOT NULL,
+  cantidad  INT UNSIGNED    NOT NULL,
+  stock DECIMAL(18,4) NULL,
+  fuente VARCHAR(64) NULL,
+  ts_carga TIMESTAMP(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+  PRIMARY KEY (id),
+  INDEX idx_vhs_sku_fecha (sku, fecha)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+
+CREATE TABLE IF NOT EXISTS stock_diario_stage (
+  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  sku VARCHAR(128) NOT NULL,
+  fecha DATE NOT NULL,
+  cantidad  INT UNSIGNED    NOT NULL,
+  deposito_id VARCHAR(64) NULL,
+  fuente VARCHAR(64) NULL,
+  ts_carga TIMESTAMP(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+  PRIMARY KEY (id),
+  UNIQUE KEY uq_stock_stage_sku_fecha_deposito (sku, fecha, deposito_id),
+  INDEX idx_sds_sku_fecha (sku, fecha)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;

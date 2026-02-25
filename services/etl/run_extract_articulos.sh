@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-: "${WS_URL:?missing}"
+: "${WS_URL:?missing}"    # sigue siendo obligatorio
 : "${MYSQL_HOST:?missing}"
 : "${MYSQL_DB:?missing}"
 : "${MYSQL_USER:?missing}"
@@ -14,7 +14,7 @@ WS_SOAP_ACTION="${WS_SOAP_ACTION:-http://tempuri.org/VSServicioWeb/SWNadWeb/Cons
 
 ID_EMPRESA="${ID_EMPRESA:-1}"
 ID_GRUPO="${ID_GRUPO:-}"
-GRUPOS="${GRUPOS:-}"          # <-- usar ESTE (no GROUPS)
+GRUPOS="${GRUPOS:-}"          # preferimos GRUPOS
 CANTREG="${CANTREG:-20000}"
 ARTICULO_DESDE="${ARTICULO_DESDE:-}"
 
@@ -22,10 +22,7 @@ CURL_INSECURE="${CURL_INSECURE:-0}"
 CURL_CONNECT_TIMEOUT="${CURL_CONNECT_TIMEOUT:-20}"
 CURL_MAX_TIME="${CURL_MAX_TIME:-120}"
 
-# -----------------------
-# Args opcionales (para poder pasar grupos sin usar env GROUPS)
-# Ej: run_extract_articulos.sh --grupos "201" --cuantos 100 --chunk-start 2016-10-03
-# -----------------------
+# Leer args opcionales
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --grupos|--groups)
@@ -44,7 +41,7 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-# Derivar CHUNK_START si no está provisto (compatibilidad con run_etl_daily.sh)
+# Derivar CHUNK_START si no está provisto (compatibilidad)
 if [[ -z "${CHUNK_START:-}" ]]; then
   if [[ -n "${FORCE_START:-}" ]]; then
     CHUNK_START="${FORCE_START}"
@@ -60,10 +57,9 @@ if [[ -z "${CHUNK_START:-}" ]]; then
 fi
 
 # Normalizar FechaDesde a ISO dateTime (YYYY-MM-DDT00:00:00)
-# Acepta: yyyy-mm-ddTHH:MM:SS, yyyy-mm-dd, dd/mm/yyyy
 FechaDate="$(python3 - "$CHUNK_START" <<'PY'
 import sys,re,datetime as dt
-raw=sys.argv[1]
+raw=sys.argv[1] if len(sys.argv)>1 else ""
 m=re.search(r'(\d{4}-\d{2}-\d{2}|\d{2}/\d{2}/\d{4})', raw or "")
 if not m:
   print("")
@@ -105,10 +101,14 @@ TMP_HDR="/tmp/soap_headers_articulos.$$.$RANDOM.txt"
 TMP_XML="/tmp/soap_response_articulos.$$.$RANDOM.xml"
 TMP_PAYLOAD="/tmp/ws_payload_articulos.$$.$RANDOM.txt"
 
-trap 'cp -f "$TMP_REQ" /tmp/last_soap_request_articulos.xml 2>/dev/null || true;
-      cp -f "$TMP_HDR" /tmp/soap_headers_articulos.txt 2>/dev/null || true;
-      cp -f "$TMP_XML" /tmp/soap_response_articulos.xml 2>/dev/null || true;
-      [[ -s "$TMP_PAYLOAD" ]] && cp -f "$TMP_PAYLOAD" /tmp/last_ws_payload_articulos.txt 2>/dev/null || true' EXIT
+# Guardar últimos archivos al salir para debugging (no referenciar variables no inicializadas)
+cleanup_articulos() {
+  cp -f "$TMP_REQ" /tmp/last_soap_request_articulos.xml 2>/dev/null || true
+  cp -f "$TMP_HDR" /tmp/soap_headers_articulos.txt 2>/dev/null || true
+  cp -f "$TMP_XML" /tmp/soap_response_articulos.xml 2>/dev/null || true
+  [[ -s "$TMP_PAYLOAD" ]] && cp -f "$TMP_PAYLOAD" /tmp/last_ws_payload_articulos.txt 2>/dev/null || true
+}
+trap 'cleanup_articulos' EXIT
 
 # Build SOAP request
 {

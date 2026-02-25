@@ -9,6 +9,8 @@
     <parameter><name>ID_EMPRESA</name><default_value>1</default_value></parameter>
     <parameter><name>S_DEPOSITOS</name><default_value>1,5</default_value></parameter>
     <parameter><name>GROUPS</name><default_value>201</default_value></parameter>
+    <!-- Añadimos GRUPOS para compatibilidad con scripts que esperan la variable en español -->
+    <parameter><name>GRUPOS</name><default_value>${GROUPS}</default_value></parameter>
     <parameter><name>CANTREG</name><default_value>20000</default_value></parameter>
 
     <parameter><name>MYSQL_HOST</name><default_value>${MYSQL_HOST}</default_value></parameter>
@@ -128,38 +130,21 @@ SELECT 1;
       <type>SQL</type>
       <connection>MYSQL_EVALUTIA</connection>
       <sql><![CDATA[
+-- MERGE corregido: solo columnas presentes en la tabla ventas_historicas
 INSERT INTO ventas_historicas
-  (fecha, sku, cantidad, ts_carga, fuente, barcode, descripcion_articulo,
-   familia_id, familia_nombre, genero_id, genero_descripcion, stock_minimo, frecuencia_mensual)
+  (fecha, sku, cantidad, ts_carga, fuente)
 SELECT
   DATE(s.fecha) AS fecha,
   TRIM(s.sku) AS sku,
   CAST(s.cantidad AS DECIMAL(12,3)) AS cantidad,
   NOW(6) AS ts_carga,
-  COALESCE(s.fuente,'ws_consstockventa') AS fuente,
-  a.barcode,
-  a.descripcion AS descripcion_articulo,
-  a.familia_id,
-  a.familia_nombre,
-  a.genero_id,
-  a.genero_descripcion,
-  a.stock_minimo,
-  a.frecuencia_mensual
+  COALESCE(s.fuente,'ws_consstockventa') AS fuente
 FROM ventas_historicas_stage s
-LEFT JOIN articulos a ON a.sku = TRIM(s.sku)
 WHERE s.sku IS NOT NULL
 ON DUPLICATE KEY UPDATE
   cantidad = VALUES(cantidad),
   ts_carga = VALUES(ts_carga),
-  fuente   = VALUES(fuente),
-  barcode  = VALUES(barcode),
-  descripcion_articulo = VALUES(descripcion_articulo),
-  familia_id = VALUES(familia_id),
-  familia_nombre = VALUES(familia_nombre),
-  genero_id = VALUES(genero_id),
-  genero_descripcion = VALUES(genero_descripcion),
-  stock_minimo = VALUES(stock_minimo),
-  frecuencia_mensual = VALUES(frecuencia_mensual);
+  fuente   = VALUES(fuente);
       ]]></sql>
       <xloc>1680</xloc><yloc>64</yloc><draw>Y</draw>
     </entry>
