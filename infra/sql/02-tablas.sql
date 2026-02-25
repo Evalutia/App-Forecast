@@ -12,13 +12,24 @@ CREATE TABLE IF NOT EXISTS usuarios (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
 CREATE TABLE IF NOT EXISTS articulos (
-  sku                       VARCHAR(120)    NOT NULL,
-  barcode                   VARCHAR(64)             NULL,
+  sku                       VARCHAR(128)    NOT NULL,
   descripcion               VARCHAR(512)           NULL,
   familia_id                INT UNSIGNED           NULL,
   familia_nombre            VARCHAR(255)           NULL,
   genero_id                 INT UNSIGNED           NULL,
   genero_descripcion        VARCHAR(255)           NULL,
+  seccion_id                INT UNSIGNED           NULL,
+  seccion_nombre            VARCHAR(255)           NULL,
+  marca_id                  INT UNSIGNED           NULL,
+  marca_nombre              VARCHAR(255)           NULL,
+  temporada_id              INT UNSIGNED           NULL,
+  temporada_nombre          VARCHAR(255)           NULL,
+  fec_alta                  DATETIME                NULL,
+  fec_modif                 DATETIME                NULL,
+  comentario                TEXT                    NULL,
+  fact_desc_min             VARCHAR(32)             NULL,
+  fact_desc_max             VARCHAR(32)             NULL,
+  desc_valida               VARCHAR(16)             NULL,
   stock_minimo              INT UNSIGNED    NOT NULL DEFAULT 0,
   frecuencia_mensual        TINYINT UNSIGNED       NULL,
   fuente                    VARCHAR(64)            NULL,
@@ -30,18 +41,10 @@ CREATE TABLE IF NOT EXISTS articulos (
 CREATE TABLE IF NOT EXISTS ventas_historicas (
   id        BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
   fecha     DATE            NOT NULL,
-  sku       VARCHAR(120)    NOT NULL,
+  sku       VARCHAR(128)    NOT NULL,
   cantidad  INT UNSIGNED    NOT NULL,
   ts_carga  TIMESTAMP(6)    NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
   fuente    VARCHAR(64)              NULL,
-  barcode                 VARCHAR(64)            NULL,
-  descripcion_articulo    VARCHAR(512)           NULL,
-  familia_id              INT UNSIGNED           NULL,
-  familia_nombre          VARCHAR(255)           NULL,
-  genero_id               INT UNSIGNED           NULL,
-  genero_descripcion      VARCHAR(255)           NULL,
-  stock_minimo            INT UNSIGNED    NOT NULL DEFAULT 0,
-  frecuencia_mensual      TINYINT UNSIGNED       NULL,
   PRIMARY KEY (id),
   UNIQUE KEY uq_ventas_fecha_sku_fuente (fecha, sku, fuente),
   CONSTRAINT chk_ventas_cantidad CHECK (cantidad >= 0),
@@ -63,7 +66,7 @@ CREATE TABLE IF NOT EXISTS jobs_historial (
 
 CREATE TABLE IF NOT EXISTS predicciones (
   id                 BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
-  sku                VARCHAR(120)    NOT NULL,
+  sku                VARCHAR(128)    NOT NULL,
   fecha_predicha     DATE            NOT NULL,
   cantidad_predicha  DECIMAL(18,2)   NOT NULL,
   modelo             VARCHAR(64)     NOT NULL,
@@ -85,7 +88,7 @@ CREATE TABLE IF NOT EXISTS predicciones (
 
 CREATE TABLE IF NOT EXISTS stock_diario (
   id             BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
-  sku            VARCHAR(120)    NOT NULL,
+  sku            VARCHAR(128)    NOT NULL,
   fecha          DATE            NOT NULL,
   cantidad       INT UNSIGNED    NOT NULL DEFAULT 0,
   deposito_id    VARCHAR(64)             NULL,
@@ -98,7 +101,7 @@ CREATE TABLE IF NOT EXISTS stock_diario (
 
 CREATE TABLE IF NOT EXISTS ventas_mensuales (
   id               BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
-  sku              VARCHAR(120)    NOT NULL,
+  sku              VARCHAR(128)    NOT NULL,
   year             SMALLINT UNSIGNED NOT NULL,
   month            TINYINT UNSIGNED NOT NULL,
   ventas_cantidad  BIGINT UNSIGNED NOT NULL DEFAULT 0,
