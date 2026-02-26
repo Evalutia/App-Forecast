@@ -37,3 +37,6 @@ pycache/
 ## Build results
 [Bb]in/
 [Oo]bj/
+
+# PDI zip (no versionar)
+services/etl/pdi-ce-9.4.0.0-343.zip
