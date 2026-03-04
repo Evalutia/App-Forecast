@@ -3,7 +3,7 @@ import { toast } from 'sonner';
 import { clearAuth } from '../features/auth/utils/authStorage';
 
 const api = axios.create({
-  baseURL: import.meta.env.VITE_API_BASE_URL?.replace(/\/+$/, '') ?? 'http://localhost:8081',
+  baseURL: import.meta.env.VITE_API_BASE_URL?.replace(/\/+$/, '') ?? 'http://localhost:8080',
   withCredentials: false,
 });
 

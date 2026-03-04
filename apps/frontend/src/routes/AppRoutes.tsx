@@ -5,6 +5,9 @@ import UsersPage from '../features/users/pages/UsersPage';
 import PrediccionesPage from '../features/predictions/pages/PrediccionesPage';
 import VentasPage from "../features/sales/pages/VentasPage";
 import JobsPage from '../features/jobs/pages/JobsPage';
+import ArticulosPage from '../features/articles/pages/ArticulosPage';
+import VentasMensualesPage from '../features/salesmonthly/pages/VentasMensualesPage';
+import StockDiarioPage from '../features/stock/pages/StockDiarioPage';
 import JobDetailPage from '../features/jobs/pages/JobDetailPage';
 import LogoutButton from '../features/auth/components/LogoutButton';
 import AdminUsersButton from '../features/auth/components/AdminUsersButton';
@@ -47,6 +50,21 @@ function Dashboard() {
             Ver las ventas cargadas
           </a>
         </div>
+        <div>
+          <a href="/articulos" className="btn">
+            Artículos
+          </a>
+        </div>
+        <div>
+          <a href="/ventas-mensuales" className="btn">
+            Ventas mensuales
+          </a>
+        </div>
+        <div>
+          <a href="/stock-diario" className="btn">
+            Stock diario
+          </a>
+        </div>
         {user && user.role === 'administrador' && (
           <div>
             <a href="/jobs" className="btn">
@@ -74,6 +92,9 @@ export default function AppRoutes() {
             <Route path="/usuarios" element={<UsersPage />} />
             <Route path="/predicciones" element={<PrediccionesPage />} />
             <Route path="/ventas" element={<VentasPage />} />
+            <Route path="/articulos" element={<ArticulosPage />} />
+            <Route path="/ventas-mensuales" element={<VentasMensualesPage />} />
+            <Route path="/stock-diario" element={<StockDiarioPage />} />
             <Route path="/jobs" element={<JobsPage />} />
             <Route path="/jobs/:id" element={<JobDetailPage />} />
           </Route>

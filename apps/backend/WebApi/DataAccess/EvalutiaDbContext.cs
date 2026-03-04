@@ -52,12 +52,36 @@ public class EvalutiaDbContext : DbContext
       entity.Property(e => e.Sku)
           .HasMaxLength(120)
           .HasColumnName("sku");
-      entity.Property(e => e.Barcode)
-          .HasMaxLength(64)
-          .HasColumnName("barcode");
+      // The 'barcode' column is not present in the current database schema for 'articulos'.
+      // Ignore this property to avoid mapping errors when querying.
+      entity.Ignore(e => e.Barcode);
       entity.Property(e => e.Descripcion)
           .HasMaxLength(512)
           .HasColumnName("descripcion");
+      entity.Property(e => e.SeccionId)
+          .HasColumnName("seccion_id");
+      entity.Property(e => e.SeccionNombre)
+          .HasMaxLength(255)
+          .HasColumnName("seccion_nombre");
+      entity.Property(e => e.MarcaId)
+          .HasColumnName("marca_id");
+      entity.Property(e => e.MarcaNombre)
+          .HasMaxLength(255)
+          .HasColumnName("marca_nombre");
+      entity.Property(e => e.TemporadaId)
+          .HasColumnName("temporada_id");
+      entity.Property(e => e.TemporadaNombre)
+          .HasMaxLength(255)
+          .HasColumnName("temporada_nombre");
+      entity.Property(e => e.FactDescMin)
+          .HasMaxLength(32)
+          .HasColumnName("fact_desc_min");
+      entity.Property(e => e.FactDescMax)
+          .HasMaxLength(32)
+          .HasColumnName("fact_desc_max");
+      entity.Property(e => e.DescValida)
+          .HasMaxLength(16)
+          .HasColumnName("desc_valida");
       entity.Property(e => e.FamiliaId)
           .HasColumnName("familia_id");
       entity.Property(e => e.FamiliaNombre)
@@ -70,8 +94,9 @@ public class EvalutiaDbContext : DbContext
           .HasColumnName("genero_descripcion");
       entity.Property(e => e.StockMinimo)
           .HasColumnName("stock_minimo");
-      entity.Property(e => e.FrecuenciaMensual)
-          .HasColumnName("frecuencia_mensual");
+      // The column 'frecuencia_mensual' is not present in the current 'articulos' table.
+      // Ignore this property to avoid mapping and query errors.
+      entity.Ignore(e => e.FrecuenciaMensual);
       entity.Property(e => e.Fuente)
           .HasMaxLength(64)
           .HasColumnName("fuente");
@@ -251,38 +276,28 @@ public class EvalutiaDbContext : DbContext
 
       entity.HasIndex(e => new { e.Fecha, e.Sku, e.Fuente }, "uq_ventas_fecha_sku_fuente").IsUnique();
 
+            // Ignore properties that are not present in the actual DB table
+            entity.Ignore(e => e.Barcode);
+            entity.Ignore(e => e.DescripcionArticulo);
+            entity.Ignore(e => e.FamiliaId);
+            entity.Ignore(e => e.FamiliaNombre);
+            entity.Ignore(e => e.FrecuenciaMensual);
+            entity.Ignore(e => e.GeneroDescripcion);
+            entity.Ignore(e => e.GeneroId);
+            entity.Ignore(e => e.StockMinimo);
+
       entity.Property(e => e.Id).HasColumnName("id");
-      entity.Property(e => e.Barcode)
-          .HasMaxLength(64)
-          .HasColumnName("barcode");
-      entity.Property(e => e.Cantidad).HasColumnName("cantidad");
-      entity.Property(e => e.DescripcionArticulo)
-          .HasMaxLength(512)
-          .HasColumnName("descripcion_articulo");
-      entity.Property(e => e.FamiliaId)
-          .HasColumnName("familia_id");
-      entity.Property(e => e.FamiliaNombre)
-          .HasMaxLength(255)
-          .HasColumnName("familia_nombre");
       entity.Property(e => e.Fecha)
           .HasConversion(dateOnlyConverter)
           .HasColumnType("date")
           .HasColumnName("fecha");
-      entity.Property(e => e.FrecuenciaMensual)
-          .HasColumnName("frecuencia_mensual");
+      entity.Property(e => e.Sku)
+          .HasMaxLength(128)
+          .HasColumnName("sku");
+      entity.Property(e => e.Cantidad).HasColumnName("cantidad");
       entity.Property(e => e.Fuente)
           .HasMaxLength(64)
           .HasColumnName("fuente");
-      entity.Property(e => e.GeneroDescripcion)
-          .HasMaxLength(255)
-          .HasColumnName("genero_descripcion");
-      entity.Property(e => e.GeneroId)
-          .HasColumnName("genero_id");
-      entity.Property(e => e.Sku)
-          .HasMaxLength(120)
-          .HasColumnName("sku");
-      entity.Property(e => e.StockMinimo)
-          .HasColumnName("stock_minimo");
       entity.Property(e => e.TsCarga)
           .HasDefaultValueSql("CURRENT_TIMESTAMP(6)")
           .HasColumnType("timestamp(6)")

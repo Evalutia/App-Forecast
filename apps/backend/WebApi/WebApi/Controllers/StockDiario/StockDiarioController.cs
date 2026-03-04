@@ -1,4 +1,5 @@
 using Microsoft.AspNetCore.Mvc;
+using System.Linq;
 using DataAccess.Repositories.StockDiarioDataAccess;
 using WebApi.Controllers.StockDiario.DTOs;
 
@@ -45,6 +46,25 @@ namespace WebApi.Controllers.StockDiarioApi
       _repo.InsertBatch(registros);
 
       return Ok(new { insertados = registros.Count });
+    }
+
+    [HttpGet]
+    public IActionResult Get([FromQuery] string? sku, [FromQuery] int? year, [FromQuery] int? month, [FromQuery] int page = 1, [FromQuery] int pageSize = 50)
+    {
+      if (string.IsNullOrWhiteSpace(sku) || !year.HasValue || !month.HasValue)
+        return BadRequest("Los parámetros 'sku', 'year' y 'month' son requeridos.");
+
+      var daily = _repo.GetDailySumBySkuAndMonth(sku, year.Value, month.Value).ToList();
+      var total = daily.Count;
+
+      var items = daily
+        .OrderBy(d => d.Fecha)
+        .Skip((page - 1) * pageSize)
+        .Take(pageSize)
+        .Select(d => new { fecha = d.Fecha.ToString("yyyy-MM-dd"), cantidad = d.CantidadTotal })
+        .ToList();
+
+      return Ok(new { items, page, pageSize, total });
     }
   }
 }

@@ -11,12 +11,22 @@ namespace WebApi.Models
         }
 
         public string Sku { get; set; } = null!;
+        [System.ComponentModel.DataAnnotations.Schema.NotMapped]
         public string? Barcode { get; set; }
         public string? Descripcion { get; set; }
         public uint? FamiliaId { get; set; }
         public string? FamiliaNombre { get; set; }
         public uint? GeneroId { get; set; }
         public string? GeneroDescripcion { get; set; }
+        public uint? SeccionId { get; set; }
+        public string? SeccionNombre { get; set; }
+        public uint? MarcaId { get; set; }
+        public string? MarcaNombre { get; set; }
+        public uint? TemporadaId { get; set; }
+        public string? TemporadaNombre { get; set; }
+        public string? FactDescMin { get; set; }
+        public string? FactDescMax { get; set; }
+        public string? DescValida { get; set; }
         public uint StockMinimo { get; set; }
         public byte? FrecuenciaMensual { get; set; }
         public string? Fuente { get; set; }

@@ -21,8 +21,8 @@ namespace DataAccess.Repositories.ArticuloDataAccess
       if (string.IsNullOrWhiteSpace(sku)) return null;
 
       return _db.Articulos
-                .FromSqlInterpolated($"SELECT * FROM articulos WHERE sku = {sku} LIMIT 1")
                 .AsNoTracking()
+                .Where(a => a.Sku == sku)
                 .FirstOrDefault();
     }
 
@@ -80,18 +80,36 @@ ON DUPLICATE KEY UPDATE
 
       var offset = (page - 1) * pageSize;
 
-      return _db.Articulos
-                .FromSqlInterpolated($@"
-SELECT *
-FROM articulos
-WHERE
-  ({familyId} IS NULL AND {genreId} IS NULL)
-  OR (({familyId} IS NOT NULL AND familia_id = {familyId})
-      OR ({genreId} IS NOT NULL AND genero_id = {genreId}))
-ORDER BY sku
-LIMIT {pageSize} OFFSET {offset}")
-                .AsNoTracking()
-                .ToList();
+      var query = _db.Articulos.AsNoTracking().AsQueryable();
+
+      if (familyId.HasValue && familyId.Value >= 0)
+      {
+        query = query.Where(a => a.FamiliaId == familyId.Value);
+      }
+      if (genreId.HasValue && genreId.Value >= 0)
+      {
+        query = query.Where(a => a.GeneroId == genreId.Value);
+      }
+
+      return query.OrderBy(a => a.Sku).Skip(offset).Take(pageSize).ToList();
+    }
+
+    public int CountByFamilyOrGenre(int? familyId, int? genreId)
+    {
+      if (familyId.HasValue && familyId.Value < 0) familyId = null;
+      if (genreId.HasValue && genreId.Value < 0) genreId = null;
+
+      var query = _db.Articulos.AsNoTracking().AsQueryable();
+      if (familyId.HasValue)
+      {
+        query = query.Where(a => a.FamiliaId == familyId.Value);
+      }
+      if (genreId.HasValue)
+      {
+        query = query.Where(a => a.GeneroId == genreId.Value);
+      }
+
+      return query.Count();
     }
   }
 }
