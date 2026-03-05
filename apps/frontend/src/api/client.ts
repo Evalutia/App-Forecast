@@ -2,8 +2,10 @@ import axios from 'axios';
 import { toast } from 'sonner';
 import { clearAuth } from '../features/auth/utils/authStorage';
 
+const resolvedBase = (import.meta.env.VITE_API_BASE_URL && String(import.meta.env.VITE_API_BASE_URL).trim()) || 'http://localhost:8080';
+
 const api = axios.create({
-  baseURL: import.meta.env.VITE_API_BASE_URL?.replace(/\/+$/, '') ?? 'http://localhost:8080',
+  baseURL: resolvedBase.replace(/\/+$/, ''),
   withCredentials: false,
 });
 

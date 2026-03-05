@@ -68,5 +68,73 @@ ON DUPLICATE KEY UPDATE
 
       return query.AsEnumerable().Select(x => (x.Fecha, x.CantidadTotal)).ToList();
     }
+
+    public IEnumerable<StockDiario> GetRowsBySkuAndMonth(string sku, int year, int month, int page, int pageSize, out int total)
+    {
+      if (string.IsNullOrWhiteSpace(sku)) throw new ArgumentException("sku is required", nameof(sku));
+      if (year < 1) throw new ArgumentOutOfRangeException(nameof(year));
+      if (month is < 1 or > 12) throw new ArgumentOutOfRangeException(nameof(month));
+
+      var start = new DateOnly(year, month, 1);
+      var end = start.AddMonths(1);
+
+      var q = _db.StockDiario
+        .AsNoTracking()
+        .Where(x => x.Sku == sku && x.Fecha >= start && x.Fecha < end)
+        .OrderBy(x => x.Fecha).ThenBy(x => x.Id);
+
+      total = q.Count();
+
+      var items = q.Skip((page - 1) * pageSize).Take(pageSize).ToList();
+
+      return items;
+    }
+
+    public IEnumerable<StockDiario> Search(string? sku, int? year, int? month, int page, int pageSize, out int total)
+    {
+      var q = _db.StockDiario.AsNoTracking().AsQueryable();
+
+      if (!string.IsNullOrWhiteSpace(sku))
+        q = q.Where(x => x.Sku == sku.Trim().ToUpperInvariant());
+
+      if (year.HasValue && month.HasValue)
+      {
+        var start = new DateOnly(year.Value, month.Value, 1);
+        var end = start.AddMonths(1);
+        q = q.Where(x => x.Fecha >= start && x.Fecha < end);
+      }
+      else if (year.HasValue)
+      {
+        var start = new DateOnly(year.Value, 1, 1);
+        var end = new DateOnly(year.Value + 1, 1, 1);
+        q = q.Where(x => x.Fecha >= start && x.Fecha < end);
+      }
+      else if (month.HasValue)
+      {
+        q = q.Where(x => x.Fecha.Month == month.Value);
+      }
+
+      total = q.Count();
+
+      return q
+        .OrderByDescending(x => x.Fecha)
+        .ThenByDescending(x => x.Id)
+        .Skip((page - 1) * pageSize)
+        .Take(pageSize)
+        .ToList();
+    }
+
+    public IEnumerable<StockDiario> GetLatestRows(int page, int pageSize, out int total)
+    {
+      var q = _db.StockDiario
+        .AsNoTracking()
+        .OrderByDescending(x => x.Fecha).ThenByDescending(x => x.Id);
+
+      total = q.Count();
+
+      var items = q.Skip((page - 1) * pageSize).Take(pageSize).ToList();
+
+      return items;
+    }
   }
 }

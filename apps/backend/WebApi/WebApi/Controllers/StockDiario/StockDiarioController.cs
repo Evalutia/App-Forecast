@@ -54,6 +54,8 @@ namespace WebApi.Controllers.StockDiarioApi
       if (string.IsNullOrWhiteSpace(sku) || !year.HasValue || !month.HasValue)
         return BadRequest("Los parámetros 'sku', 'year' y 'month' son requeridos.");
 
+      sku = sku!.Trim().ToUpperInvariant();
+
       var daily = _repo.GetDailySumBySkuAndMonth(sku, year.Value, month.Value).ToList();
       var total = daily.Count;
 
@@ -65,6 +67,23 @@ namespace WebApi.Controllers.StockDiarioApi
         .ToList();
 
       return Ok(new { items, page, pageSize, total });
+    }
+
+    [HttpGet("raw")]
+    public IActionResult GetRaw([FromQuery] string? sku, [FromQuery] int? year, [FromQuery] int? month, [FromQuery] int page = 1, [FromQuery] int pageSize = 50)
+    {
+      var rows = _repo.Search(sku, year, month, page, pageSize, out var total);
+
+      var outItems = rows.Select(r => new StockDiarioOutDto
+      {
+        Id = r.Id,
+        Sku = r.Sku,
+        Fecha = r.Fecha.ToString("yyyy-MM-dd"),
+        Cantidad = r.Cantidad,
+        DepositoId = r.DepositoId
+      }).ToList();
+
+      return Ok(new { items = outItems, page, pageSize, total });
     }
   }
 }

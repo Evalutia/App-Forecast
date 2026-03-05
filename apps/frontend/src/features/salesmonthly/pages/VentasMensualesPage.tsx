@@ -64,7 +64,6 @@ export default function VentasMensualesPage() {
           <table className="table">
             <thead>
               <tr>
-                <th>ID</th>
                 <th>SKU</th>
                 <th>Año</th>
                 <th>Mes</th>
@@ -75,14 +74,13 @@ export default function VentasMensualesPage() {
             <tbody>
               {isLoading ? (
                 Array.from({ length: 8 }).map((_, i) => (
-                  <tr key={i}>{Array.from({ length: 6 }).map((__, j) => <td key={j}><span className="skeleton skel-20"/></td>)}</tr>
+                  <tr key={i}>{Array.from({ length: 5 }).map((__, j) => <td key={j}><span className="skeleton skel-20"/></td>)}</tr>
                 ))
               ) : items.length === 0 ? (
-                <tr><td colSpan={6} className="muted" style={{ textAlign: 'center', padding: '1.2rem 0' }}>No hay resultados.</td></tr>
+                <tr><td colSpan={5} className="muted" style={{ textAlign: 'center', padding: '1.2rem 0' }}>No hay resultados.</td></tr>
               ) : (
                 items.map((r: any) => (
-                  <tr key={r.id ?? `${r.sku}-${r.year}-${r.month}`}>
-                    <td className="muted">{r.id ?? ''}</td>
+                  <tr key={`${r.sku}-${r.year}-${r.month}`}>
                     <td className="mono">{r.sku}</td>
                     <td>{r.year}</td>
                     <td>{r.month}</td>
