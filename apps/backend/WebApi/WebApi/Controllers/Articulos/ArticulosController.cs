@@ -2,7 +2,6 @@ using Microsoft.AspNetCore.Mvc;
 using DataAccess.Repositories.ArticuloDataAccess;
 using WebApi.Models;
 using WebApi.Controllers.Articulos.DTOs;
-using WebApi.Controllers.Ventas.DTOs;
 
 namespace WebApi.Controllers.Articulos
 {
@@ -44,14 +43,12 @@ namespace WebApi.Controllers.Articulos
 
     [HttpGet]
     public IActionResult Listar(
-      [FromQuery] int? familiaId,
-      [FromQuery] int? generoId,
-      [FromQuery] int pagina = 1,
-      [FromQuery] int tamanioPagina = 100)
+      [FromQuery] string? sku,
+      [FromQuery] int page = 1,
+      [FromQuery] int pageSize = 100)
     {
-      var items = _repo.FindByFamilyOrGenre(familiaId, generoId, pagina, tamanioPagina);
-      var total = _repo.CountByFamilyOrGenre(familiaId, generoId);
-      return Ok(new PagedResultDto<Articulo>(items, pagina, tamanioPagina, total));
+      var (items, total) = _repo.Search(sku, page, pageSize);
+      return Ok(new { items, page, pageSize, total });
     }
   }
 }

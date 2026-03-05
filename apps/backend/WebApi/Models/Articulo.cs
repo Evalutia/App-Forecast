@@ -24,6 +24,9 @@ namespace WebApi.Models
         public string? MarcaNombre { get; set; }
         public uint? TemporadaId { get; set; }
         public string? TemporadaNombre { get; set; }
+        public DateTime? FecAlta { get; set; }
+        public DateTime? FecModif { get; set; }
+        public string? Comentario { get; set; }
         public string? FactDescMin { get; set; }
         public string? FactDescMax { get; set; }
         public string? DescValida { get; set; }

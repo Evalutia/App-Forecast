@@ -73,6 +73,15 @@ public class EvalutiaDbContext : DbContext
       entity.Property(e => e.TemporadaNombre)
           .HasMaxLength(255)
           .HasColumnName("temporada_nombre");
+      entity.Property(e => e.FecAlta)
+          .HasColumnType("datetime")
+          .HasColumnName("fec_alta");
+      entity.Property(e => e.FecModif)
+          .HasColumnType("datetime")
+          .HasColumnName("fec_modif");
+      entity.Property(e => e.Comentario)
+          .HasColumnType("text")
+          .HasColumnName("comentario");
       entity.Property(e => e.FactDescMin)
           .HasMaxLength(32)
           .HasColumnName("fact_desc_min");

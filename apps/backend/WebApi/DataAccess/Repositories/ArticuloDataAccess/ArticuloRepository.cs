@@ -111,5 +111,24 @@ ON DUPLICATE KEY UPDATE
 
       return query.Count();
     }
+
+    public (IReadOnlyList<Articulo> Items, int Total) Search(string? sku, int page, int pageSize)
+    {
+      page = Math.Max(1, page);
+      pageSize = Math.Clamp(pageSize, 1, 200);
+
+      var q = _db.Articulos.AsNoTracking().AsQueryable();
+
+      if (!string.IsNullOrWhiteSpace(sku))
+        q = q.Where(a => a.Sku.ToLower().StartsWith(sku.ToLower()));
+
+      var total = q.Count();
+      var items = q.OrderBy(a => a.Sku)
+                   .Skip((page - 1) * pageSize)
+                   .Take(pageSize)
+                   .ToList();
+
+      return (items, total);
+    }
   }
 }
