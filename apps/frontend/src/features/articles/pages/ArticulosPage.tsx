@@ -62,9 +62,9 @@ export default function ArticulosPage() {
           <p className="section-subtitle">Listado de artículos cargados en la base de datos.</p>
         </header>
 
-        <section className="card filters-card">
-          <div style={{ display: 'flex', justifyContent: 'center' }}>
-            <div className="form-row" style={{ width: '300px' }}>
+        <section className="card filters-card articulos-filtros">
+          <div className="filters-grid">
+            <div className="form-row">
               <label className="label">SKU</label>
               <input
                 className="input"
@@ -75,7 +75,7 @@ export default function ArticulosPage() {
               />
             </div>
           </div>
-          <div className="filters-actions" style={{ justifyContent: 'center' }}>
+          <div className="filters-actions">
             <button type="button" className="button" onClick={handleSearch}>Buscar</button>
             <button type="button" className="button button-ghost" onClick={handleReset}>Limpiar</button>
           </div>

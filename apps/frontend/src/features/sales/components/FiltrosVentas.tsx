@@ -12,7 +12,6 @@ export default function FiltrosVentas({ initial, onApply, onClear }: Props) {
   const [fechaDesde, setFechaDesde] = useState(initial?.fechaDesde ?? "");
   const [fechaHasta, setFechaHasta] = useState(initial?.fechaHasta ?? "");
   const [sku, setSku] = useState(initial?.sku ?? "");
-  const [pageSize, setPageSize] = useState<number>(initial?.pageSize ?? 50);
 
   const skuFiltro = useDebouncedValue(sku, 250);
   const { data: skuOptions, isLoading: skusLoading } = useDistinctSkus(skuFiltro, {
@@ -24,8 +23,7 @@ export default function FiltrosVentas({ initial, onApply, onClear }: Props) {
     setFechaDesde(initial?.fechaDesde ?? "");
     setFechaHasta(initial?.fechaHasta ?? "");
     setSku(initial?.sku ?? "");
-    setPageSize(initial?.pageSize ?? 50);
-  }, [initial?.fechaDesde, initial?.fechaHasta, initial?.sku, initial?.pageSize]);
+  }, [initial?.fechaDesde, initial?.fechaHasta, initial?.sku]);
 
   const handleApply = () => {
     onApply({
@@ -33,7 +31,7 @@ export default function FiltrosVentas({ initial, onApply, onClear }: Props) {
       fechaHasta: fechaHasta || undefined,
       sku: sku?.trim() || undefined,
       page: 1,
-      pageSize,
+      pageSize: initial?.pageSize ?? 20,
     });
   };
 
@@ -41,12 +39,11 @@ export default function FiltrosVentas({ initial, onApply, onClear }: Props) {
     setFechaDesde("");
     setFechaHasta("");
     setSku("");
-    setPageSize(50);
     onClear?.();
   };
 
   return (
-    <section className="card filters-card">
+    <section className="card filters-card ventas-filtros">
       <div className="filters-grid">
         <div className="form-row">
           <label className="label">Desde</label>
@@ -84,20 +81,6 @@ export default function FiltrosVentas({ initial, onApply, onClear }: Props) {
           </datalist>
         </div>
 
-        <div className="form-row">
-          <label className="label">Filas por página</label>
-          <select
-            value={pageSize}
-            onChange={(e) => setPageSize(Number(e.target.value))}
-            className="select"
-          >
-            {[25, 50, 100, 200].map((n) => (
-              <option key={n} value={n}>
-                {n}
-              </option>
-            ))}
-          </select>
-        </div>
       </div>
 
       <div className="filters-actions">

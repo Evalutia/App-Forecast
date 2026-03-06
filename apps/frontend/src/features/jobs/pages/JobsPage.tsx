@@ -31,7 +31,7 @@ export default function JobsPage() {
           </header>
 
           {/* Filtros */}
-          <section className="card filters-card">
+          <section className="card filters-card jobs-filtros">
             <div className="filters-grid">
               <div className="form-row">
                 <label className="label">Tipo de job</label>
@@ -76,8 +76,7 @@ export default function JobsPage() {
               </div>
             </div>
 
-            {/* Acciones abajo (fuera del grid), igual que Ventas */}
-            <div className="filters-actions">
+            <div className="filters-actions jobs-filtros-actions">
               <button
                 type="button"
                 className="button"
