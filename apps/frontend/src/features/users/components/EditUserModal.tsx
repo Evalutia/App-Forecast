@@ -30,24 +30,26 @@ export default function EditUserModal({ userId, onClose }: { userId: number; onC
   return (
     <Modal title="Editar usuario" onClose={onClose}>
       {isLoading ? (
-        <div className="p-4 text-white/80">Cargando...</div>
+        <p className="muted">Cargando...</p>
       ) : !data ? (
-        <div className="p-4 text-white/80">No se encontró el usuario.</div>
+        <p className="muted">No se encontró el usuario.</p>
       ) : (
-        <form onSubmit={onSubmit} className="space-y-3">
-          <div className="text-sm text-white/70">Correo: <span className="text-white">{data.correo}</span></div>
+        <form onSubmit={onSubmit}>
+          <div style={{ marginBottom: '.85rem', fontSize: '.9rem', color: '#6b7280' }}>
+            Correo: <strong style={{ color: 'var(--emerald-950)' }}>{data.correo}</strong>
+          </div>
 
-          <label className="block text-sm">
-            <span className="mb-1 block text-white/80">Rol</span>
+          <div className="form-row" style={{ alignItems: 'flex-start', marginBottom: '.85rem' }}>
+            <label className="label" style={{ textAlign: 'left' }}>Rol</label>
             <select
-              className="w-full rounded-md border border-white/10 bg-white/5 px-3 py-2 text-white focus:outline-none focus:ring-2 focus:ring-emerald-500"
+              className="select"
               value={rol}
               onChange={(e) => setRol(e.target.value)}
             >
               <option value="administrador">Administrador</option>
               <option value="duenoDeEmpresa">Dueño de Empresa</option>
             </select>
-          </label>
+          </div>
 
           <Input
             label="Nueva contraseña (opcional)"
@@ -57,12 +59,10 @@ export default function EditUserModal({ userId, onClose }: { userId: number; onC
             required={false}
           />
 
-          <div className="flex justify-end gap-2 pt-2">
-            <button type="button" onClick={onClose} className="rounded-md px-3 py-1.5 text-sm text-white/80 hover:bg-white/10">
-              Cancelar
-            </button>
-            <button type="submit" className="rounded-md bg-emerald-700 px-3 py-1.5 text-sm font-medium text-white hover:bg-emerald-600">
-              Guardar cambios
+          <div className="filters-actions" style={{ justifyContent: 'flex-end', marginTop: '1.25rem' }}>
+            <button type="button" className="button button-ghost" onClick={onClose}>Cancelar</button>
+            <button type="submit" className="button" disabled={upd.isPending}>
+              {upd.isPending ? 'Guardando...' : 'Guardar cambios'}
             </button>
           </div>
         </form>

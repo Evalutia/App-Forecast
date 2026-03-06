@@ -6,10 +6,11 @@ import { useVentasDetalle, selectDetalleRows, getPaging } from "../hooks/useVent
 type Props = {
   query: VentasQuery;
   onPageChange: (page: number) => void;
+  onPageSizeChange?: (pageSize: number) => void;
   onRowClick?: (venta: Venta) => void;
 };
 
-export default function TablaVentas({ query, onPageChange, onRowClick }: Props) {
+export default function TablaVentas({ query, onPageChange, onPageSizeChange, onRowClick }: Props) {
   const { data, isLoading, isFetching, isError, error } = useVentasDetalle(query, {
     enabled: !query.agregado,
   });
@@ -98,6 +99,17 @@ export default function TablaVentas({ query, onPageChange, onRowClick }: Props) 
           </button>
         </div>
       </div>
+      {onPageSizeChange && (
+        <div style={{ marginTop: '.5rem' }} className="muted">
+          Filas por página:&nbsp;
+          <select
+            value={query.pageSize ?? 20}
+            onChange={(e) => onPageSizeChange(Number(e.target.value))}
+          >
+            {[10, 20, 50, 100].map(n => <option key={n} value={n}>{n}</option>)}
+          </select>
+        </div>
+      )}
     </section>
   );
 }

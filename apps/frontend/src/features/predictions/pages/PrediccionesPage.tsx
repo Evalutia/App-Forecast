@@ -1,5 +1,6 @@
 // apps/frontend/src/apps/predicciones/pages/PrediccionesPage.tsx
 import BackToDashboardButton from '../../users/components/BackToDashboardButton';
+import ScrollToTopButton from '../../users/components/ScrollToTopButton';
 import PrediccionesFilters from '../components/PrediccionesFilters';
 import PrediccionesTable from '../components/PrediccionesTable';
 import DatosExtra from '../components/DatosExtra';
@@ -40,6 +41,7 @@ export default function PrediccionesPage() {
         <PrediccionesFilters />
         <PrediccionesTable />
       </div>
+      <ScrollToTopButton />
     </div>
   );
 }

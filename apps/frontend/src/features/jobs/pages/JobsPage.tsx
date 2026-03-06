@@ -1,31 +1,29 @@
 import React from 'react';
 import type { JobsQuery } from '../../jobs/types/jobs';
 import TablaJobs from '../../jobs/components/TablaJobs';
+import BackToDashboardButton from '../../users/components/BackToDashboardButton';
+import ScrollToTopButton from '../../users/components/ScrollToTopButton';
 
 const ESTADOS = ['pendiente','ejecutando','exitoso','fallido','cancelado'];
 
 export default function JobsPage() {
   const [query, setQuery] = React.useState<JobsQuery>({
-    page: 1, pageSize: 50, tipo: '', estado: '', desde: '', hasta: '',
+    page: 1, pageSize: 20, tipo: '', estado: '', desde: '', hasta: '',
   });
 
   const onChange = <K extends keyof JobsQuery>(k: K) => (v: JobsQuery[K]) =>
     setQuery((q) => ({ ...q, [k]: v, page: 1 }));
 
   return (
-    <>
-      {/* Topbar idéntica a Home/Sales */}
-      <div className="jobs-topbar-wide">
-        <div className="home-header">
-          <a href="/home" className="home-brand">EVALUTIA</a>
-          <div className="home-actions">
-            {/* Botón igual al de Sales */}
-            <a href="/home" className="btn btn--sm">← Volver al dashboard</a>
-          </div>
+    <div className="predicciones-page">
+      <div className="predicciones-header">
+        <a href="/home" className="predicciones-brand">Evalutia</a>
+        <div className="predicciones-actions">
+          <BackToDashboardButton />
         </div>
       </div>
 
-      <div className="jobs-page">
+      <div style={{ padding: '1.5rem 1rem' }}>
         <div className="jobs-container">
           <header className="section-head">
             <h1 className="section-title">Jobs</h1>
@@ -90,7 +88,7 @@ export default function JobsPage() {
               <button
                 type="button"
                 className="button button-ghost"
-                onClick={() => setQuery({ page: 1, pageSize: 50, tipo: '', estado: '', desde: '', hasta: '' })}
+                onClick={() => setQuery({ page: 1, pageSize: 20, tipo: '', estado: '', desde: '', hasta: '' })}
               >
                 Limpiar
               </button>
@@ -103,6 +101,7 @@ export default function JobsPage() {
           </section>
         </div>
       </div>
-    </>
+      <ScrollToTopButton />
+    </div>
   );
 }
