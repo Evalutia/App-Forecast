@@ -44,11 +44,27 @@ namespace WebApi.Controllers.Articulos
     [HttpGet]
     public IActionResult Listar(
       [FromQuery] string? sku,
+      [FromQuery] string? familiaNombre,
+      [FromQuery] string? generoDescripcion,
       [FromQuery] int page = 1,
       [FromQuery] int pageSize = 100)
     {
-      var (items, total) = _repo.Search(sku, page, pageSize);
+      var (items, total) = _repo.Search(sku, familiaNombre, generoDescripcion, page, pageSize);
       return Ok(new { items, page, pageSize, total });
+    }
+
+    [HttpGet("distinct-familias")]
+    public IActionResult DistinctFamilias()
+    {
+      var familias = _repo.DistinctFamilias();
+      return Ok(familias);
+    }
+
+    [HttpGet("distinct-generos")]
+    public IActionResult DistinctGeneros()
+    {
+      var generos = _repo.DistinctGeneros();
+      return Ok(generos);
     }
   }
 }

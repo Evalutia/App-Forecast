@@ -2,21 +2,36 @@ import { useEffect, useMemo, useState } from 'react';
 import api from '../../../api/client';
 import BackToDashboardButton from '../../users/components/BackToDashboardButton';
 import ScrollToTopButton from '../../users/components/ScrollToTopButton';
+import Modal from '../../users/components/shared/Modal';
 
 export default function ArticulosPage() {
   const [skuInput, setSkuInput] = useState('');
   const [sku, setSku] = useState('');
+  const [familiaInput, setFamiliaInput] = useState('');
+  const [familia, setFamilia] = useState('');
+  const [generoInput, setGeneroInput] = useState('');
+  const [genero, setGenero] = useState('');
   const [items, setItems] = useState<any[]>([]);
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(20);
   const [total, setTotal] = useState(0);
   const [isLoading, setIsLoading] = useState(false);
+  const [familias, setFamilias] = useState<string[]>([]);
+  const [generos, setGeneros] = useState<string[]>([]);
+  const [selectedArticulo, setSelectedArticulo] = useState<any | null>(null);
 
-  const fetchPage = async (pageNum: number, skuFilter: string, ps = pageSize) => {
+  useEffect(() => {
+    api.get('/api/Articulos/distinct-familias').then(r => setFamilias(r.data ?? [])).catch(() => {});
+    api.get('/api/Articulos/distinct-generos').then(r => setGeneros(r.data ?? [])).catch(() => {});
+  }, []);
+
+  const fetchPage = async (pageNum: number, skuFilter: string, familiaFilter: string, generoFilter: string, ps = pageSize) => {
     setIsLoading(true);
     try {
       const params: any = { page: pageNum, pageSize: ps };
       if (skuFilter && skuFilter.trim() !== '') params.sku = skuFilter.trim();
+      if (familiaFilter && familiaFilter.trim() !== '') params.familiaNombre = familiaFilter.trim();
+      if (generoFilter && generoFilter.trim() !== '') params.generoDescripcion = generoFilter.trim();
       const res = await api.get('/api/Articulos', { params });
       const data = res.data;
       const out = data.items ?? data.Items ?? data;
@@ -30,22 +45,26 @@ export default function ArticulosPage() {
     }
   };
 
-  useEffect(() => { fetchPage(page, sku, pageSize); }, [page, sku, pageSize]);
+  useEffect(() => { fetchPage(page, sku, familia, genero, pageSize); }, [page, sku, familia, genero, pageSize]);
 
   const handleSearch = () => {
     setSku(skuInput);
+    setFamilia(familiaInput);
+    setGenero(generoInput);
     setPage(1);
   };
 
   const handleReset = () => {
     setSkuInput('');
     setSku('');
+    setFamiliaInput('');
+    setFamilia('');
+    setGeneroInput('');
+    setGenero('');
     setPage(1);
   };
 
   const totalPages = useMemo(() => Math.max(1, Math.ceil((total || 0) / pageSize)), [total, pageSize]);
-
-  const cols = 19;
 
   return (
     <div className="predicciones-page">
@@ -74,6 +93,36 @@ export default function ArticulosPage() {
                 onKeyDown={e => e.key === 'Enter' && handleSearch()}
               />
             </div>
+
+            <div className="form-row">
+              <label className="label">Familia</label>
+              <input
+                className="input"
+                list="articulos-familia-list"
+                placeholder="Todos"
+                value={familiaInput}
+                onChange={e => setFamiliaInput(e.target.value)}
+                onKeyDown={e => e.key === 'Enter' && handleSearch()}
+              />
+              <datalist id="articulos-familia-list">
+                {familias.map(f => <option key={f} value={f} />)}
+              </datalist>
+            </div>
+
+            <div className="form-row">
+              <label className="label">Género</label>
+              <input
+                className="input"
+                list="articulos-genero-list"
+                placeholder="Todos"
+                value={generoInput}
+                onChange={e => setGeneroInput(e.target.value)}
+                onKeyDown={e => e.key === 'Enter' && handleSearch()}
+              />
+              <datalist id="articulos-genero-list">
+                {generos.map(g => <option key={g} value={g} />)}
+              </datalist>
+            </div>
           </div>
           <div className="filters-actions">
             <button type="button" className="button" onClick={handleSearch}>Buscar</button>
@@ -88,62 +137,27 @@ export default function ArticulosPage() {
                 <tr>
                   <th>SKU</th>
                   <th>Descripción</th>
-                  <th>Familia ID</th>
-                  <th>Familia</th>
-                  <th>Género ID</th>
-                  <th>Género</th>
-                  <th>Sección ID</th>
-                  <th>Sección</th>
-                  <th>Marca ID</th>
-                  <th>Marca</th>
-                  <th>Temporada ID</th>
-                  <th>Temporada</th>
-                  <th>Fec. Alta</th>
-                  <th>Fec. Modif.</th>
-                  <th>Comentario</th>
-                  <th>Fact Desc Min</th>
-                  <th>Fact Desc Max</th>
-                  <th>Desc Válida</th>
-                  <th>Stock Mínimo</th>
                 </tr>
               </thead>
               <tbody>
                 {isLoading ? (
                   Array.from({ length: 8 }).map((_, i) => (
                     <tr key={i}>
-                      {Array.from({ length: cols }).map((__, j) => (
-                        <td key={j}><span className="skeleton skel-20" /></td>
-                      ))}
+                      <td><span className="skeleton skel-20" /></td>
+                      <td><span className="skeleton skel-20" /></td>
                     </tr>
                   ))
                 ) : items.length === 0 ? (
                   <tr>
-                    <td colSpan={cols} className="muted" style={{ textAlign: 'center', padding: '1.2rem 0' }}>
+                    <td colSpan={2} className="muted" style={{ textAlign: 'center', padding: '1.2rem 0' }}>
                       No hay resultados.
                     </td>
                   </tr>
                 ) : (
                   items.map((a: any) => (
-                    <tr key={a.sku ?? a.Sku}>
-                      <td className="mono">{a.sku ?? a.Sku}</td>
+                    <tr key={a.sku ?? a.Sku} style={{ cursor: 'pointer' }} onClick={() => setSelectedArticulo(a)}>
+                      <td className="mono" style={{ color: 'var(--emerald-700)', fontWeight: 700 }}>{a.sku ?? a.Sku}</td>
                       <td>{a.descripcion ?? a.Descripcion ?? ''}</td>
-                      <td>{a.familiaId ?? a.FamiliaId ?? ''}</td>
-                      <td>{a.familiaNombre ?? a.FamiliaNombre ?? ''}</td>
-                      <td>{a.generoId ?? a.GeneroId ?? ''}</td>
-                      <td>{a.generoDescripcion ?? a.GeneroDescripcion ?? ''}</td>
-                      <td>{a.seccionId ?? a.SeccionId ?? ''}</td>
-                      <td>{a.seccionNombre ?? a.SeccionNombre ?? ''}</td>
-                      <td>{a.marcaId ?? a.MarcaId ?? ''}</td>
-                      <td>{a.marcaNombre ?? a.MarcaNombre ?? ''}</td>
-                      <td>{a.temporadaId ?? a.TemporadaId ?? ''}</td>
-                      <td>{a.temporadaNombre ?? a.TemporadaNombre ?? ''}</td>
-                      <td>{a.fecAlta ?? a.FecAlta ?? ''}</td>
-                      <td>{a.fecModif ?? a.FecModif ?? ''}</td>
-                      <td>{a.comentario ?? a.Comentario ?? ''}</td>
-                      <td>{a.factDescMin ?? a.FactDescMin ?? ''}</td>
-                      <td>{a.factDescMax ?? a.FactDescMax ?? ''}</td>
-                      <td>{a.descValida ?? a.DescValida ?? ''}</td>
-                      <td>{a.stockMinimo ?? a.StockMinimo ?? 0}</td>
                     </tr>
                   ))
                 )}
@@ -170,6 +184,48 @@ export default function ArticulosPage() {
         </section>
       </div>
       <ScrollToTopButton />
+
+      {selectedArticulo && (
+        <Modal title={`Detalle — ${selectedArticulo.sku ?? selectedArticulo.Sku}`} onClose={() => setSelectedArticulo(null)} maxWidth="52rem">
+          <div style={{ maxWidth: '100%' }}>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.85rem 1.5rem' }}>
+              {[
+                ['Descripción',    selectedArticulo.descripcion      ?? selectedArticulo.Descripcion      ?? '—'],
+                ['Familia ID',     selectedArticulo.familiaId        ?? selectedArticulo.FamiliaId        ?? '—'],
+                ['Familia',        selectedArticulo.familiaNombre     ?? selectedArticulo.FamiliaNombre    ?? '—'],
+                ['Género ID',      selectedArticulo.generoId         ?? selectedArticulo.GeneroId         ?? '—'],
+                ['Género',         selectedArticulo.generoDescripcion ?? selectedArticulo.GeneroDescripcion ?? '—'],
+                ['Sección ID',     selectedArticulo.seccionId        ?? selectedArticulo.SeccionId        ?? '—'],
+                ['Sección',        selectedArticulo.seccionNombre     ?? selectedArticulo.SeccionNombre    ?? '—'],
+                ['Marca ID',       selectedArticulo.marcaId          ?? selectedArticulo.MarcaId          ?? '—'],
+                ['Marca',          selectedArticulo.marcaNombre       ?? selectedArticulo.MarcaNombre      ?? '—'],
+                ['Temporada ID',   selectedArticulo.temporadaId      ?? selectedArticulo.TemporadaId      ?? '—'],
+                ['Temporada',      selectedArticulo.temporadaNombre   ?? selectedArticulo.TemporadaNombre  ?? '—'],
+                ['Fec. Alta',      selectedArticulo.fecAlta          ?? selectedArticulo.FecAlta          ?? '—'],
+                ['Fec. Modif.',    selectedArticulo.fecModif         ?? selectedArticulo.FecModif         ?? '—'],
+                ['Stock Mínimo',   selectedArticulo.stockMinimo      ?? selectedArticulo.StockMinimo      ?? 0],
+                ['Comentario',     selectedArticulo.comentario       ?? selectedArticulo.Comentario       ?? '—'],
+                ['Fact Desc Min',  selectedArticulo.factDescMin      ?? selectedArticulo.FactDescMin      ?? '—'],
+                ['Fact Desc Max',  selectedArticulo.factDescMax      ?? selectedArticulo.FactDescMax      ?? '—'],
+                ['Desc Válida',    selectedArticulo.descValida       ?? selectedArticulo.DescValida       ?? '—'],
+                ['Frecuencia Mens.',selectedArticulo.frecuenciaMensual ?? selectedArticulo.FrecuenciaMensual ?? '—'],
+              ].map(([label, value]) => (
+                <div key={label as string}>
+                  <div style={{ fontSize: '0.72rem', fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--muted)', marginBottom: '0.2rem' }}>
+                    {label}
+                  </div>
+                  <div style={{ fontSize: '0.95rem', color: 'var(--emerald-950)', wordBreak: 'break-word' }}>
+                    {String(value)}
+                  </div>
+                </div>
+              ))}
+            </div>
+            <div style={{ marginTop: '1.5rem', display: 'flex', justifyContent: 'flex-end' }}>
+              <button className="button button-ghost" onClick={() => setSelectedArticulo(null)}>Cerrar</button>
+            </div>
+          </div>
+        </Modal>
+      )}
     </div>
   );
 }

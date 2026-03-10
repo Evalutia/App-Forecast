@@ -52,17 +52,17 @@ function Dashboard() {
         </div>
         <div>
           <a href="/articulos" className="btn">
-            Artículos
+            Ver mis artículos
           </a>
         </div>
         <div>
           <a href="/ventas-mensuales" className="btn">
-            Ventas mensuales
+            Ver las ventas mensuales
           </a>
         </div>
         <div>
           <a href="/stock-diario" className="btn">
-            Stock diario
+            Ver el stock diario
           </a>
         </div>
         {user && user.role === 'administrador' && (

@@ -9,6 +9,8 @@ namespace DataAccess.Repositories.ArticuloDataAccess
     Articulo Upsert(Articulo articulo);
     IEnumerable<Articulo> FindByFamilyOrGenre(int? familyId, int? genreId, int page, int pageSize);
     int CountByFamilyOrGenre(int? familyId, int? genreId);
-    (IReadOnlyList<Articulo> Items, int Total) Search(string? sku, int page, int pageSize);
+    (IReadOnlyList<Articulo> Items, int Total) Search(string? sku, string? familiaNombre, string? generoDescripcion, int page, int pageSize);
+    IReadOnlyList<string> DistinctFamilias();
+    IReadOnlyList<string> DistinctGeneros();
   }
 }

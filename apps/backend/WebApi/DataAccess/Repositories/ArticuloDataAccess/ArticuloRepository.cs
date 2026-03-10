@@ -112,7 +112,7 @@ ON DUPLICATE KEY UPDATE
       return query.Count();
     }
 
-    public (IReadOnlyList<Articulo> Items, int Total) Search(string? sku, int page, int pageSize)
+    public (IReadOnlyList<Articulo> Items, int Total) Search(string? sku, string? familiaNombre, string? generoDescripcion, int page, int pageSize)
     {
       page = Math.Max(1, page);
       pageSize = Math.Clamp(pageSize, 1, 200);
@@ -122,6 +122,12 @@ ON DUPLICATE KEY UPDATE
       if (!string.IsNullOrWhiteSpace(sku))
         q = q.Where(a => a.Sku.ToLower().StartsWith(sku.ToLower()));
 
+      if (!string.IsNullOrWhiteSpace(familiaNombre))
+        q = q.Where(a => a.FamiliaNombre == familiaNombre);
+
+      if (!string.IsNullOrWhiteSpace(generoDescripcion))
+        q = q.Where(a => a.GeneroDescripcion == generoDescripcion);
+
       var total = q.Count();
       var items = q.OrderBy(a => a.Sku)
                    .Skip((page - 1) * pageSize)
@@ -129,6 +135,28 @@ ON DUPLICATE KEY UPDATE
                    .ToList();
 
       return (items, total);
+    }
+
+    public IReadOnlyList<string> DistinctFamilias()
+    {
+      return _db.Articulos
+                .AsNoTracking()
+                .Where(a => a.FamiliaNombre != null && a.FamiliaNombre != "")
+                .Select(a => a.FamiliaNombre!)
+                .Distinct()
+                .OrderBy(f => f)
+                .ToList();
+    }
+
+    public IReadOnlyList<string> DistinctGeneros()
+    {
+      return _db.Articulos
+                .AsNoTracking()
+                .Where(a => a.GeneroDescripcion != null && a.GeneroDescripcion != "")
+                .Select(a => a.GeneroDescripcion!)
+                .Distinct()
+                .OrderBy(g => g)
+                .ToList();
     }
   }
 }

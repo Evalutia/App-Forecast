@@ -62,20 +62,23 @@
 }
 .jobs-container section.card{ width:100%; max-width:var(--content-max); margin:0 auto; }
 
-/* ---- Centrar filtros de artículos (1 campo centrado) ---- */
+/* ---- Filtros de artículos (SKU + Familia + Género en fila) ---- */
 .articulos-filtros .filters-grid {
   display: grid;
-  grid-template-columns: repeat(1, minmax(0, 300px));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 1.25rem;
-  justify-content: center;
   padding: 0 0.5rem;
-  margin: 0 auto;
 }
 
 .articulos-filtros .form-row {
   display: flex;
   flex-direction: column;
   align-items: center;
+  text-align: center;
+}
+
+.articulos-filtros .input {
+  width: 100%;
   text-align: center;
 }
 

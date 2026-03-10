@@ -1,4 +1,4 @@
-export default function Modal({ title, onClose, children }: any) {
+export default function Modal({ title, onClose, children, maxWidth = '28rem' }: any) {
   return (
     <div
       style={{
@@ -9,7 +9,7 @@ export default function Modal({ title, onClose, children }: any) {
       onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
     >
       <div style={{
-        width: '100%', maxWidth: '28rem',
+        width: '100%', maxWidth,
         background: 'rgba(255,255,255,.97)',
         border: '1px solid rgba(209,250,229,.4)',
         borderRadius: '1.5rem',
