@@ -8,6 +8,7 @@ import JobsPage from '../features/jobs/pages/JobsPage';
 import ArticulosPage from '../features/articles/pages/ArticulosPage';
 import VentasMensualesPage from '../features/salesmonthly/pages/VentasMensualesPage';
 import StockDiarioPage from '../features/stock/pages/StockDiarioPage';
+import ResultadosPage from '../features/resultados/pages/ResultadosPage';
 import JobDetailPage from '../features/jobs/pages/JobDetailPage';
 import LogoutButton from '../features/auth/components/LogoutButton';
 import AdminUsersButton from '../features/auth/components/AdminUsersButton';
@@ -65,6 +66,11 @@ function Dashboard() {
             Ver el stock diario
           </a>
         </div>
+        <div>
+          <a href="/resultados" className="btn">
+            Ver resultados
+          </a>
+        </div>
         {user && user.role === 'administrador' && (
           <div>
             <a href="/jobs" className="btn">
@@ -95,6 +101,7 @@ export default function AppRoutes() {
             <Route path="/articulos" element={<ArticulosPage />} />
             <Route path="/ventas-mensuales" element={<VentasMensualesPage />} />
             <Route path="/stock-diario" element={<StockDiarioPage />} />
+            <Route path="/resultados" element={<ResultadosPage />} />
             <Route path="/jobs" element={<JobsPage />} />
             <Route path="/jobs/:id" element={<JobDetailPage />} />
           </Route>
