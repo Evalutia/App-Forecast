@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-# run_extract_articulos.py - extracción (segundo script) + inserción (primer script, BUG corregido)
+# run_extract_articulos.py - extracción + inserción (agrega barcode / NroBarra)
+
 import os
 import sys
 import json
@@ -35,14 +36,58 @@ def to_nonneg_int(x, default=0):
 def localname(tag: str) -> str:
     return tag.split("}")[-1] if tag else tag
 
+def normalize_sku_from_value(raw):
+    if raw is None:
+        return None
+    s = str(raw)
+    s = "".join(ch for ch in s if ord(ch) >= 32)
+    s = " ".join(s.split())
+    s = s.strip().upper()
+    if s == "":
+        return None
+    return s[:128]
+
+def normalize_sku_from_item(it: dict):
+    raw = (
+        it.get("IdArticulo")
+        or it.get("SKU")
+        or it.get("Articulo")
+        or it.get("Codigo")
+        or it.get("Id")
+    )
+    return normalize_sku_from_value(raw)
+
 def parse_items_from_xml(xml_text: str):
+    """
+    Devuelve:
+      - items: lista de dicts de <Articulo> (campos del WS)
+      - barcode_map: dict sku -> [nro_barra1, nro_barra2, ...]
+    Soporta casos donde el WS devuelve <Barra> separado del <Articulo>.
+    """
     items = []
+    barcode_map = {}
     try:
         root = ET.fromstring(xml_text)
     except Exception as e:
-        return [], f"XML parse error: {e}"
+        return [], {}, f"XML parse error: {e}"
 
-    # Recorrer todo y aceptar 'Articulo' en cualquier case/namespaces
+    # 1) Primero: recolectar códigos de barras si vienen como <Barra>
+    for el in root.iter():
+        if localname(el.tag).lower() == "barra":
+            d = {}
+            for c in list(el):
+                k = localname(c.tag)
+                v = c.text.strip() if c.text is not None else None
+                d[k] = v
+
+            sku = normalize_sku_from_value(d.get("IdArticulo") or d.get("SKU") or d.get("Articulo") or d.get("Codigo"))
+            nro = d.get("NroBarra") or d.get("Barcode") or d.get("CodigoBarra") or d.get("CodigoBarras")
+            if sku and nro:
+                nro = str(nro).strip()
+                if nro:
+                    barcode_map.setdefault(sku, []).append(nro)
+
+    # 2) Luego: recolectar artículos (<Articulo>)
     for el in root.iter():
         if localname(el.tag).lower() == "articulo":
             d = {}
@@ -53,30 +98,9 @@ def parse_items_from_xml(xml_text: str):
             if d:
                 items.append(d)
 
-    return items, None
+    return items, barcode_map, None
 
-def normalize_sku_from_item(it: dict):
-    raw = (
-        it.get("IdArticulo")
-        or it.get("SKU")
-        or it.get("Articulo")
-        or it.get("Codigo")
-        or it.get("Id")
-    )
-    if raw is None:
-        return None
-    s = str(raw)
-    # remove control chars
-    s = "".join(ch for ch in s if ord(ch) >= 32)
-    # collapse whitespace
-    s = " ".join(s.split())
-    s = s.strip().upper()
-    if s == "":
-        return None
-    return s[:128]
-
-def normalize_item(it: dict):
-    # Tomamos los campos reales del WS (segundo script) y añadimos las columnas del modelo (primer script)
+def normalize_item(it: dict, barcode_map: dict):
     sku = normalize_sku_from_item(it)
 
     descripcion = (
@@ -101,7 +125,6 @@ def normalize_item(it: dict):
     temporada_id = to_int_nullable(it.get("IdTemporada") or it.get("TemporadaId"))
     temporada_nombre = it.get("DescTemporada") or it.get("Temporada")
 
-    # Fechas y comentarios (se dejan como strings truncadas)
     fec_alta = it.get("FecAlta") or it.get("FechaAlta") or it.get("FecAltaArt")
     fec_modif = it.get("FecModif") or it.get("FecModifArt") or it.get("FechaModificacion")
     comentario = it.get("Comentario") or it.get("Observacion")
@@ -111,7 +134,28 @@ def normalize_item(it: dict):
     desc_valida = it.get("DescValida")
 
     stock_minimo = to_nonneg_int(it.get("StockMinimo") or it.get("MinStock") or it.get("StockMinimoArt"), 0)
-    frecuencia_mensual = to_int_nullable(it.get("FrecuenciaMensual"))
+
+    # barcode: si viene dentro del articulo o por map <Barra>
+    barcode_inline = (
+        it.get("NroBarra")
+        or it.get("Barcode")
+        or it.get("CodigoBarra")
+        or it.get("CodigoBarras")
+    )
+    barcodes = []
+    if barcode_inline:
+        b = str(barcode_inline).strip()
+        if b:
+            barcodes.append(b)
+    if sku and sku in barcode_map:
+        barcodes.extend(barcode_map.get(sku) or [])
+
+    # normalizar: únicos, ordenados, concatenados con ';'
+    barcode = None
+    if barcodes:
+        uniq = sorted({str(x).strip() for x in barcodes if str(x).strip()})
+        if uniq:
+            barcode = ";".join(uniq)
 
     return {
         "sku": trunc(sku, 128) if sku else None,
@@ -133,17 +177,15 @@ def normalize_item(it: dict):
         "fact_desc_max": trunc(fact_desc_max, 32) if fact_desc_max else None,
         "desc_valida": trunc(desc_valida, 16) if desc_valida else None,
         "stock_minimo": stock_minimo,
-        "frecuencia_mensual": frecuencia_mensual,
+        "barcode": trunc(barcode, 255) if barcode else None,  # <- nuevo
     }
 
 def load_payload_raw():
-    # Preferimos lo que deja el .sh
     payload_path = os.environ.get("TMP_PAYLOAD_PATH") or os.environ.get("TMP_JSON_PATH")
     if payload_path and os.path.exists(payload_path):
         with open(payload_path, "r", encoding="utf-8") as f:
             return f.read().strip()
 
-    # Fallback: intentar sacar del SOAP guardado
     soapfile = "/tmp/soap_response_articulos.xml"
     if os.path.exists(soapfile):
         with open(soapfile, "r", encoding="utf-8") as f:
@@ -168,8 +210,8 @@ def main():
         return 0
 
     decoded = html.unescape(payload_raw).strip()
-
     items = []
+    barcode_map = {}
 
     # Intentar JSON si parece JSON
     if decoded.startswith("{") or decoded.startswith("["):
@@ -187,12 +229,12 @@ def main():
         except Exception:
             items = []
 
-    # Si no es JSON válido, intentar XML
+    # Si no es JSON válido, intentar XML (y extraer barcode por <Barra>)
     if not items:
         if not decoded.startswith("<"):
             if "<Articulos" in decoded:
                 decoded = decoded[decoded.find("<Articulos"):]
-        xml_items, err = parse_items_from_xml(decoded)
+        xml_items, bmap, err = parse_items_from_xml(decoded)
         if err:
             if "<Articulos" in decoded:
                 print(f"[WARN] {err}")
@@ -201,6 +243,7 @@ def main():
             print(f"[WARN] No parece XML ni JSON. {err}")
             return 0
         items = xml_items
+        barcode_map = bmap
 
     if not items:
         print("[WARN] No se detectaron items de artículos en el payload. Salida OK.")
@@ -217,13 +260,12 @@ def main():
         charset="utf8mb4",
     )
 
-    # NOTE: ts_carga se setea con NOW(6) para evitar mismatch de placeholders
     insert_sql = """
     INSERT INTO articulos
       (sku, descripcion, familia_id, familia_nombre, genero_id, genero_descripcion,
        seccion_id, seccion_nombre, marca_id, marca_nombre, temporada_id, temporada_nombre,
        fec_alta, fec_modif, comentario, fact_desc_min, fact_desc_max, desc_valida,
-       stock_minimo, frecuencia_mensual, fuente, ts_carga)
+       stock_minimo, barcode, fuente, ts_carga)
     VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,NOW(6))
     ON DUPLICATE KEY UPDATE
       descripcion = VALUES(descripcion),
@@ -244,7 +286,7 @@ def main():
       fact_desc_max = VALUES(fact_desc_max),
       desc_valida = VALUES(desc_valida),
       stock_minimo = VALUES(stock_minimo),
-      frecuencia_mensual = VALUES(frecuencia_mensual),
+      barcode = VALUES(barcode),
       fuente = VALUES(fuente),
       actualizado_en = NOW(6),
       ts_carga = NOW(6)
@@ -258,12 +300,12 @@ def main():
     try:
         with conn.cursor() as cur:
             for idx, raw in enumerate(items):
-                normalized = normalize_item(raw)
+                normalized = normalize_item(raw, barcode_map)
                 if not normalized["sku"]:
                     rows_skip += 1
                     if len(skipped_samples) < 20:
                         keys = list(raw.keys())
-                        summary = {k:(raw[k][:120]+'...' if isinstance(raw[k],str) and len(raw[k])>120 else raw[k]) for k in keys[:16]}
+                        summary = {k: (raw[k][:120] + "..." if isinstance(raw[k], str) and len(raw[k]) > 120 else raw[k]) for k in keys[:16]}
                         skipped_samples.append({"index": idx, "summary": summary})
                     continue
 
@@ -290,22 +332,29 @@ def main():
                             normalized["fact_desc_max"],
                             normalized["desc_valida"],
                             normalized["stock_minimo"],
-                            normalized["frecuencia_mensual"],
+                            normalized["barcode"],
                             "ConsArticulosWeb",
                         ),
                     )
                     rows_ins += 1
                 except Exception as e:
                     rows_skip += 1
-                    err_log.append({"index": idx, "sku": normalized.get("sku"), "error": str(e), "normalized": normalized, "raw_keys": list(raw.keys())})
+                    err_log.append(
+                        {
+                            "index": idx,
+                            "sku": normalized.get("sku"),
+                            "error": str(e),
+                            "normalized": normalized,
+                            "raw_keys": list(raw.keys()),
+                        }
+                    )
             conn.commit()
     finally:
         conn.close()
 
-    # Guardar muestras y errores para debugging
     if skipped_samples:
         try:
-            with open("/tmp/articulos_skipped_samples.json","w",encoding="utf-8") as f:
+            with open("/tmp/articulos_skipped_samples.json", "w", encoding="utf-8") as f:
                 json.dump({"skipped_count": rows_skip, "samples": skipped_samples}, f, ensure_ascii=False, indent=2)
             print(f"[WARN] Guardadas muestras de items skippeados en /tmp/articulos_skipped_samples.json (muestras: {len(skipped_samples)})")
         except Exception:
@@ -313,7 +362,7 @@ def main():
 
     if err_log:
         try:
-            with open("/tmp/articulos_insert_errors.log","w",encoding="utf-8") as f:
+            with open("/tmp/articulos_insert_errors.log", "w", encoding="utf-8") as f:
                 for e in err_log:
                     f.write(json.dumps(e, ensure_ascii=False) + "\n")
             print(f"[ERROR] Errores de inserción registrados en /tmp/articulos_insert_errors.log (count: {len(err_log)})")
