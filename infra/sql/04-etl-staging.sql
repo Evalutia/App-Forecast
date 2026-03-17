@@ -28,5 +28,15 @@ SET @sql2 := IF(@idx2 = 0,
 );
 PREPARE stmt2 FROM @sql2; EXECUTE stmt2; DEALLOCATE PREPARE stmt2;
 
-ALTER TABLE evalutia.ventas_historicas_stage
-  ADD COLUMN stock INT DEFAULT 0 AFTER cantidad;
+-- 3) Agregar columna stock a staging solo si no existe
+SET @col := (
+  SELECT COUNT(1) FROM information_schema.columns
+  WHERE table_schema = DATABASE()
+    AND table_name = 'ventas_historicas_stage'
+    AND column_name = 'stock'
+);
+SET @sql3 := IF(@col = 0,
+  'ALTER TABLE ventas_historicas_stage ADD COLUMN stock INT DEFAULT 0 AFTER cantidad;',
+  'SELECT 1;'
+);
+PREPARE stmt3 FROM @sql3; EXECUTE stmt3; DEALLOCATE PREPARE stmt3;

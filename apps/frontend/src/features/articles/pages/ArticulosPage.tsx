@@ -190,6 +190,7 @@ export default function ArticulosPage() {
           <div style={{ maxWidth: '100%' }}>
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.85rem 1.5rem' }}>
               {[
+                ['Código de Barras',selectedArticulo.barcode          ?? selectedArticulo.Barcode          ?? '—'],
                 ['Descripción',    selectedArticulo.descripcion      ?? selectedArticulo.Descripcion      ?? '—'],
                 ['Familia ID',     selectedArticulo.familiaId        ?? selectedArticulo.FamiliaId        ?? '—'],
                 ['Familia',        selectedArticulo.familiaNombre     ?? selectedArticulo.FamiliaNombre    ?? '—'],

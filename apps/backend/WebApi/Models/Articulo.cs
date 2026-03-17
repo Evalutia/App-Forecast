@@ -11,7 +11,6 @@ namespace WebApi.Models
         }
 
         public string Sku { get; set; } = null!;
-        [System.ComponentModel.DataAnnotations.Schema.NotMapped]
         public string? Barcode { get; set; }
         public string? Descripcion { get; set; }
         public uint? FamiliaId { get; set; }

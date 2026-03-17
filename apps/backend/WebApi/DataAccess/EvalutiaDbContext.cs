@@ -52,9 +52,9 @@ public class EvalutiaDbContext : DbContext
       entity.Property(e => e.Sku)
           .HasMaxLength(120)
           .HasColumnName("sku");
-      // The 'barcode' column is not present in the current database schema for 'articulos'.
-      // Ignore this property to avoid mapping errors when querying.
-      entity.Ignore(e => e.Barcode);
+      entity.Property(e => e.Barcode)
+          .HasMaxLength(255)
+          .HasColumnName("barcode");
       entity.Property(e => e.Descripcion)
           .HasMaxLength(512)
           .HasColumnName("descripcion");
