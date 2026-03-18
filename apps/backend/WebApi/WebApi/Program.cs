@@ -17,6 +17,7 @@ using Services.Stock;
 using Services.Admin;
 using Services.Usuarios;
 using Services.Ventas;
+using Services.Resultados;
 using System.Text;
 using WebApi.Data;
 using WebApi.Filters;
@@ -70,6 +71,7 @@ builder.Services.AddScoped<IStockDiarioRepository, StockDiarioRepository>();
 builder.Services.AddScoped<IVentasMensualesRepository, VentasMensualesRepository>();
 builder.Services.AddScoped<IStockService, StockService>();
 builder.Services.AddScoped<IAdminService, AdminService>();
+builder.Services.AddScoped<IResultadosService, ResultadosService>();
 
 // Exception filter global
 builder.Services.AddControllers(o =>
