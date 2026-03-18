@@ -30,11 +30,6 @@ export default function ResumenCards() {
       color: (data?.ventasPerdidasTotales ?? 0) > 0 ? '#dc2626' : 'var(--emerald-700)',
     },
     {
-      label: 'R² promedio modelos',
-      value: isLoading ? '...' : (data?.r2Promedio?.toFixed(3) ?? '—'),
-      color: 'var(--emerald-700)',
-    },
-    {
       label: 'Última predicción',
       value: isLoading ? '...' : (data?.ultimaPrediccion ?? '—'),
       color: 'var(--emerald-700)',

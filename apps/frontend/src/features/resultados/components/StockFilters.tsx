@@ -9,7 +9,7 @@ type Props = {
 
 export default function StockFilters({ sku, onSkuChange, orderBy, onOrderByChange, onSearch, onReset }: Props) {
   return (
-    <section className="card filters-card" style={{ marginBottom: '1rem' }}>
+    <section className="card filters-card resultados-filtros" style={{ marginBottom: '1rem' }}>
       <div className="filters-grid">
         <div className="form-row">
           <label className="label">SKU</label>

@@ -35,17 +35,11 @@ export default function ResultadosPage() {
           Visualizaciones clave para tomar decisiones de compra con datos.
         </p>
 
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1.25rem', marginBottom: '1.25rem' }}>
-          <TopVentasPerdidasChart />
-          <StockoutDistributionChart />
-        </div>
-
-        <div style={{ marginBottom: '1.25rem' }}>
+        <div className="charts-grid">
           <VentasTrendChart />
-        </div>
-
-        <div style={{ marginBottom: '1.25rem' }}>
+          <TopVentasPerdidasChart />
           <AbcChart />
+          <StockoutDistributionChart />
         </div>
 
         <div className="section-divider"></div>

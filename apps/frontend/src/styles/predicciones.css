@@ -90,6 +90,24 @@
   gap: 1rem;
 }
 
+/* === Grid de gráficos de análisis (mismo ancho que section.card / table-card) === */
+.predicciones-container .charts-grid{
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1.25rem;
+  width: 100% !important;
+  align-self: stretch !important;
+  box-sizing: border-box;
+  align-items: stretch;
+  margin-bottom: 1.25rem;
+}
+.predicciones-container .charts-grid > .card{
+  min-width: 0;
+  max-width: none;
+  width: 100%;
+  box-sizing: border-box;
+}
+
 /* === MATCH EXACTO con Jobs/Ventas (clave para el ancho de la tabla) === */
 .predicciones-container section.card{
   width: 100%;
@@ -449,16 +467,7 @@
   border-bottom: 1px dashed rgba(16,185,129,.25);
 }
 
-/* Grilla de gráficos: mismo alto para ambas tarjetas */
-.charts-grid{
-  display: grid;
-  grid-template-columns: 1fr;
-  gap: 1rem;
-  align-items: stretch; /* ← garantiza misma altura */
-}
-@media (min-width: 768px){
-  .charts-grid{ grid-template-columns: 1fr 1fr; }
-}
+/* (charts-grid ya definido arriba en .predicciones-container .charts-grid) */
 
 /* Tarjeta/slot para cada gráfico: alto fijo y layout columna */
 .chart-card{
