@@ -1,5 +1,6 @@
 import { BrowserRouter, Routes, Route } from 'react-router-dom';
 import RequireAuth from './RequireAuth';
+import RequireAdmin from './RequireAdmin';
 import LoginPage from '../features/auth/pages/LoginPage';
 import UsersPage from '../features/users/pages/UsersPage';
 import PrediccionesPage from '../features/predictions/pages/PrediccionesPage';
@@ -46,11 +47,13 @@ function Dashboard() {
             Ver mis predicciones
           </a>
         </div>
-        <div>
-          <a href="/ventas" className="btn">
-            Ver las ventas cargadas
-          </a>
-        </div>
+        {user && user.role === 'administrador' && (
+          <div>
+            <a href="/ventas" className="btn">
+              Ver las ventas cargadas
+            </a>
+          </div>
+        )}
         <div>
           <a href="/articulos" className="btn">
             Ver mis artículos
@@ -95,15 +98,18 @@ export default function AppRoutes() {
             <Route path="/" element={<Dashboard />} />
             {/* alias /home apunta al mismo Dashboard */}
             <Route path="/home" element={<Dashboard />} />
-            <Route path="/usuarios" element={<UsersPage />} />
             <Route path="/predicciones" element={<PrediccionesPage />} />
-            <Route path="/ventas" element={<VentasPage />} />
             <Route path="/articulos" element={<ArticulosPage />} />
             <Route path="/ventas-mensuales" element={<VentasMensualesPage />} />
             <Route path="/stock-diario" element={<StockDiarioPage />} />
             <Route path="/resultados" element={<ResultadosPage />} />
-            <Route path="/jobs" element={<JobsPage />} />
-            <Route path="/jobs/:id" element={<JobDetailPage />} />
+            {/* Solo administradores */}
+            <Route element={<RequireAdmin />}>
+              <Route path="/usuarios" element={<UsersPage />} />
+              <Route path="/ventas" element={<VentasPage />} />
+              <Route path="/jobs" element={<JobsPage />} />
+              <Route path="/jobs/:id" element={<JobDetailPage />} />
+            </Route>
           </Route>
           {/* fallback */}
           <Route path="*" element={<LoginPage />} />

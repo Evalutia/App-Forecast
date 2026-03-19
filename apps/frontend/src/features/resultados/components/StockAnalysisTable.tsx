@@ -3,6 +3,7 @@ import { useStockAnalysis } from '../hooks/useResultados';
 import type { SkuStockAnalysis, StockAnalysisParams } from '../types/resultados';
 import SkuDetailModal from './SkuDetailModal';
 import StockFilters from './StockFilters';
+import { exportAllResultados } from '../utils/exportResultados';
 
 function fmt(n: number | null | undefined): string {
   if (n == null) return 'N/A';
@@ -22,6 +23,7 @@ export default function StockAnalysisTable() {
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(20);
   const [selected, setSelected] = useState<SkuStockAnalysis | null>(null);
+  const [exporting, setExporting] = useState(false);
 
   const params: StockAnalysisParams = useMemo(() => ({
     sku: sku || undefined,
@@ -48,6 +50,17 @@ export default function StockAnalysisTable() {
     setOrderByInput('');
     setOrderBy('');
     setPage(1);
+  };
+
+  const handleExport = async () => {
+    try {
+      setExporting(true);
+      await exportAllResultados(params);
+    } catch (err) {
+      console.error('Error exportando resultados', err);
+    } finally {
+      setExporting(false);
+    }
   };
 
   return (
@@ -117,6 +130,18 @@ export default function StockAnalysisTable() {
               )}
             </tbody>
           </table>
+        </div>
+
+        <div className="export-row">
+          <button
+            className="pager-btn export-btn"
+            disabled={exporting || isLoading}
+            onClick={handleExport}
+            title="Descargar todos los resultados en Excel"
+            type="button"
+          >
+            {exporting ? 'Exportando…' : 'Descargar Excel'}
+          </button>
         </div>
 
         <div className="pager">
