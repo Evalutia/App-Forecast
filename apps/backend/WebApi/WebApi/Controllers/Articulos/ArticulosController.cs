@@ -1,3 +1,4 @@
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using DataAccess.Repositories.ArticuloDataAccess;
 using WebApi.Models;
@@ -7,6 +8,7 @@ namespace WebApi.Controllers.Articulos
 {
   [ApiController]
   [Route("api/[controller]")]
+  [Authorize]
   public class ArticulosController : ControllerBase
   {
     private readonly IArticuloRepository _repo;

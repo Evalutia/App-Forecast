@@ -79,7 +79,7 @@ export default function ProjectedSalesChart({ data, sku }: Props) {
   const ds = { labels: allLabels, datasets };
 
   return (
-    <div className="rounded-xl **border border-white/10** bg-white/5 p-4">
+    <div className="rounded-xl bg-white/5 p-4">
       <h4 className="text-base font-semibold text-white">Ventas proyectadas</h4>
       <p className="mb-3 text-xs text-emerald-100/70">
         Serie trimestral: ventas históricas (acotado a 3 años antes de la predicción) agregadas por trimestre y predicción (un valor por trimestre).

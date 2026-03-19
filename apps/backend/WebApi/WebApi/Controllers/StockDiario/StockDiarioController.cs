@@ -1,3 +1,4 @@
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using System.Linq;
 using DataAccess.Repositories.StockDiarioDataAccess;
@@ -7,6 +8,7 @@ namespace WebApi.Controllers.StockDiarioApi
 {
   [ApiController]
   [Route("api/[controller]")]
+  [Authorize]
   public class StockDiarioController : ControllerBase
   {
     private readonly IStockDiarioRepository _repo;

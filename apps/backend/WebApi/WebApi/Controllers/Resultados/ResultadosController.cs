@@ -1,3 +1,4 @@
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Services.Resultados;
 using WebApi.Models;
@@ -7,6 +8,7 @@ namespace WebApi.Controllers.Resultados
 {
   [ApiController]
   [Route("api/[controller]")]
+  [Authorize]
   public class ResultadosController : ControllerBase
   {
     private readonly IResultadosService _svc;

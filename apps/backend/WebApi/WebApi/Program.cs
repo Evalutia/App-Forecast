@@ -153,8 +153,8 @@ builder.Services.AddCors(options =>
         else
         {
             policy.WithOrigins(origins)
-                  .AllowAnyHeader()
-                  .AllowAnyMethod()
+                  .WithHeaders("Authorization", "Content-Type", "Accept")
+                  .WithMethods("GET", "POST", "PUT", "DELETE", "OPTIONS")
                   .AllowCredentials();
         }
     });

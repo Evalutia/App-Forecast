@@ -201,7 +201,7 @@ export default function ArticulosPage() {
                 ['Marca ID',       selectedArticulo.marcaId          ?? selectedArticulo.MarcaId          ?? '—'],
                 ['Marca',          selectedArticulo.marcaNombre       ?? selectedArticulo.MarcaNombre      ?? '—'],
                 ['Temporada ID',   selectedArticulo.temporadaId      ?? selectedArticulo.TemporadaId      ?? '—'],
-                ['Temporada',      (selectedArticulo.temporadaNombre ?? selectedArticulo.TemporadaNombre ?? 'Sin definir').replace(/^\{(.*)\}$/, '$1')],
+                ['Temporada',      (selectedArticulo.temporadaNombre ?? selectedArticulo.TemporadaNombre ?? 'Sin definir').replace(/^\{(.*)\}$/, '$1').replace(/^Sin Definir$/i, 'Sin definir')],
                 ['Stock Mínimo',   selectedArticulo.stockMinimo      ?? selectedArticulo.StockMinimo      ?? 0],
                 ['Comentario',     selectedArticulo.comentario       ?? selectedArticulo.Comentario       ?? 'Sin definir'],
                 ['Fact Desc Min',  selectedArticulo.factDescMin      ?? selectedArticulo.FactDescMin      ?? '—'],

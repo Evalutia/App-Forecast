@@ -93,7 +93,7 @@ export default function DatosExtra() {
     <section className="extra-card">
       <p className="extra-subtitle">
         Seleccione un SKU para ver un resumen de las ventas y la proyección trimestral 
-        o esriba el nombre del SKU en el filtro de la sección "Historial de predicciones".
+        o escriba el nombre del SKU en el filtro de la sección "Historial de predicciones".
       </p>
 
       {isLoading ? (

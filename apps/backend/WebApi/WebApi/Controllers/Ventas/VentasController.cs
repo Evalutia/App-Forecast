@@ -1,3 +1,4 @@
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Services.Ventas;
 using WebApi.Controllers.Ventas.DTOs;
@@ -7,6 +8,7 @@ namespace WebApi.Controllers.Ventas
 {
   [ApiController]
   [Route("api/[controller]")]
+  [Authorize]
   public class VentasController : ControllerBase
   {
     private readonly IVentasService _ventasService;

@@ -1,3 +1,4 @@
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using System.Linq;
 using WebApi.Data;
@@ -6,6 +7,7 @@ namespace WebApi.Controllers.VentasMensuales
 {
   [ApiController]
   [Route("api/[controller]")]
+  [Authorize]
   public class VentasMensualesController : ControllerBase
   {
     private readonly EvalutiaDbContext _db;
