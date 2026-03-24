@@ -117,7 +117,7 @@ function AbcItemsTable({ items, clasificacion }: { items: AbcItem[]; clasificaci
     <div style={{ marginTop: '1rem', maxHeight: '300px', overflowY: 'auto', border: `1px solid ${color}30`, borderRadius: '0.75rem' }}>
       <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.78rem' }}>
         <thead>
-          <tr style={{ background: `${color}10`, position: 'sticky', top: 0 }}>
+          <tr style={{ background: '#f0fdf4', position: 'sticky', top: 0, zIndex: 1 }}>
             <th style={{ padding: '0.5rem 0.75rem', textAlign: 'left', fontWeight: 800, color }}>SKU</th>
             <th style={{ padding: '0.5rem 0.75rem', textAlign: 'left', fontWeight: 800, color }}>Descripción</th>
             <th style={{ padding: '0.5rem 0.75rem', textAlign: 'right', fontWeight: 800, color }}>Ventas (365d)</th>
