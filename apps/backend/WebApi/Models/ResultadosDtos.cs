@@ -39,6 +39,15 @@ namespace WebApi.Models
     public int Moderado { get; init; }  // 15–30%
     public int Critico { get; init; }   // > 30%
     public int SinDatos { get; init; }  // < MIN_DIAS_STOCK
+    public List<StockoutItemDto> Items { get; init; } = new();
+  }
+
+  public sealed class StockoutItemDto
+  {
+    public string Sku { get; init; } = string.Empty;
+    public string? Descripcion { get; init; }
+    public double StockoutRate { get; init; }
+    public string Categoria { get; init; } = string.Empty; // Bueno, Moderado, Critico, SinDatos
   }
 
   public sealed class AbcItemDto

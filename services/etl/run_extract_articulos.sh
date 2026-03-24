@@ -14,7 +14,7 @@ WS_SOAP_ACTION="${WS_SOAP_ACTION:-http://tempuri.org/VSServicioWeb/SWNadWeb/Cons
 
 ID_EMPRESA="${ID_EMPRESA:-1}"
 ID_GRUPO="${ID_GRUPO:-}"
-GRUPOS="${GRUPOS:-}"          # preferimos GRUPOS
+GRUPOS="${GRUPOS:-${GROUPS:-}}"  # acepta GRUPOS o GROUPS (compatibilidad)
 CANTREG="${CANTREG:-20000}"
 ARTICULO_DESDE="${ARTICULO_DESDE:-}"
 

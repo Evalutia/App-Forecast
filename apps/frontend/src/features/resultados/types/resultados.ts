@@ -47,6 +47,14 @@ export interface StockoutDistribution {
   moderado: number;
   critico: number;
   sinDatos: number;
+  items: StockoutItem[];
+}
+
+export interface StockoutItem {
+  sku: string;
+  descripcion: string | null;
+  stockoutRate: number;
+  categoria: string;
 }
 
 export interface AbcItem {

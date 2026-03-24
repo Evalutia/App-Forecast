@@ -275,7 +275,7 @@ namespace Services.Resultados
 
       var skusConStock = _db.Articulos.AsNoTracking()
         .Where(a => a.StockMinimo > 0)
-        .Select(a => new { a.Sku, a.StockMinimo })
+        .Select(a => new { a.Sku, a.StockMinimo, a.Descripcion })
         .ToList();
       var skuSet = skusConStock.Select(s => s.Sku).ToHashSet();
       var minimos = skusConStock.ToDictionary(s => s.Sku, s => s.StockMinimo);
@@ -290,20 +290,24 @@ namespace Services.Resultados
 
       const int MIN_DIAS = 30;
       int bueno = 0, moderado = 0, critico = 0, sinDatos = 0;
+      var items = new List<StockoutItemDto>();
 
       foreach (var s in skusConStock)
       {
         if (!stockRows.ContainsKey(s.Sku) || stockRows[s.Sku].Count < MIN_DIAS)
         {
           sinDatos++;
+          items.Add(new StockoutItemDto { Sku = s.Sku, Descripcion = s.Descripcion, StockoutRate = -1, Categoria = "SinDatos" });
           continue;
         }
         var dias = stockRows[s.Sku];
         var diasConStock = dias.Count(d => d.Total > minimos[s.Sku]);
         var rate = (double)(dias.Count - diasConStock) / dias.Count * 100;
-        if (rate > 30) critico++;
-        else if (rate > 15) moderado++;
-        else bueno++;
+        string cat;
+        if (rate > 30) { critico++; cat = "Critico"; }
+        else if (rate > 15) { moderado++; cat = "Moderado"; }
+        else { bueno++; cat = "Bueno"; }
+        items.Add(new StockoutItemDto { Sku = s.Sku, Descripcion = s.Descripcion, StockoutRate = Math.Round(rate, 1), Categoria = cat });
       }
 
       return new StockoutDistributionDto
@@ -311,7 +315,8 @@ namespace Services.Resultados
         Bueno = bueno,
         Moderado = moderado,
         Critico = critico,
-        SinDatos = sinDatos
+        SinDatos = sinDatos,
+        Items = items
       };
     }
 
