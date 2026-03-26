@@ -11,6 +11,6 @@ namespace DataAccess.Repositories.ArticuloDataAccess
     int CountByFamilyOrGenre(int? familyId, int? genreId);
     (IReadOnlyList<Articulo> Items, int Total) Search(string? sku, string? familiaNombre, string? generoDescripcion, int page, int pageSize);
     IReadOnlyList<string> DistinctFamilias();
-    IReadOnlyList<string> DistinctGeneros();
+    IReadOnlyList<string> DistinctGeneros(string? familiaNombre = null);
   }
 }

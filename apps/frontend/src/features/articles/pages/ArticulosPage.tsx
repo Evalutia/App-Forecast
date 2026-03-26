@@ -20,10 +20,25 @@ export default function ArticulosPage() {
   const [generos, setGeneros] = useState<string[]>([]);
   const [selectedArticulo, setSelectedArticulo] = useState<any | null>(null);
 
+  // Cargar familias una sola vez
   useEffect(() => {
     api.get('/api/Articulos/distinct-familias').then(r => setFamilias(r.data ?? [])).catch(() => {});
-    api.get('/api/Articulos/distinct-generos').then(r => setGeneros(r.data ?? [])).catch(() => {});
   }, []);
+
+  // Cargar géneros filtrados por familia (o todos si no hay familia)
+  useEffect(() => {
+    const params: Record<string, string> = {};
+    if (familiaInput.trim()) params.familia = familiaInput.trim();
+    api.get('/api/Articulos/distinct-generos', { params })
+      .then(r => {
+        setGeneros(r.data ?? []);
+        // Si el género actual no está en la lista filtrada, limpiar
+        if (familiaInput.trim() && generoInput && !(r.data ?? []).includes(generoInput)) {
+          setGeneroInput('');
+        }
+      })
+      .catch(() => {});
+  }, [familiaInput]);
 
   const fetchPage = async (pageNum: number, skuFilter: string, familiaFilter: string, generoFilter: string, ps = pageSize) => {
     setIsLoading(true);

@@ -63,9 +63,9 @@ namespace WebApi.Controllers.Articulos
     }
 
     [HttpGet("distinct-generos")]
-    public IActionResult DistinctGeneros()
+    public IActionResult DistinctGeneros([FromQuery] string? familia = null)
     {
-      var generos = _repo.DistinctGeneros();
+      var generos = _repo.DistinctGeneros(familia);
       return Ok(generos);
     }
   }

@@ -148,15 +148,19 @@ ON DUPLICATE KEY UPDATE
                 .ToList();
     }
 
-    public IReadOnlyList<string> DistinctGeneros()
+    public IReadOnlyList<string> DistinctGeneros(string? familiaNombre = null)
     {
-      return _db.Articulos
+      var q = _db.Articulos
                 .AsNoTracking()
-                .Where(a => a.GeneroDescripcion != null && a.GeneroDescripcion != "")
-                .Select(a => a.GeneroDescripcion!)
-                .Distinct()
-                .OrderBy(g => g)
-                .ToList();
+                .Where(a => a.GeneroDescripcion != null && a.GeneroDescripcion != "");
+
+      if (!string.IsNullOrWhiteSpace(familiaNombre))
+        q = q.Where(a => a.FamiliaNombre == familiaNombre);
+
+      return q.Select(a => a.GeneroDescripcion!)
+              .Distinct()
+              .OrderBy(g => g)
+              .ToList();
     }
   }
 }
