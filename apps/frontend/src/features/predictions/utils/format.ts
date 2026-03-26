@@ -125,7 +125,8 @@ export function pickQuarterlyProjection(items: Prediccion[], preferModelo: strin
 
   const labels = Array.from(byQ.keys()).sort();
   const values = labels.map((lab) => byQ.get(lab)!.cantidadPredicha);
-  return { labels, values };
+  const rmseValues = labels.map((lab) => byQ.get(lab)!.rmse ?? null);
+  return { labels, values, rmseValues };
 }
 
 // Función para formatear números según las reglas especificadas

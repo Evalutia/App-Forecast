@@ -142,11 +142,11 @@ export default function DatosExtra() {
                     </thead>
                     <tbody>
                       <tr>
-                        <td>Fecha de la primera observación para predecir</td>
+                        <td>Fecha de la primera observación</td>
                         <td className="mono">{resumenSku.fechaPrimerObservacion ?? '—'}</td>
                       </tr>
                       <tr>
-                        <td>Fecha de la última observación para predecir</td>
+                        <td>Fecha de la última observación</td>
                         <td className="mono">{resumenSku.fechaUltimaObservacion ?? '—'}</td>
                       </tr>
                       <tr>

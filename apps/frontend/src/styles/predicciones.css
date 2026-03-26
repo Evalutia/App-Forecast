@@ -229,6 +229,12 @@
   margin: 0 auto;
 }
 
+/* Variante para un solo filtro: centrado con ancho acotado */
+.predicciones-filtros .filters-grid--single {
+  grid-template-columns: 1fr;
+  max-width: 400px;
+}
+
 .predicciones-filtros .form-row {
   display: flex;
   flex-direction: column;

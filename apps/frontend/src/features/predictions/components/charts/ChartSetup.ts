@@ -5,9 +5,11 @@ import {
   PointElement,
   LineElement,
   BarElement,
+  Filler,
   Tooltip,
   Legend,
 } from 'chart.js';
+import annotationPlugin from 'chartjs-plugin-annotation';
 
 ChartJS.register(
   CategoryScale,
@@ -15,6 +17,8 @@ ChartJS.register(
   PointElement,
   LineElement,
   BarElement,
+  Filler,
   Tooltip,
-  Legend
+  Legend,
+  annotationPlugin
 );

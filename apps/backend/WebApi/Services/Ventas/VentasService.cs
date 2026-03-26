@@ -61,11 +61,11 @@ namespace Services.Ventas
       if (take < 1) take = 1;
       if (take > 200) take = 200;
 
-      var todayDateOnly = DateOnly.FromDateTime(DateTime.Today);
-      var fechaDesde12Meses = todayDateOnly.AddMonths(-12);
+      // Usar los parámetros del controller (UTC) para coherencia con GetSkuResumen
+      var fechaDesde12Meses = fechaHasta.AddMonths(-12);
 
       var ventasFiltro = _repo.GetAllVentas()
-          .Where(v => v.Fecha >= fechaDesde12Meses && v.Fecha <= todayDateOnly && v.Cantidad > 0)
+          .Where(v => v.Fecha >= fechaDesde12Meses && v.Fecha <= fechaHasta && v.Cantidad > 0)
           .ToList();
 
       var ventasPorSkuList = ventasFiltro
@@ -93,7 +93,7 @@ namespace Services.Ventas
           .ToDictionary(
             g => g.Key,
             g => {
-                var closest = g.OrderBy(p => Math.Abs((p.FechaPredicha.ToDateTime(TimeOnly.MinValue) - todayDateOnly.ToDateTime(TimeOnly.MinValue)).TotalDays))
+                var closest = g.OrderBy(p => Math.Abs((p.FechaPredicha.ToDateTime(TimeOnly.MinValue) - fechaHasta.ToDateTime(TimeOnly.MinValue)).TotalDays))
                                .ThenBy(p => p.FechaPredicha)
                                .FirstOrDefault();
                 return closest?.CantidadPredicha;
@@ -320,12 +320,12 @@ namespace Services.Ventas
 
       var rankingRows = ventasFiltro
           .GroupBy(v => v.Sku)
-          .Select(g => new { Sku = g.Key, Total = (ulong)g.Sum(x => x.Cantidad) })
+          .Select(g => new { Sku = g.Key, Total = (ulong)g.Sum(x => (long)x.Cantidad) })
           .OrderByDescending(x => x.Total)
           .ThenBy(x => x.Sku)
           .ToList();
 
-      var totalSkus = _repo.GetAllVentas().Select(v => v.Sku).Distinct().Count();
+      var totalSkus = rankingRows.Count;
 
       int? rank = null;
       for (var i = 0; i < rankingRows.Count; i++)
