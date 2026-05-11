@@ -1,0 +1,109 @@
+/* ==========================================================================
+   /planilla — hoja de estilos específica
+   Sigue el mismo patrón visual que predicciones.css
+   ========================================================================== */
+
+.planilla-page {
+  min-height: 100dvh;
+  background: linear-gradient(135deg, var(--emerald-950), var(--emerald-900), var(--emerald-950));
+  background-attachment: fixed;
+  background-repeat: no-repeat;
+  background-size: cover;
+}
+
+.planilla-header {
+  width: 100%;
+  margin: 0;
+  padding: .75rem 1rem;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background: var(--white);
+  border-bottom: 1px solid rgba(0, 0, 0, .06);
+  border-radius: 0;
+  box-shadow: var(--shadow-strong);
+}
+
+.planilla-brand {
+  background: none;
+  border: 0;
+  border-radius: 0;
+  padding: 0;
+  color: var(--emerald-950);
+  font-family: 'Montserrat', sans-serif;
+  font-size: 1.25rem;
+  font-weight: 900;
+  letter-spacing: .18em;
+  text-transform: uppercase;
+  line-height: 1.05;
+  text-decoration: none;
+  cursor: pointer;
+}
+.planilla-brand:hover { color: var(--emerald-900); }
+
+.planilla-actions {
+  display: flex;
+  align-items: center;
+  gap: .5rem;
+}
+.planilla-actions :where(a, button) {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: .5rem;
+  padding: .375rem .75rem;
+  border-radius: .5rem;
+  background: rgba(2, 44, 34, .92);
+  border: 1px solid rgba(2, 44, 34, 1);
+  color: var(--white);
+  font-size: .85rem;
+  font-weight: 700;
+  text-decoration: none;
+  transition: background .15s ease, transform .06s ease, box-shadow .15s ease;
+  box-shadow: var(--shadow-soft-inset), 0 6px 14px rgba(0,0,0,.12);
+  cursor: pointer;
+}
+.planilla-actions :where(a, button):hover { background: var(--emerald-900); }
+.planilla-actions :where(a, button):active { transform: translateY(1px); }
+.planilla-actions :where(a[disabled], button:disabled) { opacity: .6; cursor: not-allowed; }
+
+.planilla-container {
+  width: 100%;
+  max-width: var(--content-max);
+  margin: 0 auto;
+  padding: 1.5rem 1rem;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 1rem;
+}
+.planilla-container .card {
+  width: 100%;
+  background: rgba(255,255,255,.96);
+  color: var(--emerald-950);
+  border: 1px solid var(--border);
+  border-radius: 1.5rem;
+  padding: 1rem;
+  box-shadow: var(--shadow);
+  backdrop-filter: blur(6px);
+}
+.planilla-container section.card {
+  width: 100%;
+  max-width: var(--content-max);
+  margin: 0 auto;
+}
+.planilla-container > .filters-card {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1rem;
+  align-items: flex-end;
+  width: 100%;
+  max-width: var(--content-max);
+  margin-left: auto;
+  margin-right: auto;
+}
+
+.planilla-filtros-placeholder {
+  display: flex;
+  gap: 1rem;
+}
