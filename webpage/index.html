@@ -2,1671 +2,938 @@
 <html lang="es">
 <head>
   <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
-  <title>Evalutia — Automatización inteligente & Predicción</title>
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;700;800&display=swap" rel="stylesheet">
-
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Evalutia — Predicción de ventas para PYMEs</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600&family=Syne:wght@700;800&display=swap" rel="stylesheet">
   <style>
-    :root{
-      --esmeralda-900: #023927;
-      --esmeralda-700: #046b3f;
-      --esmeralda-500: #34c48f;
-      --white: #ffffff;
-      --muted: #6c6c6c;
-      --card-shadow: 0 32px 80px rgba(2, 30, 20, 0.55);
-      --radius-lg: 18px;
-      --max-width: 1200px;
-      --fw-regular: 400;
-      --fw-semibold: 600;
-      --fw-bold: 800;
-      --navbar-height: 72px;
+    :root {
+      --green: #34c48f;
+      --green-dim: rgba(52,196,143,0.12);
+      --green-border: rgba(52,196,143,0.25);
+      --bg: #050e09;
+      --bg-card: rgba(255,255,255,0.04);
+      --border: rgba(255,255,255,0.08);
+      --text: #f0f5f2;
+      --muted: rgba(240,245,242,0.5);
+      --max: 1100px;
+    }
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    html { scroll-behavior: smooth; }
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: 'DM Sans', system-ui, sans-serif;
+      -webkit-font-smoothing: antialiased;
+      overflow-x: hidden;
+      line-height: 1.6;
     }
 
-    *{ box-sizing: border-box; }
-    html,body{
-      height:100%;
-      margin:0;
-      font-family:"Inter",system-ui,-apple-system,"Segoe UI",Roboto,Arial;
-      -webkit-font-smoothing:antialiased;
-      -moz-osx-font-smoothing:grayscale;
-      background: linear-gradient(135deg, #022c22 0%, #064e3b 50%, #022c22 100%);
-      color:var(--white);
-      -webkit-tap-highlight-color: transparent;
-      overflow-x:hidden;
-      scroll-behavior:smooth;
-
-      /* Empujar el contenido por debajo de la navbar + safe-area (iOS) */
-      padding-top: calc(var(--navbar-height) + env(safe-area-inset-top));
-      padding-top: calc(var(--navbar-height) + constant(safe-area-inset-top));
-      transition: padding-top .12s ease;
+    /* ── NAV ── */
+    nav {
+      position: fixed; top: 0; left: 0; right: 0; z-index: 100;
+      display: flex; align-items: center;
+      padding: 0 32px; height: 64px;
+      border-bottom: 1px solid var(--border);
+      background: rgba(5,14,9,0.85);
+      backdrop-filter: blur(20px);
     }
-    a{ color:inherit; text-decoration:none; outline-offset:4px; }
-
-    .bg-3d-canvas {
-      position:fixed;
-      inset:0;
-      z-index:0;
-      pointer-events:none;
+    .nav-logo {
+      display: flex; align-items: center; gap: 10px;
+      font-family: 'Syne', sans-serif; font-weight: 800; font-size: 18px;
+      color: var(--text); text-decoration: none;
     }
-
-    .particles-canvas {
-      position: fixed;
-      inset: 0;
-      z-index: 1;
-      pointer-events: none;
+    .nav-logo img {
+      width: 30px; height: 30px; border-radius: 7px;
+      background: #fff; padding: 4px; object-fit: contain;
     }
-
-    .navbar {
-      position: fixed;
-      top: 0;
-      left: 0;
-      right: 0;
-      z-index: 999;
-      background: rgba(2, 30, 20, 0.75);
-      backdrop-filter: blur(16px);
-      -webkit-backdrop-filter: blur(16px);
-      border-bottom: 1px solid rgba(255, 255, 255, 0.08);
-      display: flex;
-      align-items: center;
-      gap: 24px;
-      padding: 12px 28px;
+    .nav-links { margin-left: auto; display: flex; align-items: center; gap: 8px; }
+    .nav-links a {
+      color: var(--muted); text-decoration: none;
+      font-size: 14px; font-weight: 500;
+      padding: 8px 14px; border-radius: 8px;
+      transition: color .2s, background .2s;
+    }
+    .nav-links a:hover { color: var(--text); background: var(--bg-card); }
+    .nav-cta {
+      margin-left: 8px; padding: 9px 20px !important;
+      border-radius: 8px !important; border: 1px solid var(--green-border) !important;
+      background: var(--green-dim) !important; color: var(--green) !important;
+      font-weight: 600 !important; transition: background .2s, border-color .2s !important;
+    }
+    .nav-cta:hover {
+      background: rgba(52,196,143,0.2) !important;
+      border-color: rgba(52,196,143,0.5) !important; color: var(--green) !important;
     }
 
-    .navbar-logo-link {
-      display: flex;
-      align-items: center;
-      justify-content: center;
+    /* ── NEURAL CANVAS ── */
+    #neural-canvas {
+      position: fixed; inset: 0; z-index: 0;
+      pointer-events: none; opacity: 0;
+      transition: opacity 1.2s ease;
     }
+    #neural-canvas.loaded { opacity: 1; }
 
-    .navbar-logo {
-      width: 48px;
-      height: 48px;
-      object-fit: contain;
-      border-radius: 10px;
-      background: var(--white);
-      padding: 6px;
-      cursor: pointer;
-      flex-shrink: 0;
-      transition: transform .2s ease, box-shadow .2s ease;
-    }
-    .navbar-logo:hover {
-      transform: scale(1.05);
-      box-shadow: 0 4px 14px rgba(0, 0, 0, 0.3);
-    }
-
-    .navbar-title {
-      display: flex;
-      flex-direction: column;
-      line-height: 1.1;
-      flex-shrink: 0;
-    }
-    .navbar-title h1 {
-      margin: 0;
-      font-size: 18px;
-      font-weight: 800;
-      color: var(--white);
-      letter-spacing: -0.3px;
-    }
-    .navbar-title p {
-      margin: 2px 0 0;
-      font-size: 11px;
-      font-weight: 600;
-      color: rgba(255, 255, 255, 0.75);
-    }
-
-    .navbar-nav {
-      margin-left: auto;
-      display: flex;
-      gap: 10px;
-      align-items: center;
-    }
-    .navbar-nav a {
-      color: rgba(255, 255, 255, 0.92);
-      font-weight: 600;
-      padding: 8px 14px;
-      border-radius: 8px;
-      border: 1px solid rgba(255,255,255,0.12);
-      background: rgba(255,255,255,0.08);
-      transition: background .14s ease, transform .14s ease, box-shadow .14s ease;
-      font-size: 13px;
-    }
-    .navbar-nav a:hover {
-      background: rgba(255,255,255,0.15);
-      transform: translateY(-2px);
-      box-shadow: 0 8px 18px rgba(0,0,0,0.25);
-    }
-
-    .page {
-      position: relative;
-      z-index: 2;
-      max-width: var(--max-width);
-      margin: 0 auto 36px;
-      padding: 28px;
-    }
-
-    header.global-header { display: none; }
-
-    .logo { width:86px; height:86px; object-fit:contain; border-radius:14px; background:var(--white); padding:8px; box-shadow: 0 6px 22px rgba(0,0,0,0.22); flex-shrink:0; }
-    .global-title { display:flex; flex-direction:column; line-height:1; }
-    .site-title{ margin:0; font-size:30px; font-weight:800; color:var(--white); text-shadow:0 8px 28px rgba(0,0,0,0.52); letter-spacing:-0.5px; }
-    .site-sub{ margin:6px 0 0; color:rgba(255,255,255,0.92); font-weight:600; font-size:14px; }
-
-    nav.top-nav { margin-left:auto; display:flex; gap:12px; align-items:center; }
-    nav.top-nav a {
-      color:rgba(255,255,255,0.92);
-      font-weight:600;
-      padding:8px 12px;
-      border-radius:999px;
-      border:1px solid rgba(255,255,255,0.08);
-      background:rgba(0,0,0,0.12);
-      backdrop-filter: blur(18px);
-      -webkit-backdrop-filter: blur(18px);
-      transition:background .14s ease, transform .14s ease, box-shadow .14s ease;
-      font-size:13px;
-    }
-    nav.top-nav a:hover {
-      background:rgba(0,0,0,0.24);
-      transform:translateY(-2px);
-      box-shadow:0 12px 28px rgba(0,0,0,0.35);
-    }
-
+    /* ── HERO ── */
     .hero {
-      background: rgba(2, 30, 20, 0.35);
-      backdrop-filter: blur(28px) saturate(110%);
-      -webkit-backdrop-filter: blur(28px) saturate(110%);
-      color: var(--white);
-      border-radius: var(--radius-lg);
-      padding: 48px 60px;
-      display: flex;
-      flex-direction: column;
-      gap: 24px;
-      box-shadow: 0 24px 64px rgba(0, 0, 0, 0.4);
-      border: 1px solid rgba(255, 255, 255, 0.15);
-      max-width: 1300px;
-      margin: 0 auto;
+      min-height: 100svh; display: flex; flex-direction: column;
+      align-items: center; justify-content: center;
+      text-align: center; padding: 120px 24px 80px;
+      position: relative; overflow: hidden; z-index: 1;
     }
+    .hero::before {
+      content: ''; position: absolute; inset: 0;
+      background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.04'/%3E%3C/svg%3E");
+      pointer-events: none; z-index: 0;
+    }
+    .hero::after {
+      content: ''; position: absolute; top: 0; left: 50%;
+      transform: translateX(-50%); width: 800px; height: 500px;
+      background: radial-gradient(ellipse at center top, rgba(52,196,143,0.12) 0%, transparent 70%);
+      pointer-events: none; z-index: 0;
+    }
+    .hero-grid {
+      position: absolute; inset: 0;
+      background-image: linear-gradient(rgba(255,255,255,0.03) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,0.03) 1px, transparent 1px);
+      background-size: 60px 60px;
+      mask-image: radial-gradient(ellipse 80% 60% at 50% 0%, black 0%, transparent 100%);
+      -webkit-mask-image: radial-gradient(ellipse 80% 60% at 50% 0%, black 0%, transparent 100%);
+      z-index: 0;
+    }
+    .hero-content { position: relative; z-index: 1; max-width: 780px; }
+    .hero-badge {
+      display: inline-flex; align-items: center; gap: 8px;
+      padding: 6px 14px; border-radius: 999px;
+      border: 1px solid var(--green-border); background: var(--green-dim);
+      color: var(--green); font-size: 13px; font-weight: 500;
+      letter-spacing: 0.02em; margin-bottom: 32px;
+    }
+    .hero-badge::before {
+      content: ''; width: 6px; height: 6px; border-radius: 50%;
+      background: var(--green); animation: blink 2s ease infinite;
+    }
+    @keyframes blink { 0%,100%{opacity:1} 50%{opacity:0.3} }
+    h1 {
+      font-family: 'Syne', sans-serif;
+      font-size: clamp(40px, 7vw, 76px); font-weight: 800;
+      line-height: 1.05; letter-spacing: -0.03em; color: var(--text); margin-bottom: 24px;
+    }
+    h1 em { font-style: normal; color: var(--green); }
+    .hero-sub {
+      font-size: 18px; color: var(--muted);
+      max-width: 560px; margin: 0 auto 40px; line-height: 1.65;
+    }
+    .hero-actions {
+      display: flex; align-items: center; justify-content: center;
+      gap: 12px; flex-wrap: wrap;
+    }
+    .btn-primary {
+      display: inline-flex; align-items: center; gap: 8px;
+      padding: 14px 28px; border-radius: 10px;
+      background: var(--green); color: #050e09;
+      font-weight: 600; font-size: 15px; text-decoration: none;
+      border: none; cursor: pointer; transition: opacity .2s, transform .2s;
+    }
+    .btn-primary:hover { opacity: 0.88; transform: translateY(-1px); }
+    .btn-ghost {
+      display: inline-flex; align-items: center; gap: 8px;
+      padding: 14px 28px; border-radius: 10px;
+      background: transparent; color: var(--text);
+      font-weight: 500; font-size: 15px; text-decoration: none;
+      border: 1px solid var(--border); cursor: pointer;
+      transition: background .2s, border-color .2s;
+    }
+    .btn-ghost:hover { background: var(--bg-card); border-color: rgba(255,255,255,0.15); }
 
-    .hero .left { width: 100%; }
+    /* ── STATS ── */
+    .stats {
+      border-top: 1px solid var(--border); border-bottom: 1px solid var(--border);
+      padding: 48px 24px; position: relative; z-index: 1;
+      background: rgba(5,14,9,0.82); backdrop-filter: blur(2px);
+    }
+    .stats-inner {
+      max-width: var(--max); margin: 0 auto;
+      display: grid; grid-template-columns: repeat(3,1fr);
+      gap: 1px; background: var(--border);
+    }
+    .stat { background: var(--bg); padding: 32px 40px; text-align: center; }
+    .stat-num {
+      font-family: 'Syne', sans-serif; font-size: 44px; font-weight: 800;
+      color: var(--green); line-height: 1; margin-bottom: 8px;
+    }
+    .stat-label { font-size: 14px; color: var(--muted); line-height: 1.4; }
 
-    .hero-head {
-      display:flex;
-      flex-direction:column;
-      align-items:center;
-      gap:14px;
-      margin-bottom:8px;
-      text-align:center;
+    /* ── SECTIONS ── */
+    section {
+      max-width: var(--max); margin: 0 auto;
+      padding: 96px 24px; position: relative; z-index: 1;
     }
-    .hero h1 {
-      margin:0;
-      font-size:36px;
-      font-weight:800;
-      color:var(--white);
-      line-height:1.25;
-      letter-spacing:-0.6px;
-      text-align:center;
+    .section-tag {
+      font-size: 12px; font-weight: 600; letter-spacing: 0.12em;
+      text-transform: uppercase; color: var(--green); margin-bottom: 16px;
     }
+    h2 {
+      font-family: 'Syne', sans-serif;
+      font-size: clamp(28px, 4vw, 42px); font-weight: 800;
+      letter-spacing: -0.02em; line-height: 1.1; margin-bottom: 16px;
+    }
+    .section-lead { font-size: 17px; color: var(--muted); max-width: 500px; line-height: 1.65; }
 
-    .lead {
-      margin:12px 0 0;
-      color: rgba(255, 255, 255, 0.95);
-      font-size:16px;
-      line-height:1.7;
+    /* ── PROBLEM / SOLUTION ── */
+    .problem-solution {
+      display: grid; grid-template-columns: 1fr 1fr;
+      gap: 2px; border: 1px solid var(--border);
+      border-radius: 16px; overflow: hidden; margin-top: 56px;
     }
-    .lead strong{ color: rgba(52, 196, 143, 1); }
+    .ps-block { padding: 48px 40px; background: var(--bg-card); }
+    .ps-block:first-child { border-right: 1px solid var(--border); }
+    .ps-block h3 {
+      font-family: 'Syne', sans-serif; font-size: 20px;
+      font-weight: 700; margin-bottom: 16px;
+    }
+    .ps-block.problem h3 { color: rgba(255,100,80,0.9); }
+    .ps-block.solution h3 { color: var(--green); }
+    .ps-block p { font-size: 15px; color: var(--muted); line-height: 1.7; }
+    .ps-list { list-style: none; margin-top: 20px; display: flex; flex-direction: column; gap: 10px; }
+    .ps-list li { display: flex; align-items: flex-start; gap: 10px; font-size: 14px; color: var(--muted); }
+    .ps-list li::before { content:''; width:5px; height:5px; border-radius:50%; margin-top:8px; flex-shrink:0; }
+    .problem .ps-list li::before { background: rgba(255,100,80,0.7); }
+    .solution .ps-list li::before { background: var(--green); }
 
-    .hero-cta {
-      margin-top:20px;
-      display:flex;
-      gap:12px;
-      align-items:center;
-      flex-wrap:wrap;
+    /* ── FLIP CARDS ── */
+    .features-grid {
+      display: grid; grid-template-columns: repeat(3,1fr);
+      gap: 16px; margin-top: 56px;
     }
-    .btn {
-      display:inline-flex;
-      align-items:center;
-      gap:10px;
-      padding:12px 18px;
-      border-radius:999px;
-      font-weight:700;
-      cursor:pointer;
-      transition: transform .16s cubic-bezier(.19,.9,.24,1), box-shadow .16s ease, opacity .14s ease, background .16s ease;
-      text-decoration:none;
-      border:0;
-      font-size:14px;
-      letter-spacing:0.01em;
+    .flip-card { height: 220px; perspective: 1000px; cursor: pointer; }
+    .flip-card-inner {
+      position: relative; width: 100%; height: 100%;
+      transform-style: preserve-3d;
+      transition: transform 0.65s cubic-bezier(0.4, 0.2, 0.2, 1);
     }
-    .btn svg{ display:block; }
-    .btn.primary {
-      background: linear-gradient(90deg,var(--esmeralda-700),var(--esmeralda-500));
-      color:var(--white);
-      box-shadow: 0 18px 40px rgba(6,85,45,0.35);
+    .flip-card:hover .flip-card-inner,
+    .flip-card.flipped .flip-card-inner { transform: rotateY(180deg); }
+    .flip-front, .flip-back {
+      position: absolute; inset: 0; border-radius: 14px;
+      backface-visibility: hidden; -webkit-backface-visibility: hidden;
+      display: flex; flex-direction: column;
+      border: 1px solid var(--border);
     }
-    .btn.ghost {
-      background: rgba(255,255,255,0.75);
-      color: var(--esmeralda-700);
-      border:1px solid rgba(6,85,45,0.10);
-      padding:11px 16px;
-      font-weight:600;
-      box-shadow:0 10px 22px rgba(9,45,25,0.12);
+    .flip-front {
+      background: var(--bg-card);
+      align-items: center; justify-content: center;
+      text-align: center; padding: 32px 24px;
+      gap: 16px;
     }
-    .btn:focus { box-shadow: 0 0 0 4px rgba(52,196,143,0.30); outline:none; }
-    .btn:hover {
-      transform: translateY(-4px) translateZ(0);
-      box-shadow: 0 20px 45px rgba(0,0,0,0.35);
+    .flip-front:hover { border-color: var(--green-border); }
+    .flip-back {
+      background: rgba(52,196,143,0.08);
+      border-color: var(--green-border);
+      transform: rotateY(180deg);
+      padding: 28px 24px; justify-content: center; gap: 12px;
     }
+    .feature-icon {
+      width: 44px; height: 44px; border-radius: 10px;
+      background: var(--green-dim); border: 1px solid var(--green-border);
+      display: flex; align-items: center; justify-content: center; flex-shrink: 0;
+    }
+    .feature-icon svg {
+      width: 20px; height: 20px; stroke: var(--green);
+      fill: none; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round;
+    }
+    .flip-front h3 {
+      font-family: 'Syne', sans-serif; font-size: 15px;
+      font-weight: 700; color: var(--text); margin: 0;
+    }
+    .flip-front .flip-hint {
+      font-size: 11px; color: var(--muted); letter-spacing: 0.06em;
+      text-transform: uppercase; margin-top: auto;
+    }
+    .flip-back h3 {
+      font-family: 'Syne', sans-serif; font-size: 15px;
+      font-weight: 700; color: var(--green); margin: 0;
+    }
+    .flip-back p { font-size: 13px; color: var(--muted); line-height: 1.6; margin: 0; }
 
-    .contact {
-      margin: 20px auto 0;
-      color: rgba(255, 255, 255, 0.85);
-      font-size:14px;
-      display:flex;
-      justify-content: center;
-      width: 100%;
-      max-width: 500px;
-      gap:8px;
+    /* ── STEPS WITH ANIMATED PROGRESS LINE ── */
+    .steps-wrapper {
+      margin-top: 56px; position: relative;
+      display: grid; grid-template-columns: 48px 1fr; gap: 0;
     }
-    .contact a{
-      color: rgba(52, 196, 143, 1);
-      font-weight:700;
-      text-decoration:underline;
-      text-decoration-thickness:1px;
-      text-underline-offset:2px;
+    /* Left column: the vertical track */
+    .steps-track {
+      position: relative; display: flex; flex-direction: column; align-items: center;
     }
-
-    .side { display:none; }
-    .summary {
-      background: rgba(255,255,255,0.96);
-      backdrop-filter: blur(18px) saturate(135%);
-      -webkit-backdrop-filter: blur(18px) saturate(135%);
-      border-radius:14px;
-      padding:18px 18px 16px;
-      box-shadow: 0 18px 40px rgba(9,45,25,0.16);
-      color:#21382f;
-      font-size:14px;
-      min-height:120px;
-      display:flex;
-      flex-direction:column;
-      justify-content:space-between;
-      border:1px solid rgba(255,255,255,0.45);
+    .steps-track-line {
+      position: absolute; top: 24px; bottom: 24px; left: 50%;
+      transform: translateX(-50%); width: 2px;
+      background: var(--border); border-radius: 2px; overflow: hidden;
     }
-    .summary h4{ margin:0 0 10px; color:var(--esmeralda-700); font-size:16px; }
-    .summary p{ margin:0 0 12px; color:#2f3f36; }
-
-    .summary-grid{ display:flex; gap:12px; margin-top:8px; }
-    .summary-item{ flex:1; }
-    .summary-item strong{ color:#2a6a4b; display:block; margin-bottom:4px; font-size:13px; }
-
-    .side-note {
-      background: rgba(255,255,255,0.93);
-      backdrop-filter: blur(16px) saturate(140%);
-      -webkit-backdrop-filter: blur(16px) saturate(140%);
-      border-radius:14px;
-      padding:14px 16px;
-      color:#21382f;
-      box-shadow:0 16px 38px rgba(9,45,25,0.16);
-      font-size:13px;
-      border:1px solid rgba(255,255,255,0.42);
+    .steps-track-fill {
+      position: absolute; top: 0; left: 0; right: 0;
+      background: linear-gradient(to bottom, var(--green), rgba(52,196,143,0.3));
+      height: 0%; border-radius: 2px;
+      transition: height 0.6s cubic-bezier(0.4,0,0.2,1);
     }
-    .side-note strong{ color:#2a6a4b; }
-
-    .section-title {
-      margin:30px 4px 10px;
-      font-size:15px;
-      font-weight:600;
-      text-transform:uppercase;
-      letter-spacing:0.14em;
-      color:rgba(255,255,255,0.82);
-    }
-
-    .grid {
-      display:grid;
-      grid-template-columns:1fr;
-      gap:28px;
-      margin-top:10px;
-      margin-bottom:8px;
-    }
-    .feature {
-      background:rgba(255,255,255,0.94);
-      backdrop-filter: blur(20px) saturate(130%);
-      -webkit-backdrop-filter: blur(20px) saturate(130%);
-      color:#21382f;
-      border-radius:14px;
-      padding:26px 26px 24px;
-      box-shadow: 0 16px 38px rgba(9,45,25,0.14);
-      min-height:auto;
-      border:1px solid rgba(255,255,255,0.44);
-      position:relative;
-      overflow:hidden;
-      transition: transform 0.3s cubic-bezier(0.34, 1.56, 0.64, 1), box-shadow 0.3s ease, border-color 0.3s ease;
-      cursor: pointer;
-    }
-    .feature:hover {
-      transform: scale(1.12);
-      box-shadow: 0 32px 64px rgba(9,45,25,0.35);
-      border-color: rgba(52,196,143,0.5);
-    }
-
-    .feature-header {
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      cursor: pointer;
-    }
-
-    .feature-header h5 {
-      margin: 0;
-      font-size: 15px;
-      font-weight: 700;
-      flex: 1;
-    }
-
-    .feature-toggle {
-      display: inline-flex;
-      align-items: center;
-      justify-content: center;
-      width: 24px;
-      height: 24px;
-      border-radius: 50%;
-      background: rgba(52, 196, 143, 0.15);
-      color: var(--esmeralda-700);
-      font-weight: 700;
-      font-size: 18px;
-      transition: all 0.3s ease;
-      flex-shrink: 0;
-      margin-left: 12px;
-    }
-
-    .feature.expanded .feature-toggle {
-      background: rgba(52, 196, 143, 0.3);
-      transform: rotate(45deg);
-    }
-
-    .feature-content {
-      margin: 0;
-      color:#3b4a42;
-      font-size:15px;
-      line-height:1.6;
-      position:relative;
-      z-index:1;
-      max-height: 0;
-      overflow: hidden;
-      transition: max-height 0.4s ease, margin-top 0.4s ease;
-    }
-
-    .feature.expanded .feature-content {
-      max-height: 200px;
-      margin-top: 16px;
-    }
-    .feature::before{
-      content:"";
-      position:absolute;
-      inset:-80%;
-      background: radial-gradient(circle at 0 0, rgba(52,196,143,0.18), transparent 55%);
-      opacity:0;
-      transition:opacity .28s ease-out, transform .28s ease-out;
-      transform:translate3d(-12px,12px,0);
-      pointer-events:none;
-    }
-    .feature:hover::before{
-      opacity:1;
-      transform:translate3d(0,0,0);
-    }
-    .feature h5{
-      margin:0 0 12px;
-      color:var(--esmeralda-700);
-      font-size:17px;
-      font-weight:700;
-      text-align:center;
-    }
-    .feature p{
-      margin:0;
-      color:#3b4a42;
-      font-size:15px;
-      line-height:1.6;
-      position:relative;
-      z-index:1;
-    }
-
-    .explain {
-      margin-top:48px;
-      display:flex;
-      flex-direction:column;
-      gap:24px;
-      align-items:center;
-    }
-
-    .steps-grid {
-      display: grid;
-      grid-template-columns: repeat(2, minmax(0, 1fr));
-      gap: 24px;
-      width: 100%;
-      max-width: 1000px;
-      margin: 0 auto;
-    }
-
-    .step {
-      background: rgba(255, 255, 255, 0.08);
-      backdrop-filter: blur(16px) saturate(110%);
-      -webkit-backdrop-filter: blur(16px) saturate(110%);
-      border: 1px solid rgba(255, 255, 255, 0.15);
-      border-radius: 14px;
-      padding: 28px 24px;
-      color: var(--white);
+    /* Right column: steps */
+    .steps-content { display: flex; flex-direction: column; }
+    .step-row {
+      display: flex; gap: 0; align-items: stretch;
       position: relative;
-      overflow: hidden;
-      transition: all 0.3s ease;
     }
-
-    .step:hover {
-      background: rgba(255, 255, 255, 0.12);
-      border-color: rgba(52, 196, 143, 0.3);
-      transform: translateY(-4px);
+    /* Dot on the track for each step */
+    .step-dot-col {
+      display: flex; flex-direction: column; align-items: center;
+      width: 48px; flex-shrink: 0; position: relative; z-index: 1;
     }
+    .step-dot {
+      width: 14px; height: 14px; border-radius: 50%;
+      border: 2px solid var(--border); background: var(--bg);
+      margin-top: 36px; flex-shrink: 0;
+      transition: border-color 0.4s ease, background 0.4s ease, box-shadow 0.4s ease;
+    }
+    .step-dot.active {
+      border-color: var(--green); background: var(--green);
+      box-shadow: 0 0 12px rgba(52,196,143,0.5);
+    }
+    .step-body-wrap {
+      flex: 1; padding: 28px 0 28px 24px;
+      border-bottom: 1px solid var(--border);
+      transition: padding-left 0.3s ease;
+    }
+    .step-row:last-child .step-body-wrap { border-bottom: none; }
+    .step-num-label {
+      font-size: 11px; font-weight: 600; letter-spacing: 0.1em;
+      text-transform: uppercase; color: var(--green); margin-bottom: 6px; opacity: 0.7;
+    }
+    .step-body-wrap h3 {
+      font-family: 'Syne', sans-serif; font-size: 19px;
+      font-weight: 700; margin-bottom: 8px; color: var(--text);
+    }
+    .step-body-wrap p { font-size: 15px; color: var(--muted); line-height: 1.65; max-width: 580px; }
 
-    .step::before {
-      content: "";
-      position: absolute;
-      inset: 0;
-      background: radial-gradient(circle at 0 0, rgba(52, 196, 143, 0.1), transparent 70%);
-      opacity: 0;
-      transition: opacity 0.3s ease;
+    /* ── CTA BAND ── */
+    .cta-band {
+      margin: 0 24px; border-radius: 20px;
+      border: 1px solid var(--green-border);
+      background: linear-gradient(135deg, rgba(52,196,143,0.07) 0%, rgba(52,196,143,0.02) 100%);
+      padding: 80px 48px; text-align: center;
+      position: relative; overflow: hidden; z-index: 1;
+    }
+    .cta-band::before {
+      content: ''; position: absolute; top: -80px; left: 50%;
+      transform: translateX(-50%); width: 500px; height: 300px;
+      background: radial-gradient(ellipse, rgba(52,196,143,0.15) 0%, transparent 70%);
       pointer-events: none;
     }
+    .cta-band h2 { position: relative; margin-bottom: 16px; }
+    .cta-band p { color: var(--muted); font-size: 17px; max-width: 480px; margin: 0 auto 36px; }
 
-    .step:hover::before {
-      opacity: 1;
+    /* ── MODAL (cinematic) ── */
+    .modal-bg {
+      position: fixed; inset: 0; z-index: 200;
+      display: none; align-items: center; justify-content: center; padding: 24px;
+      /* the background blurs in */
+      background: transparent;
+      backdrop-filter: blur(0px);
+      -webkit-backdrop-filter: blur(0px);
+      transition: backdrop-filter 0.4s ease, background 0.4s ease;
     }
-
-    .step-number {
-      width: 48px;
-      height: 48px;
-      border-radius: 12px;
-      background: rgba(52, 196, 143, 0.15);
-      border: 2px solid rgba(52, 196, 143, 0.4);
+    .modal-bg.open {
       display: flex;
-      align-items: center;
-      justify-content: center;
-      font-size: 24px;
-      font-weight: 700;
-      color: var(--esmeralda-500);
-      flex-shrink: 0;
+      background: rgba(0,0,0,0.65);
+      backdrop-filter: blur(12px);
+      -webkit-backdrop-filter: blur(12px);
+      animation: modal-bg-in 0.4s ease forwards;
+    }
+    @keyframes modal-bg-in {
+      from { background: rgba(0,0,0,0); backdrop-filter: blur(0px); }
+      to   { background: rgba(0,0,0,0.65); backdrop-filter: blur(12px); }
+    }
+    .modal {
+      background: #0a1c11;
+      border: 1px solid rgba(52,196,143,0.2);
+      border-radius: 20px; padding: 48px;
+      width: 100%; max-width: 500px;
       position: relative;
-      z-index: 1;
+      /* cinematic entrance */
+      animation: modal-in 0.5s cubic-bezier(0.34,1.56,0.64,1) forwards;
+      transform-origin: center bottom;
     }
-
-    .step-header {
-      display: flex;
-      align-items: center;
-      gap: 14px;
-      margin-bottom: 16px;
+    @keyframes modal-in {
+      from { opacity:0; transform: scale(0.88) translateY(32px); }
+      to   { opacity:1; transform: scale(1) translateY(0); }
     }
-
-    .step h4 {
-      margin: 0;
-      font-size: 18px;
-      font-weight: 700;
-      color: var(--white);
-      position: relative;
-      z-index: 1;
-      display: block;
-    }
-
-    .step h4 {
-      animation: pulse-subtle 2.5s ease-in-out infinite;
-    }
-
-    @keyframes pulse-subtle {
-      0%, 100% {
-        color: var(--white);
-        text-shadow: 0 0 0 rgba(52, 196, 143, 0);
-      }
-      50% {
-        color: rgba(255, 255, 255, 0.95);
-        text-shadow: 0 0 12px rgba(52, 196, 143, 0.4);
-      }
-    }
-
-    .step p {
-      margin: 0;
-      color: rgba(255, 255, 255, 0.85);
-      font-size: 14px;
-      line-height: 1.6;
-      position: relative;
-      z-index: 1;
-    }
-
-    .step.reveal-on-scroll {
-      opacity: 0;
-      transform: scale(0.85) translate3d(0, 20px, 0);
-      filter: blur(10px);
-      transition:
-        opacity 0.7s ease-out,
-        transform 0.7s cubic-bezier(0.34, 1.56, 0.64, 1),
-        filter 0.7s ease-out;
-      transition-delay: calc(0.12s * var(--step-delay));
-      will-change: opacity, transform, filter;
-    }
-
-    .step.reveal-on-scroll.is-visible {
-      opacity: 1;
-      transform: scale(1) translate3d(0, 0, 0);
-      filter: blur(0);
-    }
-
-    .bullets{
-      margin:12px 0 0;
-      display:grid;
-      gap:12px;
-    }
-    .bullet {
-      display:flex;
-      gap:12px;
-      align-items:flex-start;
-    }
-    .dot{
-      width:12px;
-      height:12px;
-      border-radius:3px;
-      background:var(--esmeralda-700);
-      margin-top:6px;
-      flex-shrink:0;
-      box-shadow:0 0 0 3px rgba(52,196,143,0.25);
-    }
-    .bullet p{
-      margin:0;
-      color:#3b4a42;
-      font-size:15px;
-      line-height:1.5;
-    }
-
-    .reveal-on-scroll{
-      opacity:0;
-      transform: translate3d(0,28px,0);
-      filter: blur(18px);
-      transition:
-        opacity .8s ease-out,
-        transform .8s ease-out,
-        filter .8s ease-out;
-      will-change: opacity, transform, filter;
-    }
-    .reveal-on-scroll.is-visible{
-      opacity:1;
-      transform: translate3d(0,0,0);
-      filter: blur(0);
-    }
-
-    .outro {
-      margin-top: 40px;
-      display: flex;
-      justify-content: center;
-    }
-
-    .outro-box {
-      background: rgba(255, 255, 255, 0.12);
-      backdrop-filter: blur(18px) saturate(135%);
-      -webkit-backdrop-filter: blur(18px) saturate(135%);
-      border-radius: 16px;
-      padding: 32px 32px 28px;
-      box-shadow: 0 18px 40px rgba(9, 45, 25, 0.16);
-      color: var(--white);
-      max-width: 900px;
-      border: 1px solid rgba(255, 255, 255, 0.45);
-    }
-
-    .outro-box h2 {
-      margin: 0 0 12px;
-      color: var(--esmeralda-500);
-      font-size: 22px;
-      font-weight: 700;
-    }
-
-    .outro-box p {
-      margin: 0 0 18px;
-      color: var(--white);
-      font-size: 15px;
-      line-height: 1.6;
-    }
-    .outro-box p strong {
-      color: var(--esmeralda-500);
-    }
-
-    .outro-grid {
-      display: flex;
-      gap: 20px;
-      margin-bottom: 18px;
-      position: relative;
-    }
-
-    .outro-item {
-      flex: 1;
-    }
-
-    .outro-item:first-child::after {
-      content: "";
-      position: absolute;
-      right: 50%;
-      top: 0;
-      bottom: 0;
-      width: 2px;
-      background: rgba(52, 196, 143, 0.35);
-      margin-right: 10px;
-    }
-
-    .outro-item strong {
-      color: var(--esmeralda-500);
-      display: block;
+    /* Fields animate in cascade */
+    .modal h2 {
+      font-family: 'Syne', sans-serif; font-size: 26px;
       margin-bottom: 6px;
-      font-size: 14px;
+      animation: field-in 0.5s 0.1s ease both;
     }
+    .modal p.modal-sub {
+      color: var(--muted); font-size: 14px; margin-bottom: 32px;
+      animation: field-in 0.5s 0.15s ease both;
+    }
+    .form-field { margin-bottom: 16px; }
+    .form-field:nth-child(1) { animation: field-in 0.5s 0.2s ease both; }
+    .form-field:nth-child(2) { animation: field-in 0.5s 0.28s ease both; }
+    .form-field:nth-child(3) { animation: field-in 0.5s 0.36s ease both; }
+    #recaptcha-container    { animation: field-in 0.5s 0.44s ease both; }
+    .modal .btn-primary     { animation: field-in 0.5s 0.5s ease both; }
+    @keyframes field-in {
+      from { opacity:0; transform: translateY(14px); }
+      to   { opacity:1; transform: translateY(0); }
+    }
+    /* Re-trigger animation on reopen by toggling class */
+    .modal-bg:not(.open) .modal { animation: none; }
+    .modal-close {
+      position: absolute; top: 18px; right: 18px;
+      background: rgba(255,255,255,0.06); border: 1px solid var(--border);
+      width: 32px; height: 32px; border-radius: 8px;
+      display: flex; align-items: center; justify-content: center;
+      color: var(--muted); font-size: 18px; cursor: pointer;
+      transition: background .2s, color .2s;
+    }
+    .modal-close:hover { background: rgba(255,255,255,0.12); color: var(--text); }
+    .form-field label {
+      display: block; font-size: 13px; font-weight: 500;
+      color: var(--muted); margin-bottom: 6px;
+    }
+    .form-field input, .form-field textarea {
+      width: 100%; padding: 12px 14px;
+      background: rgba(255,255,255,0.05);
+      border: 1px solid var(--border); border-radius: 10px;
+      color: var(--text); font-size: 14px; font-family: inherit;
+      outline: none; transition: border-color .2s, background .2s;
+    }
+    .form-field input:focus, .form-field textarea:focus {
+      border-color: var(--green-border);
+      background: rgba(52,196,143,0.04);
+    }
+    .form-field textarea { min-height: 110px; resize: vertical; }
+    #recaptcha-container { display:flex; justify-content:center; margin: 8px 0 16px; }
 
-    .outro-item div {
-      color: var(--white);
-      font-size: 13px;
-      line-height: 1.5;
+    /* ── FOOTER ── */
+    footer {
+      border-top: 1px solid var(--border); padding: 32px 24px;
+      display: flex; align-items: center; justify-content: space-between;
+      max-width: var(--max); margin: 0 auto;
+      gap: 16px; flex-wrap: wrap; position: relative; z-index: 1;
     }
+    .footer-brand { font-family: 'Syne', sans-serif; font-weight: 700; font-size: 16px; }
+    footer a { color: var(--muted); text-decoration: none; font-size: 13px; transition: color .2s; }
+    footer a:hover { color: var(--text); }
+    footer p { color: var(--muted); font-size: 13px; }
 
-    .outro-note {
-      background: rgba(52, 196, 143, 0.12);
-      border-left: 3px solid var(--esmeralda-500);
-      border-radius: 8px;
-      padding: 14px 16px;
-      color: var(--white);
-    }
+    /* ── REVEAL ── */
+    .reveal { opacity:0; transform:translateY(24px); transition: opacity .7s ease, transform .7s ease; }
+    .reveal.visible { opacity:1; transform:none; }
 
-    .outro-note strong {
-      color: var(--esmeralda-500);
-      display: block;
-      margin-bottom: 6px;
-      font-size: 14px;
+    /* ── RESPONSIVE ── */
+    @media (max-width: 768px) {
+      nav { padding: 0 20px; }
+      .nav-links a:not(.nav-cta) { display: none; }
+      .stats-inner { grid-template-columns: 1fr; }
+      .stat { padding: 24px; }
+      .problem-solution { grid-template-columns: 1fr; }
+      .ps-block:first-child { border-right: none; border-bottom: 1px solid var(--border); }
+      .ps-block { padding: 32px 24px; }
+      .features-grid { grid-template-columns: 1fr 1fr; gap: 12px; }
+      .flip-card { height: 190px; }
+      .cta-band { padding: 48px 24px; margin: 0 12px; }
+      footer { flex-direction: column; text-align: center; }
+      .modal { padding: 32px 24px; }
     }
-
-    .outro-note div {
-      color: var(--white);
-      font-size: 13px;
-      line-height: 1.5;
-    }
-
-    .contact-btn {
-      background: linear-gradient(135deg, var(--esmeralda-500), var(--esmeralda-600));
-      color: var(--white);
-      border: 1px solid rgba(52, 196, 143, 0.5);
-      padding: 12px 24px;
-      border-radius: 8px;
-      font-size: 15px;
-      font-weight: 600;
-      cursor: pointer;
-      transition: all 0.3s ease;
-      box-shadow: 0 8px 24px rgba(52, 196, 143, 0.2);
-    }
-
-    .contact-btn:hover {
-      transform: translateY(-2px);
-      box-shadow: 0 12px 32px rgba(52, 196, 143, 0.35);
-      background: linear-gradient(135deg, var(--esmeralda-600), var(--esmeralda-700));
-    }
-
-    .contact-modal {
-      position: fixed;
-      top: 0;
-      left: 0;
-      width: 100%;
-      height: 100%;
-      background: rgba(0, 0, 0, 0.65);
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      z-index: 1000;
-      backdrop-filter: blur(4px);
-      -webkit-backdrop-filter: blur(4px);
-      animation: fadeIn 0.3s ease;
-    }
-
-    @keyframes fadeIn {
-      from { opacity: 0; }
-      to { opacity: 1; }
-    }
-
-    .contact-modal-content {
-      background: rgba(255, 255, 255, 0.98);
-      backdrop-filter: blur(20px) saturate(140%);
-      -webkit-backdrop-filter: blur(20px) saturate(140%);
-      border-radius: 16px;
-      padding: 40px;
-      max-width: 500px;
-      width: 90%;
-      max-height: 85vh;
-      overflow-y: auto;
-      box-shadow: 0 32px 64px rgba(0, 0, 0, 0.35);
-      border: 1px solid rgba(255, 255, 255, 0.5);
-      position: relative;
-      animation: slideUp 0.3s ease;
-    }
-
-    @keyframes slideUp {
-      from {
-        transform: translateY(40px);
-        opacity: 0;
-      }
-      to {
-        transform: translateY(0);
-        opacity: 1;
-      }
-    }
-
-    .close-modal {
-      position: absolute;
-      top: 16px;
-      right: 16px;
-      background: none;
-      border: none;
-      font-size: 28px;
-      color: #666;
-      cursor: pointer;
-      transition: color 0.2s ease;
-      padding: 0;
-      width: 32px;
-      height: 32px;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-    }
-
-    .close-modal:hover {
-      color: var(--esmeralda-700);
-    }
-
-    .contact-modal-content h2 {
-      margin: 0 0 24px;
-      color: var(--esmeralda-700);
-      font-size: 28px;
-      font-weight: 700;
-    }
-
-    .contact-form {
-      display: flex;
-      flex-direction: column;
-      gap: 20px;
-    }
-
-    .form-group {
-      display: flex;
-      flex-direction: column;
-      gap: 8px;
-    }
-
-    .form-group label {
-      color: #2b3b33;
-      font-weight: 600;
-      font-size: 14px;
-    }
-
-    .form-group input,
-    .form-group textarea {
-      padding: 12px 14px;
-      border: 1px solid rgba(52, 196, 143, 0.3);
-      border-radius: 8px;
-      font-size: 14px;
-      color: #21382f;
-      transition: all 0.3s ease;
-      font-family: inherit;
-    }
-
-    .form-group input:focus,
-    .form-group textarea:focus {
-      outline: none;
-      border-color: var(--esmeralda-500);
-      box-shadow: 0 0 0 3px rgba(52, 196, 143, 0.1);
-      background: rgba(52, 196, 143, 0.02);
-    }
-
-    .form-group textarea {
-      resize: vertical;
-      min-height: 120px;
-    }
-
-    #recaptcha-container {
-      display: flex;
-      justify-content: center;
-      padding: 10px 0;
-    }
-
-    .submit-btn {
-      background: linear-gradient(135deg, #34c48f, #2ba570);
-      color: var(--white);
-      border: none;
-      padding: 14px 28px;
-      border-radius: 8px;
-      font-size: 16px;
-      font-weight: 700;
-      cursor: pointer;
-      transition: all 0.3s ease;
-      box-shadow: 0 8px 24px rgba(52, 196, 143, 0.3);
-      width: 100%;
-    }
-
-    .submit-btn:hover {
-      transform: translateY(-2px);
-      box-shadow: 0 12px 32px rgba(52, 196, 143, 0.5);
-      background: linear-gradient(135deg, #2ba570, #1f8a5a);
-    }
-
-    .submit-btn:active {
-      transform: translateY(0);
-    }
-
-    .submit-btn:disabled {
-      opacity: 0.7;
-      cursor: not-allowed;
-    }
-
-    .form-note {
-      margin: 0;
-      color: #999;
-      font-size: 12px;
-      text-align: center;
-    }
-
-    .form-status {
-      text-align: center;
-      padding: 12px;
-      border-radius: 8px;
-      font-size: 14px;
-      margin-top: 8px;
-      display: none;
-    }
-
-    .form-status.success {
-      background: rgba(52, 196, 143, 0.15);
-      color: #046b3f;
-      display: block;
-      border: 1px solid rgba(52, 196, 143, 0.3);
-    }
-
-    .form-status.error {
-      background: rgba(239, 68, 68, 0.15);
-      color: #991b1b;
-      display: block;
-      border: 1px solid rgba(239, 68, 68, 0.3);
-    }
-
-    footer{
-      margin-top:40px;
-      text-align:center;
-      color:rgba(255,255,255,0.9);
-      font-size:14px;
-    }
-
-    .muted { color:var(--muted); font-weight:500; }
-    .sr-only {
-      position:absolute;
-      left:-10000px;
-      top:auto;
-      width:1px;
-      height:1px;
-      overflow:hidden;
-    }
-
-    @media (max-width:1080px){
-      .grid{ grid-template-columns:repeat(2, minmax(0,1fr)); }
-      .hero{ padding:36px 24px; }
-      .hero h1{ font-size:26px; }
-      nav.top-nav{ display:none; }
-    }
-    @media (max-width:768px){
-      .steps-grid{ grid-template-columns:1fr; }
-    }
-    @media (max-width:640px){
-      .grid{ grid-template-columns:1fr; }
-      .page{ padding:18px; margin:0 auto 26px; }
-      .site-title{ font-size:22px; }
-      .lead{ font-size:15px; }
-      .summary{ padding:14px 14px 13px; }
-      .feature{ padding:16px; min-height:unset; }
-      .hero{ padding:24px 18px; }
-      .hero-head{ flex-direction:column; }
-      .contact{ align-items: center; max-width: 100%; padding: 0 16px; }
-      .steps-grid{ grid-template-columns:1fr; }
-      .main-cta-button { font-size: 1rem !important; padding: 12px 28px !important; }
+    @media (max-width: 480px) {
+      .features-grid { grid-template-columns: 1fr; }
+      .flip-card { height: auto; min-height: 160px; }
     }
   </style>
 </head>
 <body>
-  <nav class="navbar" role="navigation" aria-label="Navegación principal">
-    <a href="#" class="navbar-logo-link" title="Ir al inicio">
-      <img class="navbar-logo" src="assets/logo.png" alt="Logo Evalutia" onerror="this.onerror=null; this.src='logo.png';">
-    </a>
-    <div class="navbar-title">
-      <h1>Evalutia</h1>
-      <p>Automatización & Predicción</p>
-    </div>
-    <div class="navbar-nav" aria-label="Navegación rápida"></div>
-  </nav>
 
-  <div class="page" role="main">
-    <div class="app-cta-container" style="text-align: center; margin: 8px 0 36px; padding: 0 20px;">
-      <a href="https://app.evalutia.net" class="main-cta-button" style="
-        display: inline-block; 
-        background: #023927; 
-        color: white; 
-        padding: 16px 40px; 
-        border-radius: 50px; 
-        font-size: 1.4rem; 
-        font-weight: 600; 
-        text-decoration: none; 
-        transition: all 0.3s ease; 
-        border: 2px solid var(--esmeralda-500); 
-        box-shadow: 0 0 15px rgba(52, 196, 143, 0.5);
-        position: relative;
-        overflow: hidden;
-        animation: pulse 2s infinite;
-        z-index: 2;
-      " onmouseover="this.style.boxShadow='0 0 25px rgba(52, 196, 143, 0.8)'; this.style.transform='translateY(-3px)';" onmouseout="this.style.boxShadow='0 0 15px rgba(52, 196, 143, 0.5)'; this.style.transform='translateY(0)';">
-        <span style="position: relative; z-index: 2;">Abrir aplicación</span>
-        <span style="
-          position: absolute;
-          top: -50%;
-          left: -50%;
-          width: 200%;
-          height: 200%;
-          background: linear-gradient(
-            to bottom right,
-            rgba(255, 255, 255, 0) 0%,
-            rgba(255, 255, 255, 0.15) 50%,
-            rgba(255, 255, 255, 0) 100%
-          );
-          transform: rotate(30deg);
-          animation: shine 3s infinite;
-          z-index: 1;
-        "></span>
+<canvas id="neural-canvas"></canvas>
+
+<!-- NAV -->
+<nav>
+  <a href="#" class="nav-logo">
+    <img src="assets/logo.png" alt="Evalutia" onerror="this.style.display='none'">
+    Evalutia
+  </a>
+  <div class="nav-links">
+    <a href="#como-funciona">Cómo funciona</a>
+    <a href="#caracteristicas">Características</a>
+    <a href="https://app.evalutia.net" class="nav-cta">Abrir app →</a>
+  </div>
+</nav>
+
+<!-- HERO -->
+<div class="hero">
+  <div class="hero-grid"></div>
+  <div class="hero-content">
+    <div class="hero-badge">Predicción con machine learning</div>
+    <h1>Vendé más.<br>Comprá <em>exactamente</em> lo que necesitás.</h1>
+    <p class="hero-sub">Evalutia predice cuánto va a vender cada producto y cuándo tenés que reponer. Sin hojas de cálculo, sin adivinanzas.</p>
+    <div class="hero-actions">
+      <a href="https://app.evalutia.net" class="btn-primary">
+        Abrir aplicación
+        <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M3 8h10M9 4l4 4-4 4" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
       </a>
-      <style>
-        @keyframes pulse {
-          0% { transform: scale(1); }
-          50% { transform: scale(1.03); }
-          100% { transform: scale(1); }
-        }
-        @keyframes shine {
-          0% { left: -100%; }
-          20% { left: 100%; }
-          100% { left: 100%; }
-        }
-      </style>
+      <button class="btn-ghost" id="open-modal">Pedir una demo</button>
     </div>
+  </div>
+</div>
 
-    <section class="hero reveal-on-scroll" role="region" aria-labelledby="hero-title">
-      <div class="left">
-        <div class="hero-head" aria-hidden="false">
-          <h1 id="hero-title">Evita faltantes y reduce costos<br>Predicción de ventas para PYMEs</h1>
+<!-- STATS -->
+<div class="stats">
+  <div class="stats-inner">
+    <div class="stat reveal">
+      <div class="stat-num">~60%</div>
+      <div class="stat-label">reducción de faltantes en 3 meses</div>
+    </div>
+    <div class="stat reveal">
+      <div class="stat-num">~18%</div>
+      <div class="stat-label">menos exceso de stock acumulado</div>
+    </div>
+    <div class="stat reveal">
+      <div class="stat-num">+12%</div>
+      <div class="stat-label">de rentabilidad sobre el inventario</div>
+    </div>
+  </div>
+</div>
+
+<!-- PROBLEMA / SOLUCIÓN -->
+<section>
+  <p class="section-tag reveal">El problema</p>
+  <h2 class="reveal">La mayoría de las PYMEs<br>compra a ciegas</h2>
+  <p class="section-lead reveal">Sin previsión sistemática, cada decisión de compra depende del instinto. El resultado es siempre el mismo.</p>
+  <div class="problem-solution reveal">
+    <div class="ps-block problem">
+      <h3>Sin Evalutia</h3>
+      <p>La gestión de stock manual genera pérdidas silenciosas que se acumulan mes a mes.</p>
+      <ul class="ps-list">
+        <li>Faltantes que hacen perder ventas</li>
+        <li>Exceso de stock que inmoviliza capital</li>
+        <li>Compras urgentes con menor margen</li>
+        <li>Decisiones basadas en intuición, no en datos</li>
+      </ul>
+    </div>
+    <div class="ps-block solution">
+      <h3>Con Evalutia</h3>
+      <p>Predicción automática por producto. Reportes listos para ejecutar el mismo día.</p>
+      <ul class="ps-list">
+        <li>Lista de pedido recomendada por artículo</li>
+        <li>Calendario de reabastecimiento</li>
+        <li>Alertas de riesgo por producto</li>
+        <li>Acompañamiento humano para implementarlo</li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<!-- CARACTERÍSTICAS — FLIP CARDS -->
+<section id="caracteristicas" style="padding-top:0">
+  <p class="section-tag reveal">Características</p>
+  <h2 class="reveal">Todo lo que necesitás,<br>nada que no usás</h2>
+  <p class="section-lead reveal">Pasá el mouse sobre cada tarjeta para ver los detalles.</p>
+
+  <div class="features-grid reveal">
+
+    <div class="flip-card" tabindex="0" aria-label="Integración flexible">
+      <div class="flip-card-inner">
+        <div class="flip-front">
+          <div class="feature-icon"><svg viewBox="0 0 24 24"><path d="M9 17H7a5 5 0 010-10h2M15 7h2a5 5 0 010 10h-2M8 12h8"/></svg></div>
+          <h3>Integración flexible</h3>
+          <span class="flip-hint">ver más →</span>
         </div>
-
-        <p id="hero-lead" class="lead">
-          Muchos comercios no proyectan compras de forma sistemática: eso genera faltantes, ventas perdidas y exceso de stock.
-          <strong>Evalutia</strong> transforma tus ventas en decisiones concretas: te indica <strong>cuánto venderá cada producto, cuándo reponer y cuánto pedir</strong> para optimizar caja y evitar rupturas.
-          Recibís reportes listos (lista de pedido recomendada por producto, calendario de reabastecimiento, informe de riesgo por producto) y acompañamiento humano para implementarlo.
-        </p>
-
-        <div class="contact" aria-hidden="false">
-          <button id="contact-btn" type="button" class="contact-btn" title="Abrir formulario de contacto">Contacto: Demos personalizadas y asesoramiento</button>
+        <div class="flip-back">
+          <h3>Integración flexible</h3>
+          <p>Upload de CSV, API REST o asistencia manual de nuestro equipo. Funciona con tu sistema actual sin cambiar nada en tu operación.</p>
         </div>
-      </div>
-
-      <aside class="side" role="complementary" aria-labelledby="side-title">
-        <div class="summary">
-          <div>
-            <h4 id="side-title">En pocas palabras</h4>
-            <p><strong>Evalutia</strong> predice futuras ventas y te indica: cuándo comprar, cuánto producir y cómo evitar faltantes o sobrantes. Todo pensado para operaciones reales.</p>
-          </div>
-
-          <div class="summary-grid" aria-hidden="false">
-            <div class="summary-item" aria-hidden="false">
-              <strong>Entregas</strong>
-              <div style="color:#3b4a42; font-size:13px;">Predicciones periódicas y reportes operativos, listos para ejecutar.</div>
-            </div>
-            <div class="summary-item" aria-hidden="false">
-              <strong>Seguridad</strong> 
-              <div style="color:#3b4a42; font-size:13px;">Acceso seguro con cuentas y permisos, integraciones administrativas.</div>
-            </div>
-          </div>
-        </div>
-        <div class="side-note">
-          <strong>¿Por qué Evalutia?</strong>
-          <div style="margin-top:6px; color:#3b4a42; line-height:1.4;">
-            Modelos combinados en producción, integración mediante CSV o API, y soporte humano para poner la predicción en acción dentro de tu operación diaria.
-          </div>
-        </div>
-      </aside>
-    </section>
-
-    <div id="contact-modal" class="contact-modal" style="display:none;">
-      <div class="contact-modal-content">
-        <button id="close-contact-modal" class="close-modal" title="Cerrar formulario">&times;</button>
-        <h2>Contactanos</h2>
-        <form id="contact-form" class="contact-form">
-          <div class="form-group">
-            <label for="contact-email">Tu correo electrónico *</label>
-            <input type="email" id="contact-email" name="email" required placeholder="tu.email@ejemplo.com">
-          </div>
-          
-          <div class="form-group">
-            <label for="contact-subject">Asunto (opcional)</label>
-            <input type="text" id="contact-subject" name="subject" placeholder="Ej: Consulta sobre demo">
-          </div>
-          
-          <div class="form-group">
-            <label for="contact-message">Descripción *</label>
-            <textarea id="contact-message" name="message" required placeholder="Cuéntanos más sobre tu consulta..." rows="5"></textarea>
-          </div>
-
-          <div id="recaptcha-container" class="g-recaptcha" data-sitekey="6LfsJyAsAAAAAFMlVwJvamtKUJzNF4WcwFpKP2Sc"></div>
-
-          <button type="submit" class="submit-btn">Enviar mensaje</button>
-          <p class="form-note">* Campos requeridos</p>
-        </form>
-        <div id="form-status" class="form-status"></div>
       </div>
     </div>
 
-    <section class="outro reveal-on-scroll" role="region" aria-labelledby="outro-title">
-      <div class="outro-box">
-        <h2 id="outro-title">Problema — Solución — Beneficios</h2>
-
-        <h3 style="margin-top:8px; color:var(--esmeralda-500);">Problema</h3>
-        <p>Muchas PYMEs no proyectan compras de forma sistemática. El resultado: faltantes que generan ventas perdidas, exceso de stock que inmoviliza capital, y compras por urgencia con menor margen.</p>
-
-        <h3 style="margin-top:12px; color:var(--esmeralda-500);">Solución</h3>
-        <p><strong>Evalutia</strong> predice la demanda por artículo y recomienda cuándo y cuánto comprar. Entregamos listas de pedido por producto, un calendario de reabastecimiento y reportes de riesgo, listos para ejecutar o integrar con tu flujo actual.</p>
-
-        <h3 style="margin-top:12px; color:var(--esmeralda-500);">Beneficios</h3>
-        <ul style="margin:8px 0 12px 18px; color:var(--white);">
-          <li>Menos faltantes — mayor disponibilidad para vender.</li>
-          <li>Menos exceso de stock — menor costo financiero e inventario.</li>
-          <li>Decisiones operativas rápidas con reportes accionables.</li>
-        </ul>
-
-        <h3 style="margin-top:8px; color:var(--esmeralda-500);">Funcionamiento y público</h3>
-        <p>Funciona con uploads simples (CSV), integración por API o con ayuda de nuestro equipo para conectar tu sistema de gestión. Está pensado para PYMEs comerciales y mayoristas (alimentos, bebidas, ferretería, perfumería, repuestos) que buscan planificar compras sin depender de hojas manuales.</p>
-
-        <h3 style="margin-top:12px; color:var(--esmeralda-500);">Prueba rápida (caso)</h3>
-        <p>Ejemplo: una tienda promedio que adoptó Evalutia redujo faltantes en ~60% y disminuyó exceso de stock en ~18% en 3 meses, con una mejora de ~12% en la rentabilidad sobre el inventario gestionado (valores orientativos, dependen del negocio).</p>
-
-        <div class="outro-note" style="margin-top:14px;">
-          <strong>Soporte humano</strong>
-          <div>Nuestro equipo ayuda a interpretar los reportes y configurar la solución: "te ayudo a usarlo" — clave para comercios sin experiencia previa en previsión o ERPs.</div>
+    <div class="flip-card" tabindex="0" aria-label="Modelos en producción">
+      <div class="flip-card-inner">
+        <div class="flip-front">
+          <div class="feature-icon"><svg viewBox="0 0 24 24"><path d="M3 3v18h18M7 16l4-4 4 4 4-4"/></svg></div>
+          <h3>Modelos en producción</h3>
+          <span class="flip-hint">ver más →</span>
+        </div>
+        <div class="flip-back">
+          <h3>Modelos en producción</h3>
+          <p>Combinamos múltiples algoritmos de ML validados y monitoreamos su precisión de forma continua para detectar desvíos.</p>
         </div>
       </div>
-    </section>
+    </div>
 
-    <h2 class="section-title">Características</h2>
-    <section class="grid" role="list" aria-label="Características y beneficios">
-      <div class="feature reveal-on-scroll" role="listitem">
-          <div class="feature-header">
-            <h5>Reportes operativos claros</h5>
-            <span class="feature-toggle">+</span>
-          </div>
-          <p class="feature-content">Reportes listos: lista de pedido recomendada por producto, calendario de reabastecimiento y resumen de riesgo por producto — todo en formatos fáciles de leer para tomar decisión operativa.</p>
-      </div>
-
-      <div class="feature reveal-on-scroll" role="listitem">
-        <div class="feature-header">
-          <h5>Integración flexible</h5>
-          <span class="feature-toggle">+</span>
+    <div class="flip-card" tabindex="0" aria-label="Reportes accionables">
+      <div class="flip-card-inner">
+        <div class="flip-front">
+          <div class="feature-icon"><svg viewBox="0 0 24 24"><path d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4"/></svg></div>
+          <h3>Reportes accionables</h3>
+          <span class="flip-hint">ver más →</span>
         </div>
-        <p class="feature-content">Funciona por upload de CSV, por integración API o vía asistencia manual de nuestro equipo para conectar tu gestión actual — elegí lo que te resulte más cómodo.</p>
-      </div>
-
-      <div class="feature reveal-on-scroll" role="listitem">
-        <div class="feature-header">
-          <h5>Modelos en producción</h5>
-          <span class="feature-toggle">+</span>
-        </div>
-        <p class="feature-content">Combinamos modelos y validamos el resultado en producción, con monitoreo continuo para mantener precisión y detectar desviaciones.</p>
-      </div>
-
-      <div class="feature reveal-on-scroll" role="listitem">
-        <div class="feature-header">
-          <h5>Automatización práctica</h5>
-          <span class="feature-toggle">+</span>
-        </div>
-        <p class="feature-content">Programá ejecuciones diarias o semanales; recibí alertas y reportes automáticos para incorporar directamente en tus compras y planificación.</p>
-      </div>
-
-      <div class="feature reveal-on-scroll" role="listitem">
-        <div class="feature-header">
-          <h5>Soporte humano dedicado</h5>
-          <span class="feature-toggle">+</span>
-        </div>
-        <p class="feature-content">Acompañamiento práctico: demos guiadas, capacitación y soporte para ajustar parámetros — ideal para comercios pequeños que nunca trabajaron con previsión.</p>
-      </div>
-
-      <div class="feature reveal-on-scroll" role="listitem">
-        <div class="feature-header">
-          <h5>Despliegue flexible</h5>
-          <span class="feature-toggle">+</span>
-        </div>
-        <p class="feature-content">Implantación por servicio gestionado o con contenedores (Docker) si preferís operar en tu infraestructura. Escalamos según tu crecimiento.</p>
-      </div>
-    </section>
-
-    <section class="explain" aria-labelledby="how-title">
-      <h2 id="how-title" style="width:100%; margin:0 0 24px; color:var(--white); font-size:20px; font-weight:700; text-align:center;">Cómo lo hacemos (en 4 pasos simples)</h2>
-      <div class="steps-grid">
-        <div class="step reveal-on-scroll" style="--step-delay: 0">
-          <div class="step-header">
-            <div class="step-number">1</div>
-            <h4>Traemos tus datos</h4>
-          </div>
-          <p>Subís un archivo o conectamos tu base. Nosotros limpiamos y transformamos los datos para que veas inmediatamente: tablas por producto, historial ajustado y un archivo de pedidos sugeridos.</p>
-        </div>
-
-        <div class="step reveal-on-scroll" style="--step-delay: 1">
-          <div class="step-header">
-            <div class="step-number">2</div>
-            <h4>Generamos predicciones</h4>
-          </div>
-          <p>Generamos predicciones con intervalos de confianza y visuales sencillos: series temporales, pronóstico por línea y alertas de picos o tendencias.</p>
-        </div>
-
-        <div class="step reveal-on-scroll" style="--step-delay: 2">
-          <div class="step-header">
-            <div class="step-number">3</div>
-            <h4>Entregamos planes prácticos</h4>
-          </div>
-          <p>Recibís listas de pedido recomendadas por producto, fechas sugeridas y un resumen con el nivel de riesgo para priorizar acciones.</p>
-        </div>
-
-        <div class="step reveal-on-scroll" style="--step-delay: 3">
-          <div class="step-header">
-            <div class="step-number">4</div>
-            <h4>Lo dejamos automático</h4>
-          </div>
-          <p>Dejamos los procesos automáticos: ejecuciones programadas, reportes automáticos y paneles para monitorear desempeño y decidir con rapidez.</p>
+        <div class="flip-back">
+          <h3>Reportes accionables</h3>
+          <p>Lista de pedido por producto, calendario de reabastecimiento y resumen de riesgo priorizados. Listos para ejecutar ese mismo día.</p>
         </div>
       </div>
-    </section>
+    </div>
 
-    <footer role="contentinfo" aria-label="Pie de página">
-      <div style="display:flex; flex-direction:column; gap:8px; align-items:center; justify-content:center;">
-        <div>
-          <strong>Evalutia</strong> — Inteligencia aplicada a la operación • © <span id="year"></span>
+    <div class="flip-card" tabindex="0" aria-label="Automatización real">
+      <div class="flip-card-inner">
+        <div class="flip-front">
+          <div class="feature-icon"><svg viewBox="0 0 24 24"><path d="M12 8v4l3 3M3.05 11a9 9 0 100 2"/></svg></div>
+          <h3>Automatización real</h3>
+          <span class="flip-hint">ver más →</span>
         </div>
-        <div style="color:rgba(255,255,255,0.78); font-size:13px;">
-          <a href="mailto:evalutia.uy@gmail.com" style="color:rgba(255,255,255,0.9); text-decoration:underline;">evalutia.uy@gmail.com</a>
+        <div class="flip-back">
+          <h3>Automatización real</h3>
+          <p>Ejecuciones diarias o semanales programadas. Recibí alertas y reportes automáticos sin tener que recordarlo o intervenir.</p>
         </div>
       </div>
-    </footer>
+    </div>
+
+    <div class="flip-card" tabindex="0" aria-label="Soporte humano">
+      <div class="flip-card-inner">
+        <div class="flip-front">
+          <div class="feature-icon"><svg viewBox="0 0 24 24"><path d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0"/></svg></div>
+          <h3>Soporte humano</h3>
+          <span class="flip-hint">ver más →</span>
+        </div>
+        <div class="flip-back">
+          <h3>Soporte humano</h3>
+          <p>Demos guiadas, capacitación y ajuste de parámetros. Ideal para comercios sin experiencia previa en previsión o ERPs.</p>
+        </div>
+      </div>
+    </div>
+
+    <div class="flip-card" tabindex="0" aria-label="Despliegue a tu medida">
+      <div class="flip-card-inner">
+        <div class="flip-front">
+          <div class="feature-icon"><svg viewBox="0 0 24 24"><path d="M5 12h14M12 5l7 7-7 7"/></svg></div>
+          <h3>Despliegue a tu medida</h3>
+          <span class="flip-hint">ver más →</span>
+        </div>
+        <div class="flip-back">
+          <h3>Despliegue a tu medida</h3>
+          <p>Servicio gestionado en la nube o contenedores Docker en tu propia infraestructura. Escalamos con tu crecimiento.</p>
+        </div>
+      </div>
+    </div>
 
   </div>
-
-  <script>
-    document.getElementById('year').innerText = new Date().getFullYear();
-  </script>
-
-  <script src="https://www.google.com/recaptcha/api.js" async defer></script>
-
-  <!-- Modal & form logic -->
-  <script>
-    const contactBtn = document.getElementById('contact-btn');
-    const contactModal = document.getElementById('contact-modal');
-    const closeBtn = document.getElementById('close-contact-modal');
-    const contactForm = document.getElementById('contact-form');
-    const formStatus = document.getElementById('form-status');
-
-    function showNotification(message, type = 'success') {
-      const notification = document.createElement('div');
-      notification.style.cssText = `
-        position: fixed;
-        top: 24px;
-        right: 24px;
-        padding: 16px 24px;
-        border-radius: 8px;
-        font-weight: 600;
-        font-size: 14px;
-        z-index: 2000;
-        animation: slideInRight 0.4s ease;
-        box-shadow: 0 8px 24px rgba(0, 0, 0, 0.3);
-      `;
-      
-      if (type === 'success') {
-        notification.style.background = 'linear-gradient(135deg, #34c48f, #2ba570)';
-        notification.style.color = 'white';
-      } else {
-        notification.style.background = '#ef4444';
-        notification.style.color = 'white';
-      }
-      
-      notification.textContent = message;
-      document.body.appendChild(notification);
-      
-      setTimeout(() => {
-        notification.style.animation = 'slideOutRight 0.4s ease';
-        setTimeout(() => notification.remove(), 400);
-      }, 3000);
-    }
-
-    const styleNotif = document.createElement('style');
-    styleNotif.textContent = `
-      @keyframes slideInRight {
-        from { transform: translateX(400px); opacity: 0; } to { transform: translateX(0); opacity: 1; }
-      }
-      @keyframes slideOutRight {
-        from { transform: translateX(0); opacity: 1; } to { transform: translateX(400px); opacity: 0; }
-      }
-    `;
-    document.head.appendChild(styleNotif);
-
-    if (contactBtn) {
-      contactBtn.onclick = function(e) {
-        e.preventDefault();
-        e.stopPropagation();
-        contactModal.style.display = 'flex';
-        document.body.style.overflow = 'hidden';
-      };
-    }
-
-    function closeModal() {
-      contactModal.style.display = 'none';
-      document.body.style.overflow = 'auto';
-      formStatus.textContent = '';
-      formStatus.classList.remove('success', 'error');
-      contactForm.reset();
-      if (window.grecaptcha && typeof grecaptcha.reset === 'function') {
-        grecaptcha.reset();
-      }
-    }
-
-    closeBtn.onclick = closeModal;
-
-    contactModal.onclick = function(e) {
-      if (e.target === contactModal) {
-        closeModal();
-      }
-    };
-
-    document.onkeydown = function(e) {
-      if (e.key === 'Escape' && contactModal.style.display === 'flex') {
-        closeModal();
-      }
-    };
-
-    contactForm.onsubmit = async function(e) {
-      e.preventDefault();
-
-      const email = document.getElementById('contact-email').value.trim();
-      const subject = document.getElementById('contact-subject').value.trim() || 'Consulta desde Evalutia';
-      const message = document.getElementById('contact-message').value.trim();
-
-      if (!email || !message) {
-        formStatus.textContent = 'Por favor completa los campos requeridos.';
-        formStatus.classList.add('error');
-        formStatus.classList.remove('success');
-        formStatus.style.display = 'block';
-        return;
-      }
-
-      const recaptchaResponse = (window.grecaptcha && typeof grecaptcha.getResponse === 'function') ? grecaptcha.getResponse() : '';
-      if (!recaptchaResponse) {
-        formStatus.textContent = 'Por favor, verifica el reCAPTCHA.';
-        formStatus.classList.add('error');
-        formStatus.classList.remove('success');
-        formStatus.style.display = 'block';
-        return;
-      }
-
-      const submitBtn = contactForm.querySelector('.submit-btn');
-      const originalText = submitBtn.textContent;
-      submitBtn.disabled = true;
-      submitBtn.textContent = 'Enviando...';
-
-      try {
-        const formData = new FormData();
-        formData.append('email', email);
-        formData.append('subject', subject);
-        formData.append('message', message);
-        formData.append('g-recaptcha-response', recaptchaResponse);
-
-        const response = await fetch('https://formspree.io/f/xblnyvly', {
-          method: 'POST',
-          body: formData,
-          headers: { 'Accept': 'application/json' }
-        });
-
-        if (response.ok) {
-          showNotification('¡Mensaje enviado exitosamente! Nos contactaremos pronto.', 'success');
-          setTimeout(() => {
-            closeModal();
-            submitBtn.disabled = false;
-            submitBtn.textContent = originalText;
-          }, 1000);
-        } else {
-          throw new Error('Error en la respuesta del servidor');
-        }
-
-      } catch (error) {
-        console.error('Error al enviar:', error);
-        showNotification('Error al enviar el mensaje. Intenta de nuevo.', 'error');
-        submitBtn.disabled = false;
-        submitBtn.textContent = originalText;
-        if (window.grecaptcha && typeof grecaptcha.reset === 'function') grecaptcha.reset();
-      }
-    };
-  </script>
-
-  <!-- THREE.JS responsive y con corrección para navbar (globe más pequeño en desktop) -->
-  <script src="https://unpkg.com/three@0.158.0/build/three.min.js"></script>
-  <script>
-  (function() {
-    if (!window.THREE) return;
-
-    let scene, camera, renderer, group, mesh, wire;
-    let light, light2, ambient;
-    let mouseX = 0, mouseY = 0, targetMouseX = 0, targetMouseY = 0;
-    let animateId = null;
-    let reducedMotion = false;
-    let lastIsSmall = null;
-
-    function isSmall() { return window.innerWidth < 640; }
-
-    // RADIO: reducido para desktop >=1080 para evitar solapamiento
-    function getRadius() {
-      if (window.innerWidth >= 1080) return 1.3; // <-- reducido (antes 1.7)
-      return isSmall() ? 1.35 : 1.6;
-    }
-
-    function getDetail() { return window.innerWidth < 420 ? 1 : (isSmall() ? 1 : 2); }
-    function getPixelRatio() { return Math.min(window.devicePixelRatio || 1, isSmall() ? 1.2 : 2); }
-    function getWireOpacity() { return isSmall() ? 0.05 : 0.08; }
-    function getLightIntensity() { return isSmall() ? 0.9 : 1.4; }
-    function getLight2Intensity() { return isSmall() ? 0.6 : 0.9; }
-
-    function getMarginFactor() {
-      // aumentar la holgura en desktop para que la cámara se aleje un poco más
-      return (window.innerWidth >= 1080) ? 1.35 : 1.25; // <-- desktop: 1.35 (antes 1.15)
-    }
-    function getYOffsetRatio() {
-      return (window.innerWidth >= 1080) ? 0.02 : 0.12;
-    }
-
-    function createMeshes() {
-      if (!group) return;
-
-      if (mesh) {
-        try { mesh.geometry.dispose(); mesh.material.dispose(); } catch(e){}
-        group.remove(mesh);
-        mesh = null;
-      }
-      if (wire) {
-        try { wire.geometry.dispose(); wire.material.dispose(); } catch(e){}
-        group.remove(wire);
-        wire = null;
-      }
-
-      const detail = getDetail();
-      const radius = getRadius();
-
-      const geometry = new THREE.IcosahedronGeometry(radius, detail);
-      const material = new THREE.MeshStandardMaterial({
-        color: 0x34c48f,
-        emissive: 0x023927,
-        metalness: 0.45,
-        roughness: 0.25
-      });
-      mesh = new THREE.Mesh(geometry, material);
-      group.add(mesh);
-
-      const wireGeom = new THREE.IcosahedronGeometry(radius + 0.02, Math.max(detail,1));
-      const wireMat = new THREE.MeshBasicMaterial({
-        color: 0xffffff,
-        wireframe: true,
-        transparent: true,
-        opacity: getWireOpacity()
-      });
-      wire = new THREE.Mesh(wireGeom, wireMat);
-      group.add(wire);
-    }
-
-    /**
-     * Versión navbar-aware de frameObjectToView (mejorada).
-     * Calcula un "worldShift" equivalente al padding-top (navbar + safe-area)
-     * y mueve la cámara en Y hacia arriba en unidades del mundo para que
-     * el objeto quede visualmente más abajo y no sea tapado por la navbar.
-     */
-    function frameObjectToView(object, camera, renderer, marginFactor = 1.25, yOffsetRatio = 0.12) {
-      const box = new THREE.Box3().setFromObject(object);
-      const size = box.getSize(new THREE.Vector3());
-      const center = box.getCenter(new THREE.Vector3());
-
-      if (size.x === 0 && size.y === 0 && size.z === 0) return;
-
-      const fov = camera.fov * (Math.PI / 180);
-      const aspect = renderer.domElement.clientWidth / renderer.domElement.clientHeight;
-
-      // Distancias necesarias para cubrir el ancho/alto del objeto
-      const distanceY = (size.y / 2) / Math.tan(fov / 2);
-      const hFov = 2 * Math.atan(Math.tan(fov / 2) * aspect);
-      const distanceX = (size.x / 2) / Math.tan(hFov / 2);
-
-      let distance = Math.max(distanceX, distanceY);
-      distance *= marginFactor;
-
-      // Visible world height at this distance
-      const visibleHeight = 2 * distance * Math.tan(fov / 2);
-      const canvasHeight = renderer.domElement.clientHeight || window.innerHeight;
-
-      // obtener padding-top efectivo (navbar + safe-area) en px
-      let topInsetPx = 0;
-      try {
-        const cs = getComputedStyle(document.body);
-        topInsetPx = parseFloat(cs.paddingTop) || 0;
-      } catch (e) {
-        const nav = document.querySelector('.navbar');
-        topInsetPx = nav ? nav.getBoundingClientRect().height : 0;
-      }
-
-      // multiplicador extra para desktop (garantizar holgura)
-      const worldShiftMultiplier = (window.innerWidth >= 1080) ? 1.4 : 1.0; // <-- desktop mayor compensación
-
-      // convertimos píxeles a unidades del "mundo"
-      let worldShift = (topInsetPx * visibleHeight / canvasHeight) * worldShiftMultiplier;
-
-      // Limitar el shift para no mover demasiado la cámara (por si el navbar es enorme)
-      const maxShift = Math.max(size.y * 0.85, size.y); // evita desplazar más de la altura del objeto
-      worldShift = Math.min(worldShift, maxShift);
-
-      // MOVEMOS LA CÁMARA EN Y (hacia arriba): esto hace que el objeto se vea más abajo en pantalla,
-      // y por ende quede por debajo de la navbar.
-      camera.position.set(center.x, center.y + worldShift, center.z + distance);
-
-      // Ajuste visual: mirar un poco por debajo del centro del objeto para dar sensación de "elevación"
-      const lookAt = center.clone();
-      lookAt.y -= size.y * yOffsetRatio;
-
-      camera.lookAt(lookAt);
-      camera.updateProjectionMatrix();
-
-      camera.near = Math.min(0.1, distance * 0.001);
-      camera.updateProjectionMatrix();
-    }
-
-    function init() {
-      reducedMotion = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-
-      scene = new THREE.Scene();
-      camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 1000);
-
-      renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
-      renderer.setPixelRatio(getPixelRatio());
-      renderer.setSize(window.innerWidth, window.innerHeight);
-      renderer.setClearColor(0x000000, 0);
-      renderer.domElement.classList.add('bg-3d-canvas');
-      // CORRECCIÓN: dejar el canvas por encima del fondo del body
-      // pero por debajo de la .page y .navbar (la .page tiene z-index:2 y la navbar 999)
-      renderer.domElement.style.zIndex = '0';
-      renderer.domElement.style.pointerEvents = 'none';
-
-      if (!document.querySelector('.bg-3d-canvas')) {
-        document.body.appendChild(renderer.domElement);
-      } else {
-        const existing = document.querySelector('.bg-3d-canvas');
-        existing.parentElement.replaceChild(renderer.domElement, existing);
-      }
-
-      group = new THREE.Group();
-      scene.add(group);
-
-      createMeshes();
-
-      light = new THREE.PointLight(0xffffff, getLightIntensity(), 50);
-      light.position.set(3, 2, 4);
-      light2 = new THREE.PointLight(0x34c48f, getLight2Intensity(), 30);
-      light2.position.set(-3, -1, -3);
-      ambient = new THREE.AmbientLight(0xffffff, isSmall() ? 0.5 : 0.6);
-      scene.add(light, light2, ambient);
-
-      frameObjectToView(group, camera, renderer, getMarginFactor(), getYOffsetRatio());
-
-      window.addEventListener('resize', onWindowResize, { passive: true });
-      window.addEventListener('pointermove', onPointerMove, { passive: true });
-      document.addEventListener('visibilitychange', onVisibilityChange);
-
-      lastIsSmall = isSmall();
-
-      animate();
-    }
-
-    function onPointerMove(event) {
-      const x = (event.clientX / window.innerWidth) * 2 - 1;
-      const y = (event.clientY / window.innerHeight) * 2 - 1;
-      targetMouseX = x;
-      targetMouseY = y;
-    }
-
-    function onWindowResize() {
-      if (!camera || !renderer) return;
-      camera.aspect = window.innerWidth / window.innerHeight;
-      camera.updateProjectionMatrix();
-
-      renderer.setPixelRatio(getPixelRatio());
-      renderer.setSize(window.innerWidth, window.innerHeight);
-
-      const nowSmall = isSmall();
-      if (nowSmall !== lastIsSmall) {
-        createMeshes();
-        if (light) light.intensity = getLightIntensity();
-        if (light2) light2.intensity = getLight2Intensity();
-        if (ambient) ambient.intensity = isSmall() ? 0.5 : 0.6;
-        lastIsSmall = nowSmall;
-      }
-
-      frameObjectToView(group, camera, renderer, getMarginFactor(), getYOffsetRatio());
-    }
-
-    function onVisibilityChange() {
-      if (document.hidden) {
-        if (animateId) cancelAnimationFrame(animateId);
-        animateId = null;
-      } else {
-        if (!animateId) animate();
-      }
-    }
-
-    function animate() {
-      const slowFactor = reducedMotion ? 0.08 : 1;
-
-      mouseX += (targetMouseX - mouseX) * 0.08 * slowFactor;
-      mouseY += (targetMouseY - mouseY) * 0.08 * slowFactor;
-
-      if (group) {
-        if (reducedMotion) {
-          group.rotation.y += 0.0006 * slowFactor;
-          group.rotation.x += 0.0004 * slowFactor;
-        } else {
-          group.rotation.y += 0.0025 * slowFactor;
-          group.rotation.x += 0.0015 * slowFactor;
-          group.rotation.y += mouseX * 0.0008 * slowFactor;
-          group.rotation.x += mouseY * 0.0008 * slowFactor;
-        }
-
-        const t = performance.now() * 0.001;
-        const s = 1 + Math.sin(t * 0.6) * (reducedMotion ? 0.01 : 0.03);
-        group.scale.set(s, s, s);
-      }
-
-      renderer.render(scene, camera);
-      animateId = requestAnimationFrame(animate);
-    }
-
-    init();
-
-    window.addEventListener('beforeunload', () => {
-      if (animateId) cancelAnimationFrame(animateId);
-      try {
-        if (mesh) { mesh.geometry.dispose(); mesh.material.dispose(); }
-        if (wire) { wire.geometry.dispose(); wire.material.dispose(); }
-        if (renderer) { renderer.dispose(); }
-      } catch (e) {}
+</section>
+
+<!-- CÓMO FUNCIONA — PROGRESS LINE -->
+<section id="como-funciona" style="padding-top:0">
+  <p class="section-tag reveal">Proceso</p>
+  <h2 class="reveal">Cuatro pasos simples</h2>
+  <p class="section-lead reveal">Sin configuraciones complejas. Empezás a ver resultados en la primera semana.</p>
+
+  <div class="steps-wrapper reveal" id="steps-wrapper">
+    <!-- Vertical track with animated fill -->
+    <div class="steps-track">
+      <div class="steps-track-line">
+        <div class="steps-track-fill" id="steps-fill"></div>
+      </div>
+    </div>
+
+    <!-- Steps content -->
+    <div class="steps-content">
+      <div class="step-row" data-step="0">
+        <div class="step-dot-col">
+          <div class="step-dot" id="dot-0"></div>
+        </div>
+        <div class="step-body-wrap">
+          <div class="step-num-label">Paso 01</div>
+          <h3>Traemos tus datos</h3>
+          <p>Subís un CSV o conectamos tu sistema de gestión. Nosotros limpiamos y preparamos todo: historial de ventas, artículos, variaciones estacionales.</p>
+        </div>
+      </div>
+      <div class="step-row" data-step="1">
+        <div class="step-dot-col">
+          <div class="step-dot" id="dot-1"></div>
+        </div>
+        <div class="step-body-wrap">
+          <div class="step-num-label">Paso 02</div>
+          <h3>Generamos predicciones</h3>
+          <p>Calculamos la demanda futura por producto con intervalos de confianza. Series temporales, alertas de picos y tendencias visibles de un vistazo.</p>
+        </div>
+      </div>
+      <div class="step-row" data-step="2">
+        <div class="step-dot-col">
+          <div class="step-dot" id="dot-2"></div>
+        </div>
+        <div class="step-body-wrap">
+          <div class="step-num-label">Paso 03</div>
+          <h3>Recibís el plan de compras</h3>
+          <p>Lista de pedido recomendada por artículo, fechas de reposición y un resumen de riesgo para priorizar qué atender primero.</p>
+        </div>
+      </div>
+      <div class="step-row" data-step="3">
+        <div class="step-dot-col">
+          <div class="step-dot" id="dot-3"></div>
+        </div>
+        <div class="step-body-wrap">
+          <div class="step-num-label">Paso 04</div>
+          <h3>Lo dejamos automático</h3>
+          <p>Ejecuciones programadas, reportes periódicos y paneles de monitoreo. Una vez configurado, funciona solo.</p>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- CTA BAND -->
+<div class="cta-band reveal" style="margin-bottom:80px">
+  <h2>¿Listo para dejar de comprar<br>a ojo?</h2>
+  <p>Pedí una demo personalizada para tu negocio. Sin compromiso, con resultados concretos.</p>
+  <div style="display:flex;gap:12px;justify-content:center;flex-wrap:wrap">
+    <button class="btn-primary" id="open-modal-2">Pedir demo gratuita</button>
+    <a href="https://app.evalutia.net" class="btn-ghost">Abrir la aplicación →</a>
+  </div>
+</div>
+
+<!-- FOOTER -->
+<footer>
+  <span class="footer-brand">Evalutia</span>
+  <p>Inteligencia aplicada a la operación · © <span id="year"></span></p>
+  <a href="mailto:evalutia.uy@gmail.com">evalutia.uy@gmail.com</a>
+</footer>
+
+<!-- MODAL (cinematic) -->
+<div class="modal-bg" id="modal">
+  <div class="modal">
+    <button class="modal-close" id="close-modal">✕</button>
+    <h2>Contactanos</h2>
+    <p class="modal-sub">Te respondemos a la brevedad con información sobre demos y precios.</p>
+    <form id="contact-form">
+      <div class="form-field">
+        <label for="f-email">Correo electrónico *</label>
+        <input type="email" id="f-email" name="email" required placeholder="tu@empresa.com">
+      </div>
+      <div class="form-field">
+        <label for="f-subject">Asunto</label>
+        <input type="text" id="f-subject" name="subject" placeholder="Ej: Quiero una demo">
+      </div>
+      <div class="form-field">
+        <label for="f-message">Mensaje *</label>
+        <textarea id="f-message" name="message" required placeholder="Contanos brevemente sobre tu negocio y qué necesitás..."></textarea>
+      </div>
+      <div id="recaptcha-container" class="g-recaptcha" data-sitekey="6LfsJyAsAAAAAFMlVwJvamtKUJzNF4WcwFpKP2Sc"></div>
+      <button type="submit" class="btn-primary" style="width:100%;justify-content:center">Enviar mensaje</button>
+    </form>
+    <div id="form-msg" style="margin-top:12px;font-size:14px;text-align:center;display:none"></div>
+  </div>
+</div>
+
+<script src="https://www.google.com/recaptcha/api.js" async defer></script>
+<script>
+/* ────────────────────────────────────────────
+   NEURAL NETWORK BACKGROUND
+──────────────────────────────────────────── */
+(function() {
+  const canvas = document.getElementById('neural-canvas');
+  const ctx = canvas.getContext('2d');
+  let W, H, dpr, nodes=[], raf, lastTime=0;
+  let mouse = {x:-9999, y:-9999};
+  const NODE_COUNT_BASE=90, MAX_DIST=160, MOUSE_RADIUS=200, NODE_SPEED=0.28;
+  const C='52,196,143';
+
+  function resize() {
+    dpr=Math.min(window.devicePixelRatio||1,2);
+    W=window.innerWidth; H=window.innerHeight;
+    canvas.width=W*dpr; canvas.height=H*dpr;
+    canvas.style.width=W+'px'; canvas.style.height=H+'px';
+    ctx.setTransform(dpr,0,0,dpr,0,0);
+  }
+  function createNodes() {
+    const count=Math.min(NODE_COUNT_BASE+Math.floor(W/18),160);
+    nodes=[];
+    for(let i=0;i<count;i++) nodes.push({
+      x:Math.random()*W, y:Math.random()*H,
+      vx:(Math.random()-.5)*NODE_SPEED, vy:(Math.random()-.5)*NODE_SPEED,
+      r:Math.random()*1.4+0.5, phase:Math.random()*Math.PI*2,
+      active:Math.random()<0.12
     });
-  })();
-  </script>
-
-  <!-- Sync navbar height (con safe-area) -->
-  <script>
-    (function syncNavbarHeight() {
-      const nav = document.querySelector('.navbar');
-      if (!nav) return;
-
-      function update() {
-        const h = Math.ceil(nav.getBoundingClientRect().height);
-        const offsetUp = 18;
-        const minPadding = 48;
-        const pad = Math.max(h - offsetUp, minPadding);
-        document.documentElement.style.setProperty('--navbar-height', pad + 'px');
-        document.body.style.paddingTop = `calc(${pad}px + env(safe-area-inset-top))`;
+  }
+  function loop(ts=0) {
+    const dt=Math.min((ts-lastTime)/16.67,3); lastTime=ts;
+    ctx.clearRect(0,0,W,H);
+    for(const n of nodes) {
+      n.x+=n.vx*dt; n.y+=n.vy*dt;
+      if(n.x<0){n.x=0;n.vx=Math.abs(n.vx);}
+      if(n.x>W){n.x=W;n.vx=-Math.abs(n.vx);}
+      if(n.y<0){n.y=0;n.vy=Math.abs(n.vy);}
+      if(n.y>H){n.y=H;n.vy=-Math.abs(n.vy);}
+      const mdx=mouse.x-n.x, mdy=mouse.y-n.y;
+      const md=Math.sqrt(mdx*mdx+mdy*mdy);
+      if(md<MOUSE_RADIUS&&md>0){const f=(1-md/MOUSE_RADIUS)*0.012;n.vx+=mdx/md*f;n.vy+=mdy/md*f;}
+      const spd=Math.sqrt(n.vx*n.vx+n.vy*n.vy), max=NODE_SPEED*2.5;
+      if(spd>max){n.vx=n.vx/spd*max;n.vy=n.vy/spd*max;}
+    }
+    for(let i=0;i<nodes.length;i++) for(let j=i+1;j<nodes.length;j++){
+      const a=nodes[i],b=nodes[j];
+      const dx=a.x-b.x,dy=a.y-b.y,d=Math.sqrt(dx*dx+dy*dy);
+      if(d>MAX_DIST)continue;
+      ctx.beginPath();ctx.moveTo(a.x,a.y);ctx.lineTo(b.x,b.y);
+      ctx.strokeStyle=`rgba(${C},${((1-d/MAX_DIST)*0.18).toFixed(3)})`;
+      ctx.lineWidth=0.6;ctx.stroke();
+    }
+    const t=ts*0.001;
+    for(const n of nodes){
+      const pulse=0.5+0.5*Math.sin(t*1.2+n.phase);
+      const mdx=mouse.x-n.x,mdy=mouse.y-n.y,md=Math.sqrt(mdx*mdx+mdy*mdy);
+      const mb=md<MOUSE_RADIUS?(1-md/MOUSE_RADIUS)*0.7:0;
+      const alpha=Math.min(1,(n.active?0.7:0.25)+pulse*0.15+mb);
+      const radius=n.r+(n.active?pulse*0.6:0)+mb*1.5;
+      if(n.active||mb>0.2){
+        ctx.beginPath();ctx.arc(n.x,n.y,radius*4,0,Math.PI*2);
+        const g=ctx.createRadialGradient(n.x,n.y,0,n.x,n.y,radius*4);
+        g.addColorStop(0,`rgba(${C},${(alpha*0.35).toFixed(3)})`);
+        g.addColorStop(1,`rgba(${C},0)`);
+        ctx.fillStyle=g;ctx.fill();
       }
-
-      update();
-      window.addEventListener('resize', update);
-      if (window.ResizeObserver) {
-        const ro = new ResizeObserver(update);
-        ro.observe(nav);
-      } else {
-        window.addEventListener('load', update);
+      ctx.beginPath();ctx.arc(n.x,n.y,radius,0,Math.PI*2);
+      ctx.fillStyle=`rgba(${C},${alpha.toFixed(3)})`;ctx.fill();
+    }
+    if(Math.random()<0.04){
+      const a=nodes[Math.floor(Math.random()*nodes.length)];
+      const b=nodes[Math.floor(Math.random()*nodes.length)];
+      const dx=a.x-b.x,dy=a.y-b.y;
+      if(Math.sqrt(dx*dx+dy*dy)<MAX_DIST){
+        const g2=ctx.createLinearGradient(a.x,a.y,b.x,b.y);
+        g2.addColorStop(0,`rgba(${C},0)`);g2.addColorStop(.5,`rgba(${C},0.55)`);g2.addColorStop(1,`rgba(${C},0)`);
+        ctx.beginPath();ctx.moveTo(a.x,a.y);ctx.lineTo(b.x,b.y);
+        ctx.strokeStyle=g2;ctx.lineWidth=1.2;ctx.stroke();
       }
-    })();
-  </script>
+    }
+    raf=requestAnimationFrame(loop);
+  }
+  function init(){
+    resize();createNodes();canvas.classList.add('loaded');loop();
+  }
+  window.addEventListener('mousemove',e=>{mouse.x=e.clientX;mouse.y=e.clientY},{passive:true});
+  window.addEventListener('touchmove',e=>{if(e.touches[0]){mouse.x=e.touches[0].clientX;mouse.y=e.touches[0].clientY;}},{passive:true});
+  window.addEventListener('mouseleave',()=>{mouse.x=-9999;mouse.y=-9999;});
+  let rt; window.addEventListener('resize',()=>{clearTimeout(rt);rt=setTimeout(()=>{resize();createNodes();},200);},{passive:true});
+  document.addEventListener('visibilitychange',()=>{
+    if(document.hidden){cancelAnimationFrame(raf);raf=null;}
+    else if(!raf){lastTime=0;loop();}
+  });
+  if(window.matchMedia('(prefers-reduced-motion: reduce)').matches){
+    canvas.style.opacity='0.25';resize();createNodes();requestAnimationFrame(ts=>{loop(ts);cancelAnimationFrame(raf);});return;
+  }
+  init();
+})();
 
-  <!-- Reveal on scroll + feature toggles -->
-  <script>
-    (function() {
-      const revealEls = document.querySelectorAll('.reveal-on-scroll');
-      if (!revealEls.length) return;
+/* ────────────────────────────────────────────
+   REVEAL ON SCROLL
+──────────────────────────────────────────── */
+document.getElementById('year').textContent=new Date().getFullYear();
+const reveals=document.querySelectorAll('.reveal');
+const revealIO=new IntersectionObserver(entries=>{
+  entries.forEach(e=>{if(e.isIntersecting){e.target.classList.add('visible');revealIO.unobserve(e.target);}});
+},{threshold:0.1});
+reveals.forEach(el=>revealIO.observe(el));
 
-      if ('IntersectionObserver' in window) {
-        const observer = new IntersectionObserver((entries, obs) => {
-          entries.forEach(entry => {
-            if (entry.isIntersecting) {
-              entry.target.classList.add('is-visible');
-              obs.unobserve(entry.target);
-            }
-          });
-        }, { threshold: 0.18 });
+/* ────────────────────────────────────────────
+   FLIP CARDS — also keyboard accessible
+──────────────────────────────────────────── */
+document.querySelectorAll('.flip-card').forEach(card=>{
+  card.addEventListener('keydown',e=>{
+    if(e.key==='Enter'||e.key===' '){e.preventDefault();card.classList.toggle('flipped');}
+  });
+});
 
-        revealEls.forEach(el => observer.observe(el));
-      } else {
-        revealEls.forEach(el => el.classList.add('is-visible'));
-      }
-    })();
+/* ────────────────────────────────────────────
+   STEPS — animated progress line on scroll
+──────────────────────────────────────────── */
+(function(){
+  const wrapper = document.getElementById('steps-wrapper');
+  const fill    = document.getElementById('steps-fill');
+  const dots    = [0,1,2,3].map(i=>document.getElementById('dot-'+i));
+  if(!wrapper||!fill||!dots[0])return;
 
-    (function() {
-      const features = document.querySelectorAll('.feature');
-      features.forEach(feature => {
-        const header = feature.querySelector('.feature-header');
-        header.addEventListener('click', (e) => {
-          e.stopPropagation();
-          features.forEach(f => { if (f !== feature && f.classList.contains('expanded')) f.classList.remove('expanded'); });
-          feature.classList.toggle('expanded');
-        });
-      });
-    })();
-  </script>
+  function update(){
+    const wRect=wrapper.getBoundingClientRect();
+    const vh=window.innerHeight;
+    // Start filling when top of section hits 80% of viewport, finish when 30% of section remains
+    const start = vh * 0.8;
+    const end   = vh * 0.3;
+    const raw   = (start - wRect.top) / (start - end + wRect.height * 0.7);
+    const progress = Math.max(0, Math.min(1, raw));
+    fill.style.height=(progress*100)+'%';
+    const perStep=1/4;
+    dots.forEach((dot,i)=>{
+      dot.classList.toggle('active', progress>=(i+0.4)*perStep);
+    });
+  }
+
+  window.addEventListener('scroll',update,{passive:true});
+  window.addEventListener('resize',update,{passive:true});
+  update();
+})();
+
+/* ────────────────────────────────────────────
+   MODAL — cinematic open/close (no cloning)
+──────────────────────────────────────────── */
+const modalBg = document.getElementById('modal');
+const modalInner = modalBg.querySelector('.modal');
+
+function openModal(){
+  // Reset animation by removing and re-adding the class
+  modalInner.style.animation = 'none';
+  modalInner.offsetHeight; // force reflow
+  modalInner.style.animation = '';
+  // Reset field animations
+  modalInner.querySelectorAll('h2, p.modal-sub, .form-field, #recaptcha-container, .btn-primary').forEach(el=>{
+    el.style.animation='none';
+    el.offsetHeight;
+    el.style.animation='';
+  });
+  modalBg.classList.add('open');
+  document.body.style.overflow='hidden';
+}
+function closeModal(){
+  modalBg.classList.remove('open');
+  document.body.style.overflow='';
+}
+function showMsg(el,text,color){if(!el)return;el.style.display='block';el.style.color=color;el.textContent=text;}
+
+function handleSubmit(e){
+  e.preventDefault();
+  const form=e.target;
+  const email=form.querySelector('[name=email]').value.trim();
+  const message=form.querySelector('[name=message]').value.trim();
+  const msg=document.getElementById('form-msg');
+  if(!email||!message){showMsg(msg,'Completá los campos requeridos.','#f87171');return;}
+  const rc=window.grecaptcha?grecaptcha.getResponse():'';
+  if(!rc){showMsg(msg,'Por favor verificá el reCAPTCHA.','#f87171');return;}
+  const btn=form.querySelector('[type=submit]');
+  btn.textContent='Enviando…';btn.disabled=true;
+  const fd=new FormData();
+  fd.append('email',email);
+  fd.append('subject',form.querySelector('[name=subject]').value||'Consulta desde Evalutia');
+  fd.append('message',message);
+  fd.append('g-recaptcha-response',rc);
+  fetch('https://formspree.io/f/xblnyvly',{method:'POST',body:fd,headers:{Accept:'application/json'}})
+    .then(r=>{
+      if(r.ok){showMsg(msg,'¡Mensaje enviado! Nos contactamos pronto.','#34c48f');form.reset();if(window.grecaptcha)grecaptcha.reset();setTimeout(closeModal,2000);}
+      else throw new Error();
+    })
+    .catch(()=>{showMsg(msg,'Error al enviar. Intentá de nuevo.','#f87171');if(window.grecaptcha)grecaptcha.reset();})
+    .finally(()=>{btn.textContent='Enviar mensaje';btn.disabled=false;});
+}
+
+document.getElementById('open-modal').onclick=openModal;
+document.getElementById('open-modal-2').onclick=openModal;
+document.getElementById('close-modal').onclick=closeModal;
+document.getElementById('contact-form').onsubmit=handleSubmit;
+modalBg.onclick=e=>{if(e.target===modalBg)closeModal();};
+document.onkeydown=e=>{if(e.key==='Escape')closeModal();};
+</script>
 </body>
 </html>
