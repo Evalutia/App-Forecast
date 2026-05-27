@@ -57,5 +57,21 @@ namespace Services.Planilla
 
       return (items, totalSkus);
     }
+
+    public PlanillaFiltrosDto GetFiltros()
+    {
+      var (marcas, generos, sinMarca, sinGenero) = _repo.GetFiltros();
+
+      return new PlanillaFiltrosDto
+      {
+        Marcas  = marcas.Select(m => new PlanillaFiltroItemDto { Id = m.Id, Nombre = m.Nombre }).ToList(),
+        Generos = generos.Select(g => new PlanillaFiltroItemDto { Id = g.Id, Nombre = g.Nombre }).ToList(),
+        ArticulosIncompletos = new PlanillaArticulosIncompletosDto
+        {
+          SinMarca  = sinMarca,
+          SinGenero = sinGenero
+        }
+      };
+    }
   }
 }

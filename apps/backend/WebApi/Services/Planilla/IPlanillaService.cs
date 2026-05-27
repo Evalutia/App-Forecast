@@ -5,6 +5,26 @@ namespace Services.Planilla
   public interface IPlanillaService
   {
     (IReadOnlyList<PlanillaSkuDto> Items, int TotalSkus) GetVentas(int page, int pageSize);
+    PlanillaFiltrosDto GetFiltros();
+  }
+
+  public sealed class PlanillaFiltroItemDto
+  {
+    public uint Id { get; init; }
+    public string Nombre { get; init; } = string.Empty;
+  }
+
+  public sealed class PlanillaArticulosIncompletosDto
+  {
+    public int SinMarca { get; init; }
+    public int SinGenero { get; init; }
+  }
+
+  public sealed class PlanillaFiltrosDto
+  {
+    public IReadOnlyList<PlanillaFiltroItemDto> Marcas { get; init; } = [];
+    public IReadOnlyList<PlanillaFiltroItemDto> Generos { get; init; } = [];
+    public PlanillaArticulosIncompletosDto ArticulosIncompletos { get; init; } = new();
   }
 
   public sealed class PlanillaSkuDto

@@ -8,5 +8,7 @@ namespace DataAccess.Repositories.PlanillaDataAccess
         int page,
         int pageSize
     );
+
+    (List<(uint Id, string Nombre)> Marcas, List<(uint Id, string Nombre)> Generos, int SinMarca, int SinGenero) GetFiltros();
   }
 }

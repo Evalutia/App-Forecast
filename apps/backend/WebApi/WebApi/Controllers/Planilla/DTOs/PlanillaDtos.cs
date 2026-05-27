@@ -48,6 +48,44 @@ namespace WebApi.Controllers.Planilla.DTOs
     }
   }
 
+  public sealed class PlanillaFiltroItemOutDto
+  {
+    public uint Id { get; init; }
+    public string Nombre { get; init; } = string.Empty;
+
+    public PlanillaFiltroItemOutDto(PlanillaFiltroItemDto dto)
+    {
+      Id     = dto.Id;
+      Nombre = dto.Nombre;
+    }
+  }
+
+  public sealed class PlanillaArticulosIncompletosOutDto
+  {
+    public int SinMarca { get; init; }
+    public int SinGenero { get; init; }
+
+    public PlanillaArticulosIncompletosOutDto(PlanillaArticulosIncompletosDto dto)
+    {
+      SinMarca  = dto.SinMarca;
+      SinGenero = dto.SinGenero;
+    }
+  }
+
+  public sealed class PlanillaFiltrosOutDto
+  {
+    public IReadOnlyList<PlanillaFiltroItemOutDto> Marcas { get; init; } = [];
+    public IReadOnlyList<PlanillaFiltroItemOutDto> Generos { get; init; } = [];
+    public PlanillaArticulosIncompletosOutDto ArticulosIncompletos { get; init; }
+
+    public PlanillaFiltrosOutDto(PlanillaFiltrosDto dto)
+    {
+      Marcas               = dto.Marcas.Select(m => new PlanillaFiltroItemOutDto(m)).ToList();
+      Generos              = dto.Generos.Select(g => new PlanillaFiltroItemOutDto(g)).ToList();
+      ArticulosIncompletos = new PlanillaArticulosIncompletosOutDto(dto.ArticulosIncompletos);
+    }
+  }
+
   public sealed class PagedResultDto<T>
   {
     public IEnumerable<T> Items { get; init; } = [];

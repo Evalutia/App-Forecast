@@ -26,5 +26,12 @@ namespace WebApi.Controllers.Planilla
       var outItems = items.Select(i => new PlanillaVentasOutDto(i));
       return Ok(new PagedResultDto<PlanillaVentasOutDto>(outItems, page, pageSize, totalSkus));
     }
+
+    [HttpGet("filtros")]
+    public ActionResult<PlanillaFiltrosOutDto> GetFiltros()
+    {
+      var dto = _planillaService.GetFiltros();
+      return Ok(new PlanillaFiltrosOutDto(dto));
+    }
   }
 }
