@@ -91,3 +91,26 @@ Ask **one question at a time**. For each question:
 4. Give a concrete follow-up if needed, then move to the next branch.
 
 Start with: "Listo, te empiezo a grillar. Primera pregunta:" and then ask the first question.
+
+## Closing the Session
+
+When all branches are resolved, **before presenting the final summary**:
+
+1. Read `.claude/CONTEXTO.md` from the project root.
+2. Locate the section `## Decisiones de diseño (registradas en sesiones /grill-me)` — if it doesn't exist, create it right before `## Issues conocidos / TODOs en código`.
+3. Append a new subsection with this exact format:
+
+```
+### `<artifact>` — <Issue #N> (sesión YYYY-MM-DD)
+
+| Decisión | Definición |
+|----------|-----------|
+| **<tema>** | <lo acordado> |
+...
+
+> **Nota:** <cualquier aclaración relevante para el frontend, ETL u otros sistemas>
+```
+
+4. Use today's date (available in context as `currentDate`).
+5. Write the updated file.
+6. Confirm: "✅ Decisiones guardadas en `.claude/CONTEXTO.md`" — then present the summary table to the user.
