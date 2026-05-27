@@ -114,3 +114,32 @@ When all branches are resolved, **before presenting the final summary**:
 4. Use today's date (available in context as `currentDate`).
 5. Write the updated file.
 6. Confirm: "✅ Decisiones guardadas en `.claude/CONTEXTO.md`" — then present the summary table to the user.
+
+## Verification Checklist (after any implementation)
+
+After every implementation session (new script, endpoint, migration, frontend feature), generate a **paso a paso de verificación** with this structure:
+
+```
+## ✅ Checklist de verificación — <artifact> (Issue #N)
+
+### 1. Prerequisitos
+- [ ] <qué debe estar corriendo o disponible>
+
+### 2. Prueba unitaria del componente
+- [ ] <comando exacto para probar el componente aislado>
+- [ ] <qué output esperado confirma que funciona>
+
+### 3. Prueba de integración
+- [ ] <cómo verificar que encaja con el sistema completo>
+
+### 4. Verificación en base de datos
+- [ ] <query SQL para confirmar que los datos son correctos>
+
+### 5. Prueba del caso de fallo
+- [ ] <cómo simular un fallo y verificar que el sistema lo maneja bien>
+
+### 6. Listo para commitear cuando
+- [ ] <condición final de aceptación>
+```
+
+Always include exact commands the user can copy-paste. For Docker-based components, include the `docker compose exec` form.
