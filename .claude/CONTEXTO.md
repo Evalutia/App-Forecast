@@ -283,6 +283,18 @@ PREDICT_PERIODS, PREDICT_MODEL_SET, PREDICT_VERSION, PREDICT_SCHEDULE_HOUR
 
 > **Nota:** `run_calc_planilla.sh` pasa las mismas variables MySQL que ya tiene el KJB. No requiere parámetros adicionales.
 
+### `GET /api/planilla/ventas` — Issue #8 (sesión 2026-05-27)
+
+| Decisión | Definición |
+|----------|-----------|
+| **Formato respuesta** | Wide — una fila por SKU con array `meses[]` de 13 elementos. No tall. |
+| **Paginación** | `PagedResultDto<T>` paginado por SKU (igual que el resto de endpoints). `pageSize` default 50. |
+| **Campos de artículo** | `descripcion`, `marca_nombre`, `genero_descripcion`, `stock_minimo` |
+| **Autorización** | `[Authorize]` sin restricción de rol — acceden `administrador` y `duenoDeEmpresa` |
+| **Patrón implementación** | Completo: Controller → Service → Repository con interfaces (igual que `VentasController`) |
+
+> **Nota:** El pivot tall→wide se hace en memoria en el Repository (GroupBy por SKU tras traer los datos del page). El endpoint acepta `page` y `pageSize` como query params. Los filtros (marca, genero, estado_mes) se agregan cuando se implemente el issue #13.
+
 ## Issues conocidos / TODOs en código
 
 | Issue | Ubicación | Descripción |
