@@ -216,6 +216,20 @@ python3 /app/services/python-worker/predict.py \
     </entry>
 
     <entry>
+      <name>RUN CALC_PLANILLA</name>
+      <type>SHELL</type>
+      <filename>/bin/sh</filename>
+      <work_directory>${Internal.Entry.Current.Directory}</work_directory>
+      <arguments><argument>-c</argument></arguments>
+      <insertScript>Y</insertScript>
+      <script><![CDATA[
+/app/services/etl/run_calc_planilla.sh
+      ]]></script>
+      <wait>Y</wait>
+      <xloc>2280</xloc><yloc>64</yloc><draw>Y</draw>
+    </entry>
+
+    <entry>
       <name>TRUNCATE VENTAS_STAGE END</name>
       <type>SQL</type>
       <connection>MYSQL_EVALUTIA</connection>
@@ -243,7 +257,8 @@ DELETE FROM ventas_historicas_stage;
     <hop><from>RUN EXTRACT VENTAS</from><to>MERGE STAGING -> VENTAS (con snapshot)</to><enabled>Y</enabled><unconditional>Y</unconditional></hop>
     <hop><from>MERGE STAGING -> VENTAS (con snapshot)</from><to>CALC_UPSERT_VENTAS_MENSUALES</to><enabled>Y</enabled><unconditional>Y</unconditional></hop>
     <hop><from>CALC_UPSERT_VENTAS_MENSUALES</from><to>RUN PREDICT.PY</to><enabled>Y</enabled><unconditional>Y</unconditional></hop>
-    <hop><from>RUN PREDICT.PY</from><to>TRUNCATE VENTAS_STAGE END</to><enabled>Y</enabled><unconditional>Y</unconditional></hop>
+    <hop><from>RUN PREDICT.PY</from><to>RUN CALC_PLANILLA</to><enabled>Y</enabled><unconditional>Y</unconditional></hop>
+    <hop><from>RUN CALC_PLANILLA</from><to>TRUNCATE VENTAS_STAGE END</to><enabled>Y</enabled><unconditional>Y</unconditional></hop>
     <hop><from>TRUNCATE VENTAS_STAGE END</from><to>SUCCESS</to><enabled>Y</enabled><unconditional>Y</unconditional></hop>
   </hops>
 
