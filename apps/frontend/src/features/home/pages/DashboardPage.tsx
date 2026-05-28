@@ -2,7 +2,6 @@ import { useEffect, useRef } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { useAuthUser } from '../../auth/hooks/useAuthUser';
 import { searchJobs } from '../../jobs/utils/api';
-import LogoutButton from '../../auth/components/LogoutButton';
 import '../../../styles/home.css';
 
 // ── SVG icons ────────────────────────────────────────────────────────────────
@@ -113,22 +112,6 @@ export default function DashboardPage() {
 
   return (
     <div className="home-page">
-
-      {/* ── Header ── */}
-      <header className="home-header">
-        <a href="/home" className="home-brand">Evalutia</a>
-        <div className="home-header-right">
-          {user && (
-            <>
-              <span className="home-role-badge">
-                {isAdmin ? 'Administrador' : 'Propietario'}
-              </span>
-              <span className="home-user-email">{user.email}</span>
-            </>
-          )}
-          <LogoutButton />
-        </div>
-      </header>
 
       {/* ── Hero ── */}
       <section className="home-hero">

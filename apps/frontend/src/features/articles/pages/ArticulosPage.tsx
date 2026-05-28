@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { AnimatePresence, motion } from 'framer-motion';
 import api from '../../../api/client';
 import '../../../styles/articulos.css';
 
@@ -86,12 +87,6 @@ export default function ArticulosPage() {
 
   return (
     <div className="art-page">
-
-      {/* ── Header ── */}
-      <header className="art-header">
-        <a href="/home" className="art-brand">Evalutia</a>
-        <a href="/home" className="art-back-btn">← Dashboard</a>
-      </header>
 
       {/* ── Hero ── */}
       <section className="art-hero">
@@ -233,48 +228,60 @@ export default function ArticulosPage() {
       </div>
 
       {/* ── Detail modal ── */}
-      {selected && (
-        <div
-          className="art-modal-overlay"
-          onClick={e => { if (e.target === e.currentTarget) setSelected(null); }}
-        >
-          <div className="art-modal">
-            <div className="art-modal-header">
-              <h2 className="art-modal-title">{str(selected, 'sku')}</h2>
-              <button className="art-modal-close" onClick={() => setSelected(null)}>✕</button>
-            </div>
+      <AnimatePresence>
+        {selected && (
+          <motion.div
+            className="art-modal-overlay"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: 0.18 }}
+            onClick={e => { if (e.target === e.currentTarget) setSelected(null); }}
+          >
+            <motion.div
+              className="art-modal"
+              initial={{ opacity: 0, scale: 0.96, y: 14 }}
+              animate={{ opacity: 1, scale: 1,    y: 0  }}
+              exit={{    opacity: 0, scale: 0.95, y: 10 }}
+              transition={{ duration: 0.2, ease: 'easeOut' }}
+            >
+              <div className="art-modal-header">
+                <h2 className="art-modal-title">{str(selected, 'sku')}</h2>
+                <button className="art-modal-close" onClick={() => setSelected(null)}>✕</button>
+              </div>
 
-            <div className="art-modal-grid">
-              {([
-                ['Código de Barras', str(selected, 'barcode')],
-                ['Descripción',      str(selected, 'descripcion')],
-                ['Familia',          str(selected, 'familiaNombre')],
-                ['Género',           str(selected, 'generoDescripcion')],
-                ['Sección',          str(selected, 'seccionNombre')],
-                ['Marca',            str(selected, 'marcaNombre')],
-                ['Temporada',        String(pick(selected, 'temporadaNombre') ?? 'Sin definir')
-                                       .replace(/^\{(.*)\}$/, '$1')
-                                       .replace(/^Sin Definir$/i, 'Sin definir')],
-                ['Stock Mínimo',     str(selected, 'stockMinimo')],
-                ['Comentario',       str(selected, 'comentario')],
-                ['Fact Desc Min',    str(selected, 'factDescMin')],
-                ['Fact Desc Max',    str(selected, 'factDescMax')],
-                ['Desc Válida',      str(selected, 'descValida')],
-                ['Frecuencia Mens.', str(selected, 'frecuenciaMensual')],
-              ] as [string, string][]).map(([label, value]) => (
-                <div key={label}>
-                  <div className="art-modal-field-label">{label}</div>
-                  <div className="art-modal-field-value">{value}</div>
-                </div>
-              ))}
-            </div>
+              <div className="art-modal-grid">
+                {([
+                  ['Código de Barras', str(selected, 'barcode')],
+                  ['Descripción',      str(selected, 'descripcion')],
+                  ['Familia',          str(selected, 'familiaNombre')],
+                  ['Género',           str(selected, 'generoDescripcion')],
+                  ['Sección',          str(selected, 'seccionNombre')],
+                  ['Marca',            str(selected, 'marcaNombre')],
+                  ['Temporada',        String(pick(selected, 'temporadaNombre') ?? 'Sin definir')
+                                         .replace(/^\{(.*)\}$/, '$1')
+                                         .replace(/^Sin Definir$/i, 'Sin definir')],
+                  ['Stock Mínimo',     str(selected, 'stockMinimo')],
+                  ['Comentario',       str(selected, 'comentario')],
+                  ['Fact Desc Min',    str(selected, 'factDescMin')],
+                  ['Fact Desc Max',    str(selected, 'factDescMax')],
+                  ['Desc Válida',      str(selected, 'descValida')],
+                  ['Frecuencia Mens.', str(selected, 'frecuenciaMensual')],
+                ] as [string, string][]).map(([label, value]) => (
+                  <div key={label}>
+                    <div className="art-modal-field-label">{label}</div>
+                    <div className="art-modal-field-value">{value}</div>
+                  </div>
+                ))}
+              </div>
 
-            <div className="art-modal-footer">
-              <button className="art-btn-ghost" onClick={() => setSelected(null)}>Cerrar</button>
-            </div>
-          </div>
-        </div>
-      )}
+              <div className="art-modal-footer">
+                <button className="art-btn-ghost" onClick={() => setSelected(null)}>Cerrar</button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
     </div>
   );

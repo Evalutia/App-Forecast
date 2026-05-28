@@ -1,57 +1,64 @@
-import BackToDashboardButton from '../../users/components/BackToDashboardButton';
-import ScrollToTopButton from '../../users/components/ScrollToTopButton';
+import { useEffect, useRef } from 'react';
 import ResumenCards from '../components/ResumenCards';
 import StockAnalysisTable from '../components/StockAnalysisTable';
 import TopVentasPerdidasChart from '../components/charts/TopVentasPerdidasChart';
 import StockoutDistributionChart from '../components/charts/StockoutDistributionChart';
 import AbcChart from '../components/charts/AbcChart';
 import VentasTrendChart from '../components/charts/VentasTrendChart';
+import '../../../styles/dark-layout.css';
 
 export default function ResultadosPage() {
+  const contentRef = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    const el = contentRef.current;
+    if (!el) return;
+    const obs = new IntersectionObserver(
+      entries => entries.forEach(e => {
+        if (e.isIntersecting) { (e.target as HTMLElement).classList.add('visible'); obs.unobserve(e.target); }
+      }),
+      { threshold: 0.02 }
+    );
+    obs.observe(el);
+    return () => obs.disconnect();
+  }, []);
+
   return (
-    <div className="predicciones-page">
-      <div className="predicciones-header">
-        <a href="/home" className="predicciones-brand">Evalutia</a>
-        <div className="predicciones-actions">
-          <BackToDashboardButton />
-        </div>
-      </div>
+    <div className="pg-page">
 
-      <div className="predicciones-container">
-        <header className="section-head">
-          <h1 className="section-title">Resultados</h1>
-          <p className="section-subtitle">
-            Análisis de stock, ventas perdidas por quiebre y sugerencia de compra por producto.
+      <section className="pg-hero">
+        <div className="pg-hero-grid" />
+        <div className="pg-hero-glow" />
+        <div className="pg-hero-content">
+          <h1 className="pg-title">Resultados</h1>
+          <p className="pg-subtitle">
+            Análisis ABC, tasa de stockout y ventas perdidas estimadas por producto.
           </p>
-        </header>
-
-        <h2 className="subsection-title">Resumen general</h2>
-        <ResumenCards />
-
-        <div className="section-divider"></div>
-
-        <h2 className="subsection-title">Gráficos de análisis</h2>
-        <p className="section-subtitle" style={{ marginBottom: '1rem' }}>
-          Visualizaciones clave para tomar decisiones de compra con datos.
-        </p>
-
-        <div className="charts-grid">
-          <VentasTrendChart />
-          <TopVentasPerdidasChart />
-          <AbcChart />
-          <StockoutDistributionChart />
         </div>
+      </section>
 
-        <div className="section-divider"></div>
+      <div className="pg-container pg-container--wide">
+        <div className="pg-reveal" ref={contentRef}>
 
-        <h2 className="subsection-title">Análisis por SKU</h2>
-        <p className="section-subtitle" style={{ marginBottom: '1rem' }}>
-          Hacé clic en una fila para ver el detalle completo del producto.
-        </p>
-        <StockAnalysisTable />
+          <h2 className="pg-subsection-title">Resumen general</h2>
+          <ResumenCards />
+
+          <h2 className="pg-subsection-title">Gráficos de análisis</h2>
+          <div className="pg-charts-grid">
+            <VentasTrendChart />
+            <TopVentasPerdidasChart />
+            <AbcChart />
+            <StockoutDistributionChart />
+          </div>
+
+          <h2 className="pg-subsection-title">Análisis por SKU</h2>
+          <p className="pg-subtitle" style={{ textAlign: 'left', marginBottom: '12px' }}>
+            Hacé clic en una fila para ver el detalle completo del producto.
+          </p>
+          <StockAnalysisTable />
+
+        </div>
       </div>
 
-      <ScrollToTopButton />
     </div>
   );
 }

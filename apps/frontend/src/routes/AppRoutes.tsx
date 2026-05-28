@@ -47,7 +47,7 @@ export default function AppRoutes() {
           <Route path="*" element={<LoginPage />} />
         </Routes>
       </BrowserRouter>
-      <Toaster richColors closeButton />
+      <Toaster richColors closeButton theme="dark" position="top-right" />
     </QueryClientProvider>
   );
 }
