@@ -107,3 +107,96 @@
   display: flex;
   gap: 1rem;
 }
+
+/* ── Tabla planilla ─────────────────────────────────────── */
+.planilla-tabla {
+  border-collapse: separate;
+  border-spacing: 0;
+}
+
+.planilla-sticky-col {
+  position: sticky;
+  left: 0;
+  background: #fff;
+  z-index: 2;
+  border-right: 1px solid var(--border);
+}
+thead .planilla-sticky-col {
+  z-index: 3;
+  background: #f8faf9;
+}
+
+.planilla-col-sku {
+  min-width: 200px;
+  max-width: 240px;
+}
+.planilla-col-stock {
+  text-align: right;
+  white-space: nowrap;
+}
+.planilla-col-mes {
+  text-align: right;
+  white-space: nowrap;
+  min-width: 72px;
+  font-variant-numeric: tabular-nums;
+}
+
+.planilla-sku {
+  display: block;
+  font-weight: 700;
+  font-size: .82rem;
+  letter-spacing: .03em;
+}
+.planilla-desc {
+  display: block;
+  font-size: .78rem;
+  color: #5a7a6a;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 220px;
+}
+
+/* ── Leyenda ─────────────────────────────────────────────── */
+.planilla-leyenda {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: .5rem 1rem;
+  margin-bottom: .75rem;
+  font-size: .78rem;
+}
+.planilla-leyenda-titulo {
+  font-weight: 600;
+  color: #374151;
+}
+.planilla-leyenda-item {
+  display: inline-flex;
+  align-items: center;
+  gap: .35rem;
+  padding: .2rem .55rem;
+  border-radius: .35rem;
+  font-weight: 500;
+}
+.planilla-leyenda-item::before {
+  content: '';
+  display: inline-block;
+  width: .65rem;
+  height: .65rem;
+  border-radius: .15rem;
+}
+.planilla-leyenda-normal {
+  background: rgba(22,163,74,0.12);
+  color: #166534;
+}
+.planilla-leyenda-normal::before { background: rgba(22,163,74,0.6); }
+.planilla-leyenda-quiebre {
+  background: rgba(217,119,6,0.13);
+  color: #92400e;
+}
+.planilla-leyenda-quiebre::before { background: rgba(217,119,6,0.6); }
+.planilla-leyenda-sinstock {
+  background: rgba(220,38,38,0.12);
+  color: #991b1b;
+}
+.planilla-leyenda-sinstock::before { background: rgba(220,38,38,0.6); }

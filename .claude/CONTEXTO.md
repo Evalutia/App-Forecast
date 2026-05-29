@@ -327,6 +327,18 @@ PREDICT_PERIODS, PREDICT_MODEL_SET, PREDICT_VERSION, PREDICT_SCHEDULE_HOUR
 
 > **Nota:** El filtro `estadoMes` se aplica como `.Where(p => p.EstadoMes == estadoMes)` antes del `.Select(p => p.Sku).Distinct()`, lo que naturalmente implementa la semántica "al menos un mes". No requiere subquery adicional.
 
+### `PlanillaPage` — Issue #14 (sesión 2026-05-29)
+
+| Decisión | Definición |
+|----------|-----------|
+| **Contenido de celda de mes** | `ventasCantidad` (número) + `estadoMes` como color de fondo suave. No se apilan múltiples valores en la celda. |
+| **Scroll y sticky** | `overflow-x: auto` en `table-wrap`. Primera columna (SKU + Descripción) sticky con `position: sticky; left: 0`. |
+| **Estado de filtros y paginación** | `useState` local en `PlanillaPage` — no se usa `useSearchParams`. Consistente con `StockAnalysisTable`. |
+| **Columnas fijas** | SKU + Descripción (sticky) + Marca + Stock Mínimo. Género se omite — no aporta valor operacional en la tabla. |
+| **Colores de estadoMes** | Fondos desaturados: verde suave para `normal`, amarillo suave para `quiebre_parcial`, rojo suave para `sin_stock`. Opacidad ~10–15% para no competir con el número. |
+
+> **Nota:** El mes en el header se muestra como "Ene 25" (abreviado). Los colores deben funcionar sobre fondo blanco/claro del `card`. El componente de tabla se llama `PlanillaTable` y recibe los datos y handlers como props desde `PlanillaPage`.
+
 ## Issues conocidos / TODOs en código
 
 | Issue | Ubicación | Descripción |
