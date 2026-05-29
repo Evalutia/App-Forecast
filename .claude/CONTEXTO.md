@@ -311,6 +311,22 @@ PREDICT_PERIODS, PREDICT_MODEL_SET, PREDICT_VERSION, PREDICT_SCHEDULE_HOUR
 
 > **Nota para el frontend (#12):** los dropdowns de filtro deben poblar sus opciones llamando a este endpoint al montar la página de planilla. Si `articulosIncompletos.sinMarca > 0` o `sinGenero > 0`, mostrar un aviso discreto al usuario (ej. tooltip o badge) para que el cliente sepa que hay artículos con datos incompletos en el SOAP.
 
+---
+
+### Filtros en `GET /api/planilla/ventas` — Issue #13 backend (sesión 2026-05-29)
+
+| Decisión | Definición |
+|----------|-----------|
+| **Semántica de estadoMes** | Opción "al menos un mes": se devuelven SKUs que tienen **al menos una fila** con ese `estado_mes` en los 13 meses. No se filtran filas individuales — el array de 13 meses siempre viene completo. |
+| **Dónde se aplican los filtros** | En la **primera query** (paginación de SKUs distintos), antes del `Skip/Take`. Garantiza que `totalSkus` y la página reflejen el mismo universo filtrado. |
+| **Cardinalidad por filtro** | **Single value** — `marcaId`, `generoId` y `estadoMes` aceptan un único valor opcional cada uno. Los dropdowns del frontend son single-select. |
+| **Validación de estadoMes** | El backend valida que el valor sea uno de `"normal"`, `"quiebre_parcial"` o `"sin_stock"`. Si no, retorna `400 Bad Request`. No se deja pasar un string arbitrario a la query. |
+| **Firma de métodos** | Parámetros individuales en cada capa: `GetVentas(int page, int pageSize, uint? marcaId, uint? generoId, string? estadoMes)`. Sin objeto filtro — consistencia con el resto del codebase. |
+| **IQueryable compartido** | Se construye una `IQueryable<string>` base (`skuQuery`) con todos los filtros aplicados, y se reutiliza tanto para `Count()` como para `OrderBy/Skip/Take`. Evita divergencia entre total y página. |
+| **JOIN con articulos** | Los filtros de `marcaId`/`generoId` se aplican intersectando `skuQuery` con un subquery de `articulos` via `.Where(s => articulosQuery.Select(a => a.Sku).Contains(s))` — traducido por EF Core a `IN (SELECT sku FROM articulos WHERE ...)`. |
+
+> **Nota:** El filtro `estadoMes` se aplica como `.Where(p => p.EstadoMes == estadoMes)` antes del `.Select(p => p.Sku).Distinct()`, lo que naturalmente implementa la semántica "al menos un mes". No requiere subquery adicional.
+
 ## Issues conocidos / TODOs en código
 
 | Issue | Ubicación | Descripción |

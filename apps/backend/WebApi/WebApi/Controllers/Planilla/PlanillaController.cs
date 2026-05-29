@@ -20,9 +20,12 @@ namespace WebApi.Controllers.Planilla
     [HttpGet("ventas")]
     public ActionResult<PagedResultDto<PlanillaVentasOutDto>> GetVentas(
         [FromQuery] int page = 1,
-        [FromQuery] int pageSize = 50)
+        [FromQuery] int pageSize = 50,
+        [FromQuery] uint? marcaId = null,
+        [FromQuery] uint? generoId = null,
+        [FromQuery] string? estadoMes = null)
     {
-      var (items, totalSkus) = _planillaService.GetVentas(page, pageSize);
+      var (items, totalSkus) = _planillaService.GetVentas(page, pageSize, marcaId, generoId, estadoMes);
       var outItems = items.Select(i => new PlanillaVentasOutDto(i));
       return Ok(new PagedResultDto<PlanillaVentasOutDto>(outItems, page, pageSize, totalSkus));
     }

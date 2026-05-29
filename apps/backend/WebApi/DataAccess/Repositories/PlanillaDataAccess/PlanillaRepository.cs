@@ -14,21 +14,34 @@ namespace DataAccess.Repositories.PlanillaDataAccess
 
     public (IReadOnlyList<(PlanillaVentasCalculada Fila, string? Descripcion, string? MarcaNombre, string? GeneroDescripcion, int? StockMinimo)> Items, int TotalSkus) GetVentas(
         int page,
-        int pageSize)
+        int pageSize,
+        uint? marcaId,
+        uint? generoId,
+        string? estadoMes)
     {
-      // SKUs distintos paginados, ordenados alfabéticamente
-      var skusPaginados = _db.PlanillasVentasCalculadas
-          .Select(p => p.Sku)
-          .Distinct()
-          .OrderBy(s => s)
-          .Skip((page - 1) * pageSize)
-          .Take(pageSize)
-          .ToList();
+      // Query base sobre filas de planilla — el filtro estadoMes se aplica aquí,
+      // antes del Distinct, lo que implementa la semántica "al menos un mes con ese estado"
+      var planillaQuery = _db.PlanillasVentasCalculadas.AsQueryable();
+      if (estadoMes != null)
+        planillaQuery = planillaQuery.Where(p => p.EstadoMes == estadoMes);
 
-      var totalSkus = _db.PlanillasVentasCalculadas
-          .Select(p => p.Sku)
-          .Distinct()
-          .Count();
+      // IQueryable<string> compartido para Count y Skip/Take
+      var skuQuery = planillaQuery.Select(p => p.Sku).Distinct();
+
+      // Filtros de marca y género via subquery en articulos (→ IN SELECT sku FROM articulos WHERE ...)
+      if (marcaId.HasValue || generoId.HasValue)
+      {
+        var articulosQuery = _db.Articulos.AsQueryable();
+        if (marcaId.HasValue)
+          articulosQuery = articulosQuery.Where(a => a.MarcaId == marcaId);
+        if (generoId.HasValue)
+          articulosQuery = articulosQuery.Where(a => a.GeneroId == generoId);
+        var skusFiltrados = articulosQuery.Select(a => a.Sku);
+        skuQuery = skuQuery.Where(s => skusFiltrados.Contains(s));
+      }
+
+      var totalSkus = skuQuery.Count();
+      var skusPaginados = skuQuery.OrderBy(s => s).Skip((page - 1) * pageSize).Take(pageSize).ToList();
 
       if (!skusPaginados.Any())
         return (new List<(PlanillaVentasCalculada, string?, string?, string?, int?)>(), totalSkus);
