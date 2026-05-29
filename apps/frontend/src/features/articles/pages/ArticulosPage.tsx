@@ -1,57 +1,75 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { AnimatePresence, motion } from 'framer-motion';
 import api from '../../../api/client';
-import BackToDashboardButton from '../../users/components/BackToDashboardButton';
-import ScrollToTopButton from '../../users/components/ScrollToTopButton';
-import Modal from '../../users/components/shared/Modal';
+import '../../../styles/articulos.css';
+
+type Art = Record<string, unknown>;
+
+const pick = (a: Art, k: string): unknown =>
+  a[k] ?? a[`${k.charAt(0).toUpperCase()}${k.slice(1)}`];
+
+const str = (a: Art, ...keys: string[]): string =>
+  String(keys.reduce<unknown>((v, k) => v ?? pick(a, k), undefined) ?? '—');
 
 export default function ArticulosPage() {
-  const [skuInput, setSkuInput] = useState('');
-  const [sku, setSku] = useState('');
+  const [skuInput, setSkuInput]         = useState('');
+  const [sku, setSku]                   = useState('');
   const [familiaInput, setFamiliaInput] = useState('');
-  const [familia, setFamilia] = useState('');
-  const [generoInput, setGeneroInput] = useState('');
-  const [genero, setGenero] = useState('');
-  const [items, setItems] = useState<any[]>([]);
-  const [page, setPage] = useState(1);
-  const [pageSize, setPageSize] = useState(20);
-  const [total, setTotal] = useState(0);
-  const [isLoading, setIsLoading] = useState(false);
-  const [familias, setFamilias] = useState<string[]>([]);
-  const [generos, setGeneros] = useState<string[]>([]);
-  const [selectedArticulo, setSelectedArticulo] = useState<any | null>(null);
+  const [familia, setFamilia]           = useState('');
+  const [generoInput, setGeneroInput]   = useState('');
+  const [genero, setGenero]             = useState('');
+  const [items, setItems]               = useState<Art[]>([]);
+  const [page, setPage]                 = useState(1);
+  const [pageSize, setPageSize]         = useState(20);
+  const [total, setTotal]               = useState(0);
+  const [isLoading, setIsLoading]       = useState(false);
+  const [familias, setFamilias]         = useState<string[]>([]);
+  const [generos, setGeneros]           = useState<string[]>([]);
+  const [selected, setSelected]         = useState<Art | null>(null);
 
-  // Cargar familias una sola vez
+  const filterRef = useRef<HTMLElement | null>(null);
+  const tableRef  = useRef<HTMLElement | null>(null);
+
+  useEffect(() => {
+    const els = [filterRef.current, tableRef.current].filter(Boolean) as HTMLElement[];
+    const obs = new IntersectionObserver(
+      entries => entries.forEach(e => {
+        if (e.isIntersecting) { (e.target as HTMLElement).classList.add('visible'); obs.unobserve(e.target); }
+      }),
+      { threshold: 0.04 }
+    );
+    els.forEach(el => obs.observe(el));
+    return () => obs.disconnect();
+  }, []);
+
   useEffect(() => {
     api.get('/api/Articulos/distinct-familias').then(r => setFamilias(r.data ?? [])).catch(() => {});
   }, []);
 
-  // Cargar géneros filtrados por familia (o todos si no hay familia)
   useEffect(() => {
     const params: Record<string, string> = {};
     if (familiaInput.trim()) params.familia = familiaInput.trim();
     api.get('/api/Articulos/distinct-generos', { params })
       .then(r => {
         setGeneros(r.data ?? []);
-        // Si el género actual no está en la lista filtrada, limpiar
-        if (familiaInput.trim() && generoInput && !(r.data ?? []).includes(generoInput)) {
-          setGeneroInput('');
-        }
+        if (familiaInput.trim() && generoInput && !(r.data ?? []).includes(generoInput)) setGeneroInput('');
       })
       .catch(() => {});
   }, [familiaInput]);
 
-  const fetchPage = async (pageNum: number, skuFilter: string, familiaFilter: string, generoFilter: string, ps = pageSize) => {
+  const fetchPage = async (pageNum: number, skuF: string, familiaF: string, generoF: string, ps = pageSize) => {
     setIsLoading(true);
     try {
-      const params: any = { page: pageNum, pageSize: ps };
-      if (skuFilter && skuFilter.trim() !== '') params.sku = skuFilter.trim();
-      if (familiaFilter && familiaFilter.trim() !== '') params.familiaNombre = familiaFilter.trim();
-      if (generoFilter && generoFilter.trim() !== '') params.generoDescripcion = generoFilter.trim();
-      const res = await api.get('/api/Articulos', { params });
-      const data = res.data;
-      const out = data.items ?? data.Items ?? data;
-      setItems(Array.isArray(out) ? out : []);
-      setTotal(data.total ?? data.Total ?? (Array.isArray(out) ? out.length : 0));
+      const params: Record<string, unknown> = { page: pageNum, pageSize: ps };
+      if (skuF.trim())     params.sku              = skuF.trim();
+      if (familiaF.trim()) params.familiaNombre     = familiaF.trim();
+      if (generoF.trim())  params.generoDescripcion = generoF.trim();
+      const res  = await api.get('/api/Articulos', { params });
+      const data = res.data as Art;
+      const out  = (data['items'] ?? data['Items'] ?? data) as unknown;
+      const rows = Array.isArray(out) ? (out as Art[]) : [];
+      setItems(rows);
+      setTotal(Number(data['total'] ?? data['Total'] ?? rows.length));
     } catch {
       setItems([]);
       setTotal(0);
@@ -62,184 +80,209 @@ export default function ArticulosPage() {
 
   useEffect(() => { fetchPage(page, sku, familia, genero, pageSize); }, [page, sku, familia, genero, pageSize]);
 
-  const handleSearch = () => {
-    setSku(skuInput);
-    setFamilia(familiaInput);
-    setGenero(generoInput);
-    setPage(1);
-  };
-
-  const handleReset = () => {
-    setSkuInput('');
-    setSku('');
-    setFamiliaInput('');
-    setFamilia('');
-    setGeneroInput('');
-    setGenero('');
-    setPage(1);
-  };
+  const handleSearch = () => { setSku(skuInput); setFamilia(familiaInput); setGenero(generoInput); setPage(1); };
+  const handleReset  = () => { setSkuInput(''); setSku(''); setFamiliaInput(''); setFamilia(''); setGeneroInput(''); setGenero(''); setPage(1); };
 
   const totalPages = useMemo(() => Math.max(1, Math.ceil((total || 0) / pageSize)), [total, pageSize]);
 
   return (
-    <div className="predicciones-page">
-      <div className="predicciones-header">
-        <a href="/home" className="predicciones-brand">Evalutia</a>
-        <div className="predicciones-actions">
-          <BackToDashboardButton />
+    <div className="art-page">
+
+      {/* ── Hero ── */}
+      <section className="art-hero">
+        <div className="art-hero-grid" />
+        <div className="art-hero-glow" />
+        <div className="art-hero-content">
+          <h1 className="art-title">Artículos</h1>
+          <p className="art-subtitle">Catálogo completo de productos del sistema.</p>
+          {total > 0 && (
+            <div className="art-stat-pill">{total.toLocaleString('es-UY')} artículos</div>
+          )}
         </div>
-      </div>
+      </section>
 
-      <div className="predicciones-container">
-        <header className="section-head">
-          <h1 className="section-title">Artículos</h1>
-          <p className="section-subtitle">Listado de artículos cargados en la base de datos.</p>
-        </header>
+      {/* ── Content ── */}
+      <div className="art-container">
 
-        <section className="card filters-card articulos-filtros">
-          <div className="filters-grid">
-            <div className="form-row">
-              <label className="label">SKU</label>
+        {/* Filters */}
+        <section className="art-filter-card art-reveal" ref={filterRef}>
+          <div className="art-filters-grid">
+            <div className="art-form-row">
+              <label className="art-label">SKU</label>
               <input
-                className="input"
-                placeholder="p.ej. I01497"
+                className="art-input"
+                placeholder="ej. I01497"
                 value={skuInput}
                 onChange={e => setSkuInput(e.target.value)}
                 onKeyDown={e => e.key === 'Enter' && handleSearch()}
               />
             </div>
-
-            <div className="form-row">
-              <label className="label">Familia</label>
+            <div className="art-form-row">
+              <label className="art-label">Familia</label>
               <input
-                className="input"
-                list="articulos-familia-list"
-                placeholder="Todos"
+                className="art-input"
+                list="art-familia-list"
+                placeholder="Todas"
                 value={familiaInput}
                 onChange={e => setFamiliaInput(e.target.value)}
                 onKeyDown={e => e.key === 'Enter' && handleSearch()}
               />
-              <datalist id="articulos-familia-list">
+              <datalist id="art-familia-list">
                 {familias.map(f => <option key={f} value={f} />)}
               </datalist>
             </div>
-
-            <div className="form-row">
-              <label className="label">Género</label>
+            <div className="art-form-row">
+              <label className="art-label">Género</label>
               <input
-                className="input"
-                list="articulos-genero-list"
+                className="art-input"
+                list="art-genero-list"
                 placeholder="Todos"
                 value={generoInput}
                 onChange={e => setGeneroInput(e.target.value)}
                 onKeyDown={e => e.key === 'Enter' && handleSearch()}
               />
-              <datalist id="articulos-genero-list">
+              <datalist id="art-genero-list">
                 {generos.map(g => <option key={g} value={g} />)}
               </datalist>
             </div>
           </div>
-          <div className="filters-actions">
-            <button type="button" className="button" onClick={handleSearch}>Buscar</button>
-            <button type="button" className="button button-ghost" onClick={handleReset}>Limpiar</button>
+          <div className="art-filter-actions">
+            <button type="button" className="art-btn" onClick={handleSearch}>Buscar</button>
+            <button type="button" className="art-btn-ghost" onClick={handleReset}>Limpiar</button>
           </div>
         </section>
 
-        <section className="card table-card">
-          <div className="table-wrap">
-            <table className="table">
+        {/* Table */}
+        <section className="art-table-card art-reveal" ref={tableRef}>
+          <div className="art-table-wrap">
+            <table className="art-table">
               <thead>
                 <tr>
-                  <th>SKU</th>
+                  <th className="art-th-sku">SKU</th>
                   <th>Descripción</th>
+                  <th>Familia</th>
+                  <th>Género</th>
+                  <th>Marca</th>
+                  <th>Stock Mín.</th>
                 </tr>
               </thead>
               <tbody>
                 {isLoading ? (
-                  Array.from({ length: 8 }).map((_, i) => (
+                  Array.from({ length: 10 }).map((_, i) => (
                     <tr key={i}>
-                      <td><span className="skeleton skel-20" /></td>
-                      <td><span className="skeleton skel-20" /></td>
+                      <td><span className="art-skeleton art-skeleton-sm" /></td>
+                      <td><span className="art-skeleton art-skeleton-lg" /></td>
+                      <td><span className="art-skeleton art-skeleton-md" /></td>
+                      <td><span className="art-skeleton art-skeleton-md" /></td>
+                      <td><span className="art-skeleton art-skeleton-md" /></td>
+                      <td><span className="art-skeleton art-skeleton-sm" /></td>
                     </tr>
                   ))
                 ) : items.length === 0 ? (
-                  <tr>
-                    <td colSpan={2} className="muted" style={{ textAlign: 'center', padding: '1.2rem 0' }}>
-                      No hay resultados.
-                    </td>
-                  </tr>
+                  <tr><td colSpan={6} className="art-empty">No hay resultados.</td></tr>
                 ) : (
-                  items.map((a: any) => (
-                    <tr key={a.sku ?? a.Sku} style={{ cursor: 'pointer' }} onClick={() => setSelectedArticulo(a)}>
-                      <td className="mono" style={{ color: 'var(--emerald-700)', fontWeight: 700 }}>{a.sku ?? a.Sku}</td>
-                      <td>{a.descripcion ?? a.Descripcion ?? ''}</td>
-                    </tr>
-                  ))
+                  items.map(a => {
+                    const sku = str(a, 'sku');
+                    const marca = String(pick(a, 'marcaNombre') ?? '');
+                    const stock = pick(a, 'stockMinimo');
+                    return (
+                      <tr key={sku} onClick={() => setSelected(a)}>
+                        <td className="art-td-sku">{sku}</td>
+                        <td className="art-td-desc">{str(a, 'descripcion')}</td>
+                        <td>{str(a, 'familiaNombre')}</td>
+                        <td>{str(a, 'generoDescripcion')}</td>
+                        <td className="art-td-badge">
+                          {marca ? <span className="art-badge">{marca}</span> : '—'}
+                        </td>
+                        <td>
+                          {stock != null
+                            ? <span className="art-badge art-badge-stock">{String(stock)}</span>
+                            : '—'}
+                        </td>
+                      </tr>
+                    );
+                  })
                 )}
               </tbody>
             </table>
           </div>
 
-          <div className="pager">
-            <div>Página {page} de {totalPages} — Total: <strong>{total}</strong></div>
-            <div className="pager-buttons">
-              <button className="pager-btn" disabled={page <= 1} onClick={() => setPage(p => p - 1)}>Anterior</button>
-              <button className="pager-btn" disabled={page >= totalPages} onClick={() => setPage(p => p + 1)}>Siguiente</button>
+          <div className="art-pager">
+            <span className="art-pager-info">
+              Página <strong>{page}</strong> de <strong>{totalPages}</strong> — Total: <strong>{total}</strong>
+            </span>
+            <div className="art-pager-right">
+              <select
+                className="art-page-size-select"
+                value={pageSize}
+                onChange={e => { setPageSize(Number(e.target.value)); setPage(1); }}
+              >
+                {[10, 20, 50, 100].map(n => <option key={n} value={n}>{n} filas</option>)}
+              </select>
+              <button className="art-pager-btn" disabled={page <= 1} onClick={() => setPage(p => p - 1)}>Anterior</button>
+              <button className="art-pager-btn" disabled={page >= totalPages} onClick={() => setPage(p => p + 1)}>Siguiente</button>
             </div>
-          </div>
-          <div style={{ marginTop: '.5rem' }} className="muted">
-            Filas por página:&nbsp;
-            <select
-              value={pageSize}
-              onChange={(e) => { setPageSize(Number(e.target.value)); setPage(1); }}
-            >
-              {[10, 20, 50, 100].map(n => <option key={n} value={n}>{n}</option>)}
-            </select>
           </div>
         </section>
-      </div>
-      <ScrollToTopButton />
 
-      {selectedArticulo && (
-        <Modal title={`Detalle — ${selectedArticulo.sku ?? selectedArticulo.Sku}`} onClose={() => setSelectedArticulo(null)} maxWidth="52rem">
-          <div style={{ maxWidth: '100%' }}>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.85rem 1.5rem' }}>
-              {[
-                ['Código de Barras',selectedArticulo.barcode          ?? selectedArticulo.Barcode          ?? '—'],
-                ['Descripción',    selectedArticulo.descripcion      ?? selectedArticulo.Descripcion      ?? '—'],
-                ['Familia ID',     selectedArticulo.familiaId        ?? selectedArticulo.FamiliaId        ?? '—'],
-                ['Familia',        selectedArticulo.familiaNombre     ?? selectedArticulo.FamiliaNombre    ?? '—'],
-                ['Género ID',      selectedArticulo.generoId         ?? selectedArticulo.GeneroId         ?? '—'],
-                ['Género',         selectedArticulo.generoDescripcion ?? selectedArticulo.GeneroDescripcion ?? '—'],
-                ['Sección ID',     selectedArticulo.seccionId        ?? selectedArticulo.SeccionId        ?? '—'],
-                ['Sección',        selectedArticulo.seccionNombre     ?? selectedArticulo.SeccionNombre    ?? '—'],
-                ['Marca ID',       selectedArticulo.marcaId          ?? selectedArticulo.MarcaId          ?? '—'],
-                ['Marca',          selectedArticulo.marcaNombre       ?? selectedArticulo.MarcaNombre      ?? '—'],
-                ['Temporada ID',   selectedArticulo.temporadaId      ?? selectedArticulo.TemporadaId      ?? '—'],
-                ['Temporada',      (selectedArticulo.temporadaNombre ?? selectedArticulo.TemporadaNombre ?? 'Sin definir').replace(/^\{(.*)\}$/, '$1').replace(/^Sin Definir$/i, 'Sin definir')],
-                ['Stock Mínimo',   selectedArticulo.stockMinimo      ?? selectedArticulo.StockMinimo      ?? 0],
-                ['Comentario',     selectedArticulo.comentario       ?? selectedArticulo.Comentario       ?? 'Sin definir'],
-                ['Fact Desc Min',  selectedArticulo.factDescMin      ?? selectedArticulo.FactDescMin      ?? '—'],
-                ['Fact Desc Max',  selectedArticulo.factDescMax      ?? selectedArticulo.FactDescMax      ?? '—'],
-                ['Desc Válida',    selectedArticulo.descValida       ?? selectedArticulo.DescValida       ?? '—'],
-                ['Frecuencia Mens.',selectedArticulo.frecuenciaMensual ?? selectedArticulo.FrecuenciaMensual ?? '—'],
-              ].map(([label, value]) => (
-                <div key={label as string}>
-                  <div style={{ fontSize: '0.72rem', fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--muted)', marginBottom: '0.2rem' }}>
-                    {label}
+      </div>
+
+      {/* ── Detail modal ── */}
+      <AnimatePresence>
+        {selected && (
+          <motion.div
+            className="art-modal-overlay"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: 0.18 }}
+            onClick={e => { if (e.target === e.currentTarget) setSelected(null); }}
+          >
+            <motion.div
+              className="art-modal"
+              initial={{ opacity: 0, scale: 0.96, y: 14 }}
+              animate={{ opacity: 1, scale: 1,    y: 0  }}
+              exit={{    opacity: 0, scale: 0.95, y: 10 }}
+              transition={{ duration: 0.2, ease: 'easeOut' }}
+            >
+              <div className="art-modal-header">
+                <h2 className="art-modal-title">{str(selected, 'sku')}</h2>
+                <button className="art-modal-close" onClick={() => setSelected(null)}>✕</button>
+              </div>
+
+              <div className="art-modal-grid">
+                {([
+                  ['Código de Barras', str(selected, 'barcode')],
+                  ['Descripción',      str(selected, 'descripcion')],
+                  ['Familia',          str(selected, 'familiaNombre')],
+                  ['Género',           str(selected, 'generoDescripcion')],
+                  ['Sección',          str(selected, 'seccionNombre')],
+                  ['Marca',            str(selected, 'marcaNombre')],
+                  ['Temporada',        String(pick(selected, 'temporadaNombre') ?? 'Sin definir')
+                                         .replace(/^\{(.*)\}$/, '$1')
+                                         .replace(/^Sin Definir$/i, 'Sin definir')],
+                  ['Stock Mínimo',     str(selected, 'stockMinimo')],
+                  ['Comentario',       str(selected, 'comentario')],
+                  ['Fact Desc Min',    str(selected, 'factDescMin')],
+                  ['Fact Desc Max',    str(selected, 'factDescMax')],
+                  ['Desc Válida',      str(selected, 'descValida')],
+                  ['Frecuencia Mens.', str(selected, 'frecuenciaMensual')],
+                ] as [string, string][]).map(([label, value]) => (
+                  <div key={label}>
+                    <div className="art-modal-field-label">{label}</div>
+                    <div className="art-modal-field-value">{value}</div>
                   </div>
-                  <div style={{ fontSize: '0.95rem', color: 'var(--emerald-950)', wordBreak: 'break-word' }}>
-                    {String(value)}
-                  </div>
-                </div>
-              ))}
-            </div>
-            <div style={{ marginTop: '1.5rem', display: 'flex', justifyContent: 'flex-end' }}>
-              <button className="button button-ghost" onClick={() => setSelectedArticulo(null)}>Cerrar</button>
-            </div>
-          </div>
-        </Modal>
-      )}
+                ))}
+              </div>
+
+              <div className="art-modal-footer">
+                <button className="art-btn-ghost" onClick={() => setSelected(null)}>Cerrar</button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
     </div>
   );
 }

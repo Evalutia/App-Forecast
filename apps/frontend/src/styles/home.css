@@ -1,145 +1,380 @@
-/* ===========================
-   Home / Dashboard Styles
-   =========================== */
+/* ==========================================================================
+   Dashboard / Home — estilo renovado inspirado en la landing de Evalutia
+   ========================================================================== */
 
-/* --- Paleta/vars --- */
-:root{
-  --emerald-50:  #ecfdf5;
-  --emerald-100: #d1fae5;
-  --emerald-200: #a7f3d0;
-  --emerald-600: #059669;
-  --emerald-900: #064e3b;
-  --emerald-950: #022c22;
-  --white: #ffffff;
-
-  --shadow-strong: 0 6px 18px rgba(0,0,0,.12);
-  --shadow-soft-inset: 0 1px 0 rgba(255,255,255,.06) inset;
+/* ── Variables ────────────────────────────────────────────────────────────── */
+:root {
+  --home-bg:          #050e09;
+  --home-green:       #34c48f;
+  --home-green-dim:   rgba(52, 196, 143, 0.12);
+  --home-green-border:rgba(52, 196, 143, 0.25);
+  --home-text:        #f0f5f2;
+  --home-muted:       rgba(240, 245, 242, 0.5);
+  --home-border:      rgba(255, 255, 255, 0.08);
+  --home-card-bg:     rgba(255, 255, 255, 0.04);
+  --home-max:         1100px;
 }
 
-html, body, #root { height: 100%; }
-
-/* === Página === */
-.home-page{
+/* ── Page wrapper ─────────────────────────────────────────────────────────── */
+.home-page {
   min-height: 100dvh;
-  background: linear-gradient(135deg, var(--emerald-950), var(--emerald-900), var(--emerald-950));
-  color: var(--white);
-  padding: 0 0 1.5rem;
-  display: block;
+  background: var(--home-bg);
+  color: var(--home-text);
+  display: flex;
+  flex-direction: column;
+  font-family: 'Inter', ui-sans-serif, system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
 }
 
-/* =========================================
-   HEADER: barra blanca a todo el ancho
-   ========================================= */
-.home-header{
+/* ── Header (dark glassmorphism) ──────────────────────────────────────────── */
+.home-header {
+  position: sticky;
+  top: 0;
+  z-index: 50;
   width: 100%;
-  margin: 0;
-  padding: .75rem 1rem;
+  padding: 0 2rem;
+  height: 64px;
   display: flex;
   align-items: center;
   justify-content: space-between;
-
-  background: var(--white);
-  border-bottom: 1px solid rgba(0,0,0,.06); /* ← sin dorado */
-  border-radius: 0;
-  box-shadow: var(--shadow-strong);
+  background: rgba(5, 14, 9, 0.85);
+  border-bottom: 1px solid var(--home-border);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
 }
 
-/* ====== BRAND: SOLO TEXTO con link ====== */
-.home-brand{
-  background: none;
-  border: 0;
-  border-radius: 0;
-  padding: 0;
-
-  color: var(--emerald-950);
-  font-size: 1.25rem;
-  font-weight: 900;
-  letter-spacing: .18em;
+.home-brand {
+  font-family: 'Syne', 'Montserrat', sans-serif;
+  font-size: 18px;
+  font-weight: 800;
+  letter-spacing: 0.12em;
   text-transform: uppercase;
-  line-height: 1.05;
-
+  color: var(--home-text);
   text-decoration: none;
-  cursor: pointer;
+  transition: color 0.2s;
 }
-.home-brand:hover{ color: var(--emerald-900); }
+.home-brand:hover { color: var(--home-green); }
 
-/* Acciones a la derecha */
-.home-actions{
+.home-header-right {
   display: flex;
   align-items: center;
-  gap: .5rem;
+  gap: 12px;
 }
 
-/* =========================
-   HERO
-   ========================= */
-.home-hero{
-  width: 100%;
-  max-width: 42rem;
-  margin: 7rem auto 0;
+/* Badge de rol */
+.home-role-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 4px 12px;
+  border-radius: 999px;
+  border: 1px solid var(--home-green-border);
+  background: var(--home-green-dim);
+  color: var(--home-green);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+}
+
+.home-user-email {
+  font-size: 13px;
+  color: var(--home-muted);
+  display: none;
+}
+@media (min-width: 640px) {
+  .home-user-email { display: block; }
+}
+
+/* Override logout button en el header oscuro */
+.home-header .btn,
+.home-header button.btn {
+  background: rgba(52, 196, 143, 0.1);
+  border: 1px solid var(--home-green-border);
+  color: var(--home-green);
+  font-size: 0.82rem;
+  padding: 0.35rem 0.85rem;
+  border-radius: 8px;
+}
+.home-header .btn:hover,
+.home-header button.btn:hover {
+  background: rgba(52, 196, 143, 0.2);
+  color: var(--home-text);
+}
+
+/* ── Hero ─────────────────────────────────────────────────────────────────── */
+.home-hero {
+  position: relative;
+  padding: 100px 24px 80px;
+  text-align: center;
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 1.25rem;
-  text-align: center;
+  overflow: hidden;
 }
 
-/* === Título sin contorno dorado === */
-.home-title{
-  margin: 0;
-  font-weight: 700;
-  font-size: clamp(2rem, 3.5vw + 1rem, 3.125rem);
-  color: var(--white);
+/* Grid sutil de fondo */
+.home-hero-grid {
+  position: absolute;
+  inset: 0;
+  background-image:
+    linear-gradient(rgba(255, 255, 255, 0.03) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255, 255, 255, 0.03) 1px, transparent 1px);
+  background-size: 60px 60px;
+  mask-image: radial-gradient(ellipse 80% 60% at 50% 0%, black 0%, transparent 100%);
+  -webkit-mask-image: radial-gradient(ellipse 80% 60% at 50% 0%, black 0%, transparent 100%);
+  pointer-events: none;
+  z-index: 0;
 }
 
-/* === Subtítulo sin contorno dorado === */
-.home-subtitle{
-  margin: .25rem 0 0 0;
-  font-size: 1.25rem;
-  line-height: 1.75;
-  font-weight: 600;
-  color: var(--white);
-  letter-spacing: .01em;
-  max-width: 72ch;
-  text-wrap: balance;
+/* Halo verde en el tope */
+.home-hero-glow {
+  position: absolute;
+  top: 0;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 800px;
+  height: 400px;
+  background: radial-gradient(ellipse at center top, rgba(52, 196, 143, 0.13) 0%, transparent 70%);
+  pointer-events: none;
+  z-index: 0;
 }
 
-/* ====================
-   Botones reutilizables
-   ==================== */
-.btn{
+.home-hero-content {
+  position: relative;
+  z-index: 1;
+  max-width: 680px;
+}
+
+/* Pill animado */
+.home-hero-badge {
   display: inline-flex;
   align-items: center;
+  gap: 8px;
+  padding: 6px 16px;
+  border-radius: 999px;
+  border: 1px solid var(--home-green-border);
+  background: var(--home-green-dim);
+  color: var(--home-green);
+  font-size: 13px;
+  font-weight: 500;
+  letter-spacing: 0.03em;
+  margin-bottom: 28px;
+}
+.home-hero-badge::before {
+  content: '';
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--home-green);
+  animation: home-blink 2s ease infinite;
+  flex-shrink: 0;
+}
+@keyframes home-blink {
+  0%, 100% { opacity: 1; }
+  50%       { opacity: 0.25; }
+}
+
+/* Título — Syne, tamaño fluido */
+.home-title {
+  font-family: 'Syne', 'Montserrat', sans-serif;
+  font-size: clamp(34px, 5vw, 58px);
+  font-weight: 800;
+  line-height: 1.1;
+  letter-spacing: -0.025em;
+  color: var(--home-text);
+  margin: 0 0 18px;
+}
+
+.home-subtitle {
+  font-size: 17px;
+  color: var(--home-muted);
+  max-width: 480px;
+  margin: 0 auto;
+  line-height: 1.7;
+}
+
+/* ── Stats bar ────────────────────────────────────────────────────────────── */
+.home-stats {
+  display: flex;
+  align-items: center;
   justify-content: center;
-  gap: .5rem;
-  padding: .5rem 1rem;
-  border-radius: .5rem;
+  gap: 0;
+  flex-wrap: wrap;
+  border-top:    1px solid var(--home-border);
+  border-bottom: 1px solid var(--home-border);
+  background: rgba(255, 255, 255, 0.02);
+}
 
-  background: rgba(2, 44, 34, .92);
-  border: 1px solid rgba(2, 44, 34, 1);
-  color: var(--white);
+.home-stat-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 18px 28px;
+  font-size: 13px;
+  color: var(--home-muted);
+}
 
-  font-size: .9rem;
-  font-weight: 700;
+.home-stat-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+.home-stat-dot--ok      { background: var(--home-green); box-shadow: 0 0 6px rgba(52,196,143,0.6); }
+.home-stat-dot--err     { background: #f87171; }
+.home-stat-dot--loading { background: #94a3b8; animation: home-blink 1.5s ease infinite; }
+
+.home-stat-sep {
+  width: 1px;
+  height: 20px;
+  background: var(--home-border);
+  flex-shrink: 0;
+}
+
+/* ── Modules ──────────────────────────────────────────────────────────────── */
+.home-modules {
+  max-width: var(--home-max);
+  margin: 0 auto;
+  padding: 52px 24px 80px;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.home-modules-label {
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--home-green);
+  margin: 0 0 20px;
+}
+
+.home-modules-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 14px;
+}
+
+/* ── Module card ──────────────────────────────────────────────────────────── */
+.home-module-card {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 22px 20px;
+  background: var(--home-card-bg);
+  border: 1px solid var(--home-border);
+  border-radius: 14px;
   text-decoration: none;
-  transition: background .15s ease, transform .06s ease, box-shadow .15s ease;
-  box-shadow: var(--shadow-soft-inset), 0 6px 14px rgba(0,0,0,.12);
-  cursor: pointer;
-}
-.btn:hover{ background: var(--emerald-900); }
-.btn:active{ transform: translateY(1px); }
-.btn:disabled{ opacity:.6; cursor:not-allowed; }
+  color: var(--home-text);
 
-/* Variante compacta para el header */
-.btn--sm{
-  padding: .375rem .75rem;
-  font-size: .85rem;
+  /* reveal inicial */
+  opacity: 0;
+  animation: home-card-reveal 0.55s ease forwards;
+  animation-play-state: paused;
+
+  /* hover */
+  transition: background 0.2s, border-color 0.2s, transform 0.2s, box-shadow 0.2s;
 }
 
-/* CTA del HERO más grande */
-.home-hero .btn{
-  font-size: 1.05rem;
-  padding: .7rem 1.25rem;
-  border-radius: .6rem;
-  box-shadow: var(--shadow-soft-inset), 0 10px 18px rgba(0,0,0,.16);
+.home-module-card.visible {
+  animation-play-state: running;
+}
+
+@keyframes home-card-reveal {
+  from { opacity: 0; transform: translateY(18px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+.home-module-card:hover {
+  background: rgba(52, 196, 143, 0.07);
+  border-color: var(--home-green-border);
+  transform: translateY(-3px);
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.25);
+}
+
+/* Icono */
+.home-module-icon {
+  width: 40px;
+  height: 40px;
+  border-radius: 10px;
+  background: var(--home-green-dim);
+  border: 1px solid var(--home-green-border);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+.home-module-icon svg {
+  width: 19px;
+  height: 19px;
+  stroke: var(--home-green);
+  fill: none;
+  stroke-width: 1.8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+/* Cards de admin con tono diferente */
+.home-module-card.admin-only .home-module-icon {
+  background: rgba(148, 163, 184, 0.08);
+  border-color: rgba(148, 163, 184, 0.18);
+}
+.home-module-card.admin-only .home-module-icon svg {
+  stroke: #94a3b8;
+}
+
+/* Texto */
+.home-module-title {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--home-text);
+  line-height: 1.3;
+}
+.home-module-desc {
+  font-size: 13px;
+  color: var(--home-muted);
+  line-height: 1.55;
+  margin-top: 2px;
+}
+
+/* Tag admin */
+.home-module-admin-tag {
+  position: absolute;
+  top: 14px;
+  right: 36px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #94a3b8;
+  background: rgba(148, 163, 184, 0.1);
+  border: 1px solid rgba(148, 163, 184, 0.15);
+  border-radius: 4px;
+  padding: 2px 6px;
+}
+
+/* Flecha */
+.home-module-arrow {
+  position: absolute;
+  bottom: 20px;
+  right: 18px;
+  font-size: 14px;
+  color: var(--home-muted);
+  opacity: 0;
+  transform: translateX(-4px);
+  transition: opacity 0.2s, transform 0.2s;
+}
+.home-module-card:hover .home-module-arrow {
+  opacity: 1;
+  transform: translateX(0);
+}
+
+/* ── Responsive ───────────────────────────────────────────────────────────── */
+@media (max-width: 640px) {
+  .home-header { padding: 0 1rem; }
+  .home-hero   { padding: 70px 16px 56px; }
+  .home-modules { padding: 36px 16px 60px; }
+  .home-modules-grid { grid-template-columns: 1fr; }
+  .home-stat-item { padding: 14px 16px; }
 }

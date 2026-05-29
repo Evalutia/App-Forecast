@@ -1,156 +1,160 @@
-/* --- Base y tipografía --- */
-:root{
-  --emerald-50:  #ecfdf5;
-  --emerald-100: #d1fae5;
-  --emerald-200: #a7f3d0;
-  --emerald-900: #064e3b;
-  --emerald-950: #022c22;
-  --white: #ffffff;
-  --black: #000000;
-}
+/* ==========================================================================
+   login.css — Dark glassmorphism login page
+   ========================================================================== */
 
-html,body,#root{height:100%}
-*{box-sizing:border-box}
-body{
-  margin:0;
-  color: var(--white);
-  background: linear-gradient(135deg, var(--emerald-950), var(--emerald-900), var(--emerald-950));
-  -webkit-font-smoothing: antialiased;
-  -moz-osx-font-smoothing: grayscale;
-}
+html, body, #root { height: 100%; }
+* { box-sizing: border-box; }
 
-/* --- Layout de la página --- */
-.login-page{
+.login-page {
   min-height: 100dvh;
-  display: grid;
-  place-items: center;
-  padding: 3rem 1rem;
+  background: #050e09;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  position: relative;
+  overflow: hidden;
+  font-family: 'Inter', ui-sans-serif, system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
 }
 
-.login-wrapper{
+/* Grid overlay */
+.login-grid {
+  position: absolute;
+  inset: 0;
+  background-image:
+    linear-gradient(rgba(255,255,255,0.025) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255,255,255,0.025) 1px, transparent 1px);
+  background-size: 60px 60px;
+  mask-image: radial-gradient(ellipse 70% 70% at 50% 40%, black 0%, transparent 100%);
+  -webkit-mask-image: radial-gradient(ellipse 70% 70% at 50% 40%, black 0%, transparent 100%);
+  pointer-events: none;
+}
+
+/* Radial glow */
+.login-glow {
+  position: absolute;
+  top: -60px; left: 50%;
+  transform: translateX(-50%);
+  width: 700px; height: 500px;
+  background: radial-gradient(ellipse at center top, rgba(52,196,143,0.13) 0%, transparent 65%);
+  pointer-events: none;
+}
+
+/* Glassmorphism card */
+.login-card {
+  position: relative;
+  z-index: 1;
   width: 100%;
-  max-width: 72rem;
+  max-width: 400px;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 20px;
+  padding: 40px 36px;
+  backdrop-filter: blur(24px);
+  -webkit-backdrop-filter: blur(24px);
+  animation: login-card-in 0.45s ease forwards;
+}
+@keyframes login-card-in {
+  from { opacity: 0; transform: translateY(20px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+/* Brand */
+.login-brand {
+  font-family: 'Syne', 'Montserrat', sans-serif;
+  font-size: 13px;
+  font-weight: 800;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: #34c48f;
+  margin: 0 0 28px;
+  display: block;
+}
+
+/* Title & subtitle */
+.login-title {
+  font-family: 'Syne', 'Montserrat', sans-serif;
+  font-size: 22px;
+  font-weight: 800;
+  color: #f0f5f2;
+  margin: 0 0 8px;
+  letter-spacing: -0.015em;
+  line-height: 1.25;
+}
+
+.login-subtitle {
+  font-size: 14px;
+  color: rgba(240,245,242,0.42);
+  line-height: 1.65;
+  margin: 0 0 28px;
+}
+
+/* Form groups */
+.login-form-group {
   display: flex;
   flex-direction: column;
-  align-items: center;
-  gap: 2.5rem;
-  text-align: center;
-  padding: 0 1rem;
+  gap: 6px;
+  margin-bottom: 14px;
 }
 
-/* --- Marca arriba (EVALUTIA) --- */
-.login-brand{
-  display: inline-block;
-  margin: 0 0 4.4rem 0;
-  font-weight: 900;
-  letter-spacing: .22em;
+.login-label {
+  font-size: 11px;
+  font-weight: 700;
   text-transform: uppercase;
-  font-size: clamp(2rem, 2.4vw + 1.2rem, 3.75rem);
-  line-height: 1.05;
-  color: #022c22;
-  text-shadow: none;
+  letter-spacing: 0.08em;
+  color: rgba(240,245,242,0.42);
 }
 
-/* --- Título y subtítulo SIN contorno dorado --- */
-.login-title{
-  margin: .25rem 0 0;
-  font-weight: 600;
-  font-size: clamp(2rem, 3.5vw + 1rem, 3.125rem);
-  color: var(--white);
-}
-
-.login-subtitle{
-  margin: .6rem auto 0;
-  max-width: 60ch;
-  color: rgba(255,255,255, .95);
-  font-size: 1.125rem;
-  font-weight: 600;
-}
-
-/* --- Tarjeta del formulario (blanco) --- */
-.card{
+.login-input {
   width: 100%;
-  max-width: 28rem;
-  background: rgba(255,255,255,.96);
-  color: var(--emerald-950);
-
-  border: 1px solid rgba(209, 250, 229, .4); /* borde neutro/verde suave */
-  border-radius: 1.5rem;
-  padding: 2rem;
-  box-shadow: 0 25px 40px rgba(2, 44, 34, .2);
-  backdrop-filter: blur(6px);
-}
-
-.card-header{
-  text-align:center;
-  margin-bottom: 1.5rem;
-}
-.card-title{
-  margin: 0 0 .25rem;
-  font-size: 1.75rem;
-  font-weight: 600;
-  color: var(--emerald-950);
-}
-.card-subtitle{
-  margin: 0;
-  font-size: 1rem;
-  font-weight: 700;
-  color: rgba(6, 78, 59, .7);
-}
-
-/* --- Form --- */
-.form-group{ margin-bottom: 1rem; }
-.label{
-  display:block;
-  font-size: .85rem;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: .06em;
-  color: rgba(6, 78, 59, .8);
-  margin-bottom: .35rem;
-}
-.input{
-  width:100%;
-  padding: .75rem 1rem;
-  border-radius: .875rem;
-
-  border: 1px solid rgba(16,185,129,.25);
-  background: var(--white);
-  color: var(--black);
+  padding: 10px 14px;
+  background: rgba(255,255,255,0.05);
+  border: 1px solid rgba(255,255,255,0.1);
+  border-radius: 9px;
+  color: #f0f5f2;
+  font-size: 14px;
+  font-family: inherit;
   outline: none;
-  box-shadow: 0 1px 2px rgba(0,0,0,.04) inset;
+  transition: border-color 0.2s, background 0.2s, box-shadow 0.2s;
+  box-sizing: border-box;
 }
-.input:focus{
-  border-color: #10b981;
-  /* sin halo dorado extra */
-  box-shadow: 0 0 0 3px rgba(52,211,153,.35);
-}
-
-.error{
-  margin:.35rem 0 0;
-  color:#dc2626;
-  font-size: .85rem;
+.login-input::placeholder { color: rgba(240,245,242,0.2); }
+.login-input:focus {
+  border-color: rgba(52,196,143,0.5);
+  background: rgba(52,196,143,0.04);
+  box-shadow: 0 0 0 3px rgba(52,196,143,0.12);
 }
 
-/* Botón (sin contorno dorado en el texto) */
-.button{
-  width:100%;
-  padding: .75rem 1rem;
-  border: 0;
-  border-radius: .875rem;
-  background: var(--emerald-900);
-  color: var(--white);
-  font-size: .9rem;
+.login-error {
+  font-size: 12px;
+  color: #f87171;
+  margin: 2px 0 0;
+}
+
+.login-btn {
+  width: 100%;
+  padding: 12px;
+  margin-top: 10px;
+  background: #34c48f;
+  color: #050e09;
+  border: none;
+  border-radius: 9px;
+  font-size: 14px;
   font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: .06em;
   cursor: pointer;
+  font-family: inherit;
+  transition: opacity 0.2s, transform 0.15s;
 }
-.button:hover{ background: #065f46; }
-.button:disabled{ opacity:.6; cursor:not-allowed; }
+.login-btn:hover:not(:disabled) { opacity: 0.88; transform: translateY(-1px); }
+.login-btn:disabled { opacity: 0.5; cursor: not-allowed; }
 
-/* --- Responsivo sutil --- */
-@media (min-width: 640px){
-  .login-page{ padding: 4rem 1.5rem; }
-  .card{ padding: 2.5rem; }
+.login-footer {
+  margin-top: 24px;
+  padding-top: 18px;
+  border-top: 1px solid rgba(255,255,255,0.06);
+  text-align: center;
+  font-size: 12px;
+  color: rgba(240,245,242,0.25);
+  letter-spacing: 0.02em;
 }
