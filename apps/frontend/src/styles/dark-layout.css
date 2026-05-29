@@ -752,6 +752,66 @@
 .pg-page .total-label { font-size: 13px; color: var(--pg-muted); }
 .pg-page .total-number { font-size: 15px; font-weight: 700; color: var(--pg-green); }
 
+/* ── Planilla-specific dark overrides ────────────────────────────────────── */
+.pg-page .planilla-sticky-col {
+  background: #050e09 !important;
+  border-right-color: rgba(255, 255, 255, 0.08);
+}
+.pg-page thead .planilla-sticky-col {
+  background: rgba(255, 255, 255, 0.04) !important;
+}
+.pg-page .planilla-sku    { color: var(--pg-text); }
+.pg-page .planilla-desc   { color: var(--pg-muted); }
+
+.pg-page .planilla-leyenda-titulo { color: rgba(240,245,242,0.65); }
+.pg-page .planilla-leyenda-normal {
+  background: rgba(255,255,255,0.05);
+  border: 1px solid rgba(255,255,255,0.08);
+  color: rgba(240,245,242,0.6);
+}
+.pg-page .planilla-leyenda-normal::before   { background: rgba(255,255,255,0.3); }
+.pg-page .planilla-leyenda-quiebre {
+  background: rgba(234,179,8,0.15);
+  border: 1px solid rgba(234,179,8,0.25);
+  color: #fcd34d;
+}
+.pg-page .planilla-leyenda-quiebre::before  { background: rgba(234,179,8,0.7); }
+.pg-page .planilla-leyenda-sinstock {
+  background: rgba(100,116,139,0.18);
+  border: 1px solid rgba(100,116,139,0.25);
+  color: #94a3b8;
+}
+.pg-page .planilla-leyenda-sinstock::before { background: rgba(100,116,139,0.6); }
+
+.pg-page .planilla-aviso-incompletos {
+  background: rgba(234,179,8,0.08);
+  border-left-color: rgba(234,179,8,0.5);
+  color: #fcd34d;
+}
+
+/* Summary columns: Rot. DesEstac. y DDSTK */
+.pg-page td.planilla-col-summary,
+.pg-page th.planilla-col-summary {
+  text-align: right;
+  white-space: nowrap;
+  min-width: 96px;
+  font-variant-numeric: tabular-nums;
+  border-left: 1px solid rgba(52,196,143,0.15);
+  background: rgba(52,196,143,0.04) !important;
+}
+.pg-page td.planilla-col-summary {
+  color: var(--pg-text);
+  font-weight: 600;
+  font-size: 0.85rem;
+}
+.pg-page th.planilla-col-summary {
+  color: var(--pg-green) !important;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+}
+.pg-page td.planilla-col-summary.sin-datos { color: var(--pg-muted); font-weight: 400; }
+
 /* ── Responsive ───────────────────────────────────────────────────────────── */
 @media (max-width: 768px) {
   .pg-header      { padding: 0 1rem; }
