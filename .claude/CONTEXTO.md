@@ -327,6 +327,16 @@ PREDICT_PERIODS, PREDICT_MODEL_SET, PREDICT_VERSION, PREDICT_SCHEDULE_HOUR
 
 > **Nota:** El filtro `estadoMes` se aplica como `.Where(p => p.EstadoMes == estadoMes)` antes del `.Select(p => p.Sku).Distinct()`, lo que naturalmente implementa la semántica "al menos un mes". No requiere subquery adicional.
 
+### `FiltrosPlanilla` — Issue #12 (sesión 2026-05-29)
+
+| Decisión | Definición |
+|----------|-----------|
+| **Dónde se llama `usePlanillaFiltros`** | Dentro de `FiltrosPlanilla` — el componente es autocontenido. Solo emite los valores seleccionados hacia `PlanillaPage` vía callbacks. `PlanillaPage` no conoce las opciones de marcas/géneros. |
+| **Aviso de artículos incompletos** | Texto inline dentro de la card de filtros: "⚠ X artículos sin marca · Y sin género". Solo visible cuando `sinMarca > 0` o `sinGenero > 0`. Desaparece si no hay incompletos. |
+| **Estado de carga** | Dropdowns deshabilitados con texto "Cargando…" mientras `usePlanillaFiltros` está pendiente. No se mantienen los skeletons — los controles son visibles pero bloqueados. |
+
+> **Nota:** Si `usePlanillaFiltros` falla, los dropdowns quedan deshabilitados sin mensaje de error crítico — el usuario puede igual navegar la tabla sin filtros. El aviso de incompletos no se muestra si el fetch falló.
+
 ### `PlanillaPage` — Issue #14 (sesión 2026-05-29)
 
 | Decisión | Definición |

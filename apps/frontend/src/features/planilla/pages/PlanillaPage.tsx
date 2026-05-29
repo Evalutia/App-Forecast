@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import BackToDashboardButton from '../../users/components/BackToDashboardButton';
 import ScrollToTopButton from '../../users/components/ScrollToTopButton';
+import FiltrosPlanilla from '../components/FiltrosPlanilla';
 import PlanillaTable from '../components/PlanillaTable';
 import type { PlanillaVentasParams } from '../types/planilla';
 
@@ -48,13 +49,13 @@ export default function PlanillaPage() {
           </p>
         </header>
 
-        {/* Filtros — issues #12 y #13 */}
-        <section className="card filters-card planilla-filtros">
-          <div className="planilla-filtros-placeholder">
-            <span className="skeleton skel-120" />
-            <span className="skeleton skel-120" />
-          </div>
-        </section>
+        <FiltrosPlanilla
+          marcaId={marcaId}
+          generoId={generoId}
+          estadoMes={estadoMes}
+          onFilterChange={handleFilterChange}
+          onReset={handleReset}
+        />
 
         <PlanillaTable
           params={params}

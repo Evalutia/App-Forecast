@@ -108,6 +108,18 @@
   gap: 1rem;
 }
 
+/* ── Aviso artículos incompletos ────────────────────────── */
+.planilla-aviso-incompletos {
+  margin-top: .75rem;
+  padding: .4rem .75rem;
+  border-radius: .4rem;
+  background: rgba(217, 119, 6, 0.1);
+  border-left: 3px solid rgba(217, 119, 6, 0.6);
+  color: #92400e;
+  font-size: .78rem;
+  font-weight: 500;
+}
+
 /* ── Tabla planilla ─────────────────────────────────────── */
 .planilla-tabla {
   border-collapse: separate;
