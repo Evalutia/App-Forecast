@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react';
+import { type ReactElement, useEffect, useRef } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { useAuthUser } from '../../auth/hooks/useAuthUser';
 import { searchJobs } from '../../jobs/utils/api';
@@ -13,7 +13,7 @@ const Icon = ({ d, d2 }: { d: string; d2?: string }) => (
   </svg>
 );
 
-const ICONS: Record<string, JSX.Element> = {
+const ICONS: Record<string, ReactElement> = {
   planilla: <Icon d="M3 10h18M3 14h18M10 3v18M14 3v18M5 3h14a2 2 0 012 2v14a2 2 0 01-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2z" />,
   predicciones: <Icon d="M22 12h-4l-3 9L9 3l-3 9H2" />,
   resultados: <Icon d="M18 20V10M12 20V4M6 20v-6" />,

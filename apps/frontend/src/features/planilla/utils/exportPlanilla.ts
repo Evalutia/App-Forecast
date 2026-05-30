@@ -1,4 +1,4 @@
-import ExcelJS from 'exceljs';
+import ExcelJS, { type Cell } from 'exceljs';
 import { fetchPlanillaVentas } from './api';
 import type { PlanillaVentasDto, PlanillaVentasParams } from '../types/planilla';
 
@@ -82,7 +82,7 @@ export async function exportPlanillaExcel(params: PlanillaVentasParams): Promise
   // Header row
   const headerRow = ws.addRow(headers);
   headerRow.height = 22;
-  headerRow.eachCell((cell, colNum) => {
+  headerRow.eachCell((cell: Cell, colNum: number) => {
     const isSummary = colNum > 4 + mesesRef.length;
     cell.fill   = { type: 'pattern', pattern: 'solid', fgColor: { argb: `FF${isSummary ? COLOR_SUMMARY : COLOR_HEADER}` } };
     cell.font   = { bold: true, color: { argb: 'FFFFFFFF' }, size: 10 };
