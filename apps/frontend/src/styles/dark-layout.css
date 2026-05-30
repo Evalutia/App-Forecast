@@ -754,11 +754,12 @@
 
 /* ── Planilla-specific dark overrides ────────────────────────────────────── */
 .pg-page .planilla-sticky-col {
-  background: #050e09 !important;
-  border-right-color: rgba(255, 255, 255, 0.08);
+  background: #0d1f14 !important;
+  box-shadow: 3px 0 8px rgba(0, 0, 0, 0.45);
+  border-right-color: rgba(52, 196, 143, 0.12);
 }
 .pg-page thead .planilla-sticky-col {
-  background: rgba(255, 255, 255, 0.04) !important;
+  background: #0e2215 !important;
 }
 .pg-page .planilla-sku    { color: var(--pg-text); }
 .pg-page .planilla-desc   { color: var(--pg-muted); }

@@ -65,22 +65,57 @@ export default function PlanillaTable({ params, onPageChange }: Props) {
         <table className="table planilla-tabla">
           <thead>
             <tr>
-              <th className="planilla-sticky-col planilla-col-sku">SKU / Descripción</th>
-              <th>Género</th>
-              <th className="planilla-col-stock">Stock mín.</th>
+              <th className="planilla-sticky-col planilla-col-sku"
+                  title="Código de artículo y descripción">
+                SKU / Descripción
+              </th>
+              <th title="Género del artículo según el catálogo">Género</th>
+              <th className="planilla-col-stock"
+                  title="Stock mínimo configurado para el artículo">
+                Stock mín.
+              </th>
 
               {isLoading
                 ? Array.from({ length: 13 }).map((_, i) => (
                     <th key={i}><span className="skeleton skel-40" /></th>
                   ))
-                : mesHeaders.map(m => (
-                    <th key={`${m.year}-${m.month}`} className="planilla-col-mes">
-                      {mesLabel(m.year, m.month)}
-                    </th>
-                  ))}
+                : mesHeaders.map((m, idx) => {
+                    const esReferencia = idx === mesHeaders.length - 1;
+                    return (
+                      <th
+                        key={`${m.year}-${m.month}`}
+                        className="planilla-col-mes"
+                        title={
+                          esReferencia
+                            ? `${mesLabel(m.year, m.month)} — Mes de referencia (no entra en el promedio de Rot. DesEstac.)\nFórmula: ventas ÷ días con stock\nAmarillo = quiebre parcial · Gris = sin stock`
+                            : `${mesLabel(m.year, m.month)} — Rotación diaria real del mes\nFórmula: ventas_mes ÷ días_con_stock\nAmarillo = quiebre parcial · Gris = sin stock`
+                        }
+                        style={esReferencia ? { opacity: 0.65, fontStyle: 'italic' } : undefined}
+                      >
+                        {mesLabel(m.year, m.month)}
+                      </th>
+                    );
+                  })}
 
-              <th className="planilla-col-summary">Rot. DesEstac.</th>
-              <th className="planilla-col-summary">DDSTK</th>
+              <th className="planilla-col-summary"
+                  title={
+                    'Rotación Diaria Desestacionalizada (promedio)\n' +
+                    'Promedio de la rotación diaria real en meses sin quiebre de stock (≥90% días con stock),\n' +
+                    'excluyendo el mes de referencia más reciente.\n' +
+                    'Fórmula: AVG(ventas_mes ÷ días_con_stock) donde estado_mes = normal\n' +
+                    'Nota: en Fase 2 se aplicará el factor estacional del SOAP para la versión definitiva.'
+                  }>
+                Rot. DesEstac.
+              </th>
+              <th className="planilla-col-summary"
+                  title={
+                    'Demanda Diaria con Stock (DDSTK)\n' +
+                    'Fórmula: Σ ventas del período ÷ Σ días con stock del período\n' +
+                    'Representa la tasa de venta diaria histórica promedio del artículo,\n' +
+                    'calculada sobre todos los meses de la ventana de 13 meses.'
+                  }>
+                DDSTK
+              </th>
             </tr>
           </thead>
 
