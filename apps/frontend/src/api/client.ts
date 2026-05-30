@@ -66,10 +66,9 @@ api.interceptors.response.use(
       lastAt = now;
     }
 
-    // manejar 401 (opcional): limpiar sesión y mandar a /login
     if (status === 401) {
       clearAuth();
-      // si querés: window.location.assign('/login');
+      window.location.assign('/login');
     }
 
     error.status = status;

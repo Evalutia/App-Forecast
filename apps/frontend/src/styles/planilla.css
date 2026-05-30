@@ -1,0 +1,123 @@
+/* ==========================================================================
+   /planilla — tabla de reposición, dark glassmorphism
+   Las variables globales vienen de dark-layout.css
+   ========================================================================== */
+
+/* ── Tabla planilla ─────────────────────────────────────────────────────────── */
+.planilla-tabla {
+  border-collapse: separate;
+  border-spacing: 0;
+}
+
+/* Columna SKU sticky */
+.planilla-sticky-col {
+  position: sticky;
+  left: 0;
+  background: #0d1f14;
+  z-index: 2;
+  border-right: 1px solid rgba(52, 196, 143, 0.12);
+  box-shadow: 3px 0 8px rgba(0, 0, 0, 0.45);
+}
+thead .planilla-sticky-col {
+  z-index: 3;
+  background: #0e2215;
+}
+
+/* Anchos de columnas */
+.planilla-col-sku {
+  min-width: 200px;
+  max-width: 240px;
+}
+.planilla-col-stock {
+  text-align: right;
+  white-space: nowrap;
+}
+.planilla-col-mes {
+  text-align: right;
+  white-space: nowrap;
+  min-width: 72px;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Textos dentro de la celda SKU */
+.planilla-sku {
+  display: block;
+  font-weight: 700;
+  font-size: .82rem;
+  letter-spacing: .03em;
+  color: #f0f5f2;
+}
+.planilla-desc {
+  display: block;
+  font-size: .78rem;
+  color: rgba(240, 245, 242, 0.45);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 220px;
+}
+
+/* ── Leyenda ─────────────────────────────────────────────────────────────────── */
+.planilla-leyenda {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: .5rem 1rem;
+  margin-bottom: .75rem;
+  font-size: .78rem;
+}
+.planilla-leyenda-titulo {
+  font-weight: 600;
+  color: rgba(240, 245, 242, 0.65);
+}
+.planilla-leyenda-item {
+  display: inline-flex;
+  align-items: center;
+  gap: .35rem;
+  padding: .2rem .55rem;
+  border-radius: .35rem;
+  font-weight: 500;
+}
+.planilla-leyenda-item::before {
+  content: '';
+  display: inline-block;
+  width: .65rem;
+  height: .65rem;
+  border-radius: .15rem;
+}
+
+/* Normal: sin color especial */
+.planilla-leyenda-normal {
+  background: rgba(255,255,255,0.05);
+  border: 1px solid rgba(255,255,255,0.08);
+  color: rgba(240,245,242,0.6);
+}
+.planilla-leyenda-normal::before { background: rgba(255,255,255,0.3); }
+
+/* Quiebre parcial: amarillo */
+.planilla-leyenda-quiebre {
+  background: rgba(234,179,8,0.15);
+  border: 1px solid rgba(234,179,8,0.25);
+  color: #fcd34d;
+}
+.planilla-leyenda-quiebre::before { background: rgba(234,179,8,0.7); }
+
+/* Sin stock: gris */
+.planilla-leyenda-sinstock {
+  background: rgba(100,116,139,0.18);
+  border: 1px solid rgba(100,116,139,0.25);
+  color: #94a3b8;
+}
+.planilla-leyenda-sinstock::before { background: rgba(100,116,139,0.6); }
+
+/* ── Aviso artículos incompletos ─────────────────────────────────────────────── */
+.planilla-aviso-incompletos {
+  margin-top: .75rem;
+  padding: .4rem .75rem;
+  border-radius: .4rem;
+  background: rgba(234,179,8,0.08);
+  border-left: 3px solid rgba(234,179,8,0.5);
+  color: #fcd34d;
+  font-size: .78rem;
+  font-weight: 500;
+}

@@ -1,3 +1,4 @@
+using DataAccess.Repositories.PlanillaDataAccess;
 using DataAccess.Repositories.JobDataAccess;
 using DataAccess.Repositories.ArticuloDataAccess;
 using DataAccess.Repositories.StockDiarioDataAccess;
@@ -17,6 +18,7 @@ using Services.Stock;
 using Services.Admin;
 using Services.Usuarios;
 using Services.Ventas;
+using Services.Planilla;
 using Services.Resultados;
 using System.Text;
 using WebApi.Data;
@@ -72,6 +74,8 @@ builder.Services.AddScoped<IVentasMensualesRepository, VentasMensualesRepository
 builder.Services.AddScoped<IStockService, StockService>();
 builder.Services.AddScoped<IAdminService, AdminService>();
 builder.Services.AddScoped<IResultadosService, ResultadosService>();
+builder.Services.AddScoped<IPlanillaRepository, PlanillaRepository>();
+builder.Services.AddScoped<IPlanillaService, PlanillaService>();
 
 // Exception filter global
 builder.Services.AddControllers(o =>

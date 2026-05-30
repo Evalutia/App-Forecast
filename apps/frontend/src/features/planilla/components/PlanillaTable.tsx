@@ -1,0 +1,289 @@
+import { createPortal } from 'react-dom';
+import { useRef, useState } from 'react';
+import type { PlanillaMesDto, PlanillaVentasDto, PlanillaVentasParams } from '../types/planilla';
+import { usePlanillaVentas } from '../hooks/usePlanilla';
+import { exportPlanillaExcel } from '../utils/exportPlanilla';
+
+// ── Helpers ───────────────────────────────────────────────────────────────────
+
+const MESES = ['Ene','Feb','Mar','Abr','May','Jun','Jul','Ago','Sep','Oct','Nov','Dic'];
+const mesLabel = (year: number, month: number) => `${MESES[month - 1]}/${String(year).slice(2)}`;
+
+function estadoMesBg(estado: string): string {
+  if (estado === 'quiebre_parcial') return 'rgba(234,179,8,0.18)';
+  if (estado === 'sin_stock')       return 'rgba(100,116,139,0.18)';
+  return '';
+}
+
+function calcRotDesEstac(meses: PlanillaMesDto[]): string {
+  const closed   = meses.slice(0, -1);
+  const normales = closed.filter(m => m.estadoMes === 'normal' && m.rotacionDiariaReal != null);
+  if (normales.length === 0) return '—';
+  const avg = normales.reduce((s, m) => s + (m.rotacionDiariaReal ?? 0), 0) / normales.length;
+  return avg.toFixed(4);
+}
+
+function calcDdstk(meses: PlanillaMesDto[]): string {
+  const totalVentas = meses.reduce((s, m) => s + Number(m.ventasCantidad), 0);
+  const totalDias   = meses.reduce((s, m) => s + m.diasConStock, 0);
+  if (totalDias === 0) return '—';
+  return (totalVentas / totalDias).toFixed(4);
+}
+
+// ── Tooltip via portal (escapes overflow-x: auto) ─────────────────────────────
+
+const TIP_STYLE: React.CSSProperties = {
+  position: 'fixed',
+  zIndex: 9999,
+  background: '#0d1f14',
+  border: '1px solid rgba(52,196,143,0.28)',
+  borderRadius: '10px',
+  padding: '10px 14px',
+  fontSize: '12px',
+  lineHeight: '1.65',
+  color: '#f0f5f2',
+  whiteSpace: 'pre-line',
+  maxWidth: '300px',
+  boxShadow: '0 12px 32px rgba(0,0,0,0.65)',
+  pointerEvents: 'none',
+  transform: 'translateX(-50%)',
+};
+
+function Tip({ label, tip, style }: { label: React.ReactNode; tip: string; style?: React.CSSProperties }) {
+  const iconRef = useRef<HTMLSpanElement>(null);
+  const [pos, setPos] = useState<{ x: number; y: number } | null>(null);
+
+  const show = (e: React.MouseEvent) => {
+    const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
+    setPos({ x: Math.min(r.left + r.width / 2, window.innerWidth - 160), y: r.bottom + 6 });
+  };
+
+  return (
+    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 3, ...style }}>
+      {label}
+      <span
+        ref={iconRef}
+        style={{ cursor: 'help', opacity: 0.5, fontSize: '11px', lineHeight: 1 }}
+        onMouseEnter={show}
+        onMouseLeave={() => setPos(null)}
+      >
+        ⓘ
+      </span>
+      {pos && createPortal(
+        <div style={{ ...TIP_STYLE, left: pos.x, top: pos.y }}>{tip}</div>,
+        document.body
+      )}
+    </span>
+  );
+}
+
+// ── Legend ────────────────────────────────────────────────────────────────────
+
+function Leyenda() {
+  return (
+    <div className="planilla-leyenda">
+      <span className="planilla-leyenda-titulo">Estado mensual:</span>
+      <span className="planilla-leyenda-item planilla-leyenda-normal">Normal (≥90% días con stock)</span>
+      <span className="planilla-leyenda-item planilla-leyenda-quiebre">Quiebre parcial</span>
+      <span className="planilla-leyenda-item planilla-leyenda-sinstock">Sin stock (mes completo)</span>
+    </div>
+  );
+}
+
+// ── Component ─────────────────────────────────────────────────────────────────
+
+type Props = {
+  params: PlanillaVentasParams;
+  onPageChange: (page: number) => void;
+};
+
+export default function PlanillaTable({ params, onPageChange }: Props) {
+  const { data, isLoading, isFetching, isError } = usePlanillaVentas(params);
+  const [exporting, setExporting] = useState(false);
+
+  const items      = data?.items ?? [];
+  const total      = data?.total ?? 0;
+  const totalPages = Math.max(1, Math.ceil(total / params.pageSize));
+  const mesHeaders: { year: number; month: number }[] = items[0]?.meses ?? [];
+  const lastMesIdx = mesHeaders.length - 1;
+  const totalCols  = 3 + mesHeaders.length + 2; // SKU+Desc, Género, Stock, months, Rot, DDSTK
+
+  const handleExport = async () => {
+    setExporting(true);
+    try {
+      await exportPlanillaExcel(params);
+    } finally {
+      setExporting(false);
+    }
+  };
+
+  return (
+    <section className="card table-card">
+      {/* Top bar: legend + export button */}
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '8px', marginBottom: '8px' }}>
+        <Leyenda />
+        <button
+          type="button"
+          className="pg-btn pg-btn-sm"
+          onClick={handleExport}
+          disabled={exporting || isLoading || total === 0}
+          style={{ flexShrink: 0 }}
+        >
+          {exporting ? 'Exportando…' : '↓ Exportar Excel'}
+        </button>
+      </div>
+
+      <div className="table-wrap" style={{ overflowX: 'auto' }}>
+        <table className="table planilla-tabla">
+          <thead>
+            <tr>
+              <th className="planilla-sticky-col planilla-col-sku">
+                <Tip
+                  label="SKU / Descripción"
+                  tip="Código de artículo y descripción del producto."
+                />
+              </th>
+              <th>
+                <Tip label="Género" tip="Género del artículo según el catálogo." />
+              </th>
+              <th className="planilla-col-stock">
+                <Tip label="Stock mín." tip="Stock mínimo configurado para el artículo." />
+              </th>
+
+              {isLoading
+                ? Array.from({ length: 13 }).map((_, i) => (
+                    <th key={i}><span className="skeleton skel-40" /></th>
+                  ))
+                : mesHeaders.map((m, idx) => {
+                    const esRef = idx === lastMesIdx;
+                    return (
+                      <th
+                        key={`${m.year}-${m.month}`}
+                        className="planilla-col-mes"
+                        style={esRef ? { opacity: 0.65 } : undefined}
+                      >
+                        <Tip
+                          label={<span style={esRef ? { fontStyle: 'italic' } : undefined}>{mesLabel(m.year, m.month)}</span>}
+                          tip={
+                            esRef
+                              ? `${mesLabel(m.year, m.month)} — Mes de referencia\nNo entra en el promedio de Rot. DesEstac.\nFórmula: ventas ÷ días_con_stock`
+                              : `${mesLabel(m.year, m.month)} — Rotación diaria real\nFórmula: ventas_mes ÷ días_con_stock\nAmarillo = quiebre parcial · Gris = sin stock`
+                          }
+                        />
+                      </th>
+                    );
+                  })}
+
+              <th className="planilla-col-summary">
+                <Tip
+                  label="Rot. DesEstac."
+                  tip={
+                    'Rotación Diaria Promedio (meses normales)\n' +
+                    'Promedio de la rotación real en meses sin quiebre (≥90% días con stock),\n' +
+                    'excluyendo el mes de referencia más reciente.\n' +
+                    'Fórmula: AVG(ventas ÷ días_con_stock) donde estado = normal\n\n' +
+                    'Nota: en Fase 2 se reemplaza por el valor desestacionalizado con\n' +
+                    'el factor estacional del sistema de origen.'
+                  }
+                />
+              </th>
+              <th className="planilla-col-summary">
+                <Tip
+                  label="DDSTK"
+                  tip={
+                    'Demanda Diaria con Stock\n' +
+                    'Fórmula: Σ ventas del período ÷ Σ días con stock del período\n' +
+                    'Tasa de venta diaria histórica promedio del artículo,\n' +
+                    'calculada sobre los 13 meses de la ventana.'
+                  }
+                />
+              </th>
+            </tr>
+          </thead>
+
+          <tbody>
+            {isLoading ? (
+              Array.from({ length: 8 }).map((_, i) => (
+                <tr key={i}>
+                  <td className="planilla-sticky-col"><span className="skeleton skel-120" /></td>
+                  <td><span className="skeleton skel-80" /></td>
+                  <td><span className="skeleton skel-40" /></td>
+                  {Array.from({ length: 13 }).map((__, j) => <td key={j}><span className="skeleton skel-40" /></td>)}
+                  <td><span className="skeleton skel-60" /></td>
+                  <td><span className="skeleton skel-60" /></td>
+                </tr>
+              ))
+            ) : isError ? (
+              <tr>
+                <td colSpan={totalCols} className="muted" style={{ textAlign: 'center', padding: '1.5rem 0' }}>
+                  No se pudo cargar la planilla.
+                </td>
+              </tr>
+            ) : items.length === 0 ? (
+              <tr>
+                <td colSpan={totalCols} className="muted" style={{ textAlign: 'center', padding: '1.5rem 0' }}>
+                  No se encontraron artículos con los filtros aplicados.
+                </td>
+              </tr>
+            ) : (
+              items.map((row: PlanillaVentasDto) => {
+                const rd = calcRotDesEstac(row.meses);
+                const dd = calcDdstk(row.meses);
+                return (
+                  <tr key={row.sku}>
+                    <td className="planilla-sticky-col planilla-col-sku">
+                      <span className="planilla-sku">{row.sku}</span>
+                      <span className="planilla-desc">{row.descripcion ?? '—'}</span>
+                    </td>
+                    <td>{row.generoDescripcion ?? '—'}</td>
+                    <td className="planilla-col-stock">{row.stockMinimo ?? '—'}</td>
+
+                    {row.meses.map((mes, idx) => (
+                      <td
+                        key={`${mes.year}-${mes.month}`}
+                        className="planilla-col-mes"
+                        style={{ backgroundColor: estadoMesBg(mes.estadoMes) }}
+                        title={`${mesLabel(mes.year, mes.month)} · ${mes.diasConStock}/${mes.diasNaturalesMes} días con stock · ${mes.ventasCantidad} uds.`}
+                      >
+                        <span style={idx === lastMesIdx ? { opacity: 0.6, fontStyle: 'italic' } : undefined}>
+                          {mes.rotacionDiariaReal != null ? mes.rotacionDiariaReal.toFixed(4) : '0.0000'}
+                        </span>
+                      </td>
+                    ))}
+
+                    <td className={`planilla-col-summary${rd === '—' ? ' sin-datos' : ''}`}>{rd}</td>
+                    <td className={`planilla-col-summary${dd === '—' ? ' sin-datos' : ''}`}>{dd}</td>
+                  </tr>
+                );
+              })
+            )}
+          </tbody>
+        </table>
+      </div>
+
+      <div className="pager">
+        <div className="muted">
+          {isFetching && !isLoading
+            ? 'Actualizando…'
+            : `${total} artículos · Página ${params.page} de ${totalPages}`}
+        </div>
+        <div className="pager-buttons">
+          <button
+            className="pager-btn"
+            disabled={params.page <= 1}
+            onClick={() => onPageChange(params.page - 1)}
+          >
+            Anterior
+          </button>
+          <button
+            className="pager-btn"
+            disabled={params.page >= totalPages}
+            onClick={() => onPageChange(params.page + 1)}
+          >
+            Siguiente
+          </button>
+        </div>
+      </div>
+    </section>
+  );
+}

@@ -10,81 +10,13 @@ import ArticulosPage from '../features/articles/pages/ArticulosPage';
 import VentasMensualesPage from '../features/salesmonthly/pages/VentasMensualesPage';
 import StockDiarioPage from '../features/stock/pages/StockDiarioPage';
 import ResultadosPage from '../features/resultados/pages/ResultadosPage';
+import PlanillaPage from '../features/planilla/pages/PlanillaPage';
 import JobDetailPage from '../features/jobs/pages/JobDetailPage';
-import LogoutButton from '../features/auth/components/LogoutButton';
-import AdminUsersButton from '../features/auth/components/AdminUsersButton';
-import { useAuthUser } from '../features/auth/hooks/useAuthUser';
+import DashboardPage from '../features/home/pages/DashboardPage';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { Toaster } from 'sonner';
 
 const queryClient = new QueryClient();
-
-function Dashboard() {
-  const { user } = useAuthUser();
-
-  return (
-    <div className="home-page">
-      {/* Header */}
-      <div className="home-header">
-        {/* Evalutia ahora es link a /home */}
-        <a href="/home" className="home-brand">Evalutia</a>
-        <div className="home-actions">
-          <AdminUsersButton />
-          <LogoutButton />
-        </div>
-      </div>
-
-      {/* Hero */}
-      <div className="home-hero">
-        <h1 className="home-title">Tu negocio, gestionado con inteligencia.</h1>
-        <p className="home-subtitle">
-          Visualizá métricas clave, obtené predicciones confiables y optimizá la eficiencia de tu empresa en un solo lugar.
-        </p>
-
-        {/* CTA */}
-        <div>
-          <a href="/predicciones" className="btn">
-            Ver mis predicciones
-          </a>
-        </div>
-        {user && user.role === 'administrador' && (
-          <div>
-            <a href="/ventas" className="btn">
-              Ver las ventas cargadas
-            </a>
-          </div>
-        )}
-        <div>
-          <a href="/articulos" className="btn">
-            Ver mis artículos
-          </a>
-        </div>
-        <div>
-          <a href="/ventas-mensuales" className="btn">
-            Ver las ventas mensuales
-          </a>
-        </div>
-        <div>
-          <a href="/stock-diario" className="btn">
-            Ver el stock diario
-          </a>
-        </div>
-        <div>
-          <a href="/resultados" className="btn">
-            Ver resultados
-          </a>
-        </div>
-        {user && user.role === 'administrador' && (
-          <div>
-            <a href="/jobs" className="btn">
-              Ver historial de ejecuciones 
-            </a>
-          </div>
-        )}
-      </div>
-    </div>
-  );
-}
 
 export default function AppRoutes() {
   return (
@@ -95,14 +27,14 @@ export default function AppRoutes() {
           <Route path="/login" element={<LoginPage />} />
           {/* privadas */}
           <Route element={<RequireAuth />}>
-            <Route path="/" element={<Dashboard />} />
-            {/* alias /home apunta al mismo Dashboard */}
-            <Route path="/home" element={<Dashboard />} />
+            <Route path="/"     element={<DashboardPage />} />
+            <Route path="/home" element={<DashboardPage />} />
             <Route path="/predicciones" element={<PrediccionesPage />} />
             <Route path="/articulos" element={<ArticulosPage />} />
             <Route path="/ventas-mensuales" element={<VentasMensualesPage />} />
             <Route path="/stock-diario" element={<StockDiarioPage />} />
             <Route path="/resultados" element={<ResultadosPage />} />
+            <Route path="/planilla" element={<PlanillaPage />} />
             {/* Solo administradores */}
             <Route element={<RequireAdmin />}>
               <Route path="/usuarios" element={<UsersPage />} />
@@ -115,7 +47,7 @@ export default function AppRoutes() {
           <Route path="*" element={<LoginPage />} />
         </Routes>
       </BrowserRouter>
-      <Toaster richColors closeButton />
+      <Toaster richColors closeButton theme="dark" position="top-right" />
     </QueryClientProvider>
   );
 }

@@ -33,6 +33,8 @@ public class EvalutiaDbContext : DbContext
 
   public virtual DbSet<VentaHistorica> VentasHistoricas { get; set; }
 
+  public virtual DbSet<PlanillaVentasCalculada> PlanillasVentasCalculadas { get; set; }
+
   protected override void OnModelCreating(ModelBuilder modelBuilder)
   {
     modelBuilder
@@ -311,6 +313,41 @@ public class EvalutiaDbContext : DbContext
           .HasDefaultValueSql("CURRENT_TIMESTAMP(6)")
           .HasColumnType("timestamp(6)")
           .HasColumnName("ts_carga");
+    });
+
+    modelBuilder.Entity<PlanillaVentasCalculada>(entity =>
+    {
+      entity.HasKey(e => new { e.Sku, e.Year, e.Month }).HasName("PRIMARY");
+
+      entity.ToTable("planilla_ventas_calculada");
+
+      entity.Property(e => e.Sku)
+          .HasMaxLength(128)
+          .HasColumnName("sku");
+      entity.Property(e => e.Year)
+          .HasColumnType("smallint unsigned")
+          .HasColumnName("year");
+      entity.Property(e => e.Month)
+          .HasColumnType("tinyint unsigned")
+          .HasColumnName("month");
+      entity.Property(e => e.VentasCantidad)
+          .HasColumnName("ventas_cantidad");
+      entity.Property(e => e.DiasConStock)
+          .HasColumnName("dias_con_stock");
+      entity.Property(e => e.DiasNaturalesMes)
+          .HasColumnName("dias_naturales_mes");
+      entity.Property(e => e.RotacionDiariaReal)
+          .HasPrecision(10, 4)
+          .HasColumnName("rotacion_diaria_real");
+      entity.Property(e => e.RotacionDiariaBruta)
+          .HasPrecision(10, 4)
+          .HasColumnName("rotacion_diaria_bruta");
+      entity.Property(e => e.RotacionDiariaDesestacionalizada)
+          .HasPrecision(10, 4)
+          .HasColumnName("rotacion_diaria_desestacionalizada");
+      entity.Property(e => e.EstadoMes)
+          .HasColumnType("enum('normal','quiebre_parcial','sin_stock')")
+          .HasColumnName("estado_mes");
     });
   }
 }
