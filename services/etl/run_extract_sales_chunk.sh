@@ -16,10 +16,8 @@ ID_EMPRESA="${ID_EMPRESA:-}"
 ID_GRUPO="${ID_GRUPO:-}"
 S_DEPOSITOS="${S_DEPOSITOS:-}"
 
-# Si GROUPS no está definido, tomar ID_GRUPO (compatibilidad)
 GROUPS="${GROUPS:-${ID_GRUPO:-}}"
 if [ -z "${GROUPS}" ]; then
-  # fallback razonable
   GROUPS="201"
 fi
 
@@ -44,18 +42,18 @@ fi
 BASE="$(printf '%s' "${WS_URL}" | sed -E 's,/+$,,')"
 ENDPOINT="${BASE}/VsWebProduccion/SwNadWeb.asmx"
 
-TMP_REQ="/tmp/soap_request_sales.$$.$RANDOM.xml"
-TMP_HDR="/tmp/soap_headers_sales.$$.$RANDOM.txt"
-TMP_XML="/tmp/soap_response_sales.$$.$RANDOM.xml"
-TMP_JSON="/tmp/ws_json_sales.$$.$RANDOM.json"
+# ── Una llamada SOAP por depósito + ingest Python ────────────────────────────
+# El WS no acepta lista de depósitos — se itera igual que run_extract_stockxml.sh
+call_for_deposito() {
+  local dep="$1"
 
-trap 'cp -f "$TMP_REQ" /tmp/last_soap_request_sales.xml 2>/dev/null || true;
-      cp -f "$TMP_HDR" /tmp/soap_headers_sales.txt 2>/dev/null || true;
-      cp -f "$TMP_XML" /tmp/soap_response_sales.xml 2>/dev/null || true;
-      [[ -s "$TMP_JSON" ]] && cp -f "$TMP_JSON" /tmp/last_ws_json_sales.json 2>/dev/null || true' EXIT
+  local TMP_REQ="/tmp/soap_request_sales.$$.${dep}.xml"
+  local TMP_HDR="/tmp/soap_headers_sales.$$.${dep}.txt"
+  local TMP_XML="/tmp/soap_response_sales.$$.${dep}.xml"
+  local TMP_JSON="/tmp/ws_json_sales.$$.${dep}.json"
 
-{
-  cat <<XML
+  {
+    cat <<XML
 <?xml version="1.0" encoding="utf-8"?>
 <soap:Envelope xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
                xmlns:xsd="http://www.w3.org/2001/XMLSchema"
@@ -63,49 +61,74 @@ trap 'cp -f "$TMP_REQ" /tmp/last_soap_request_sales.xml 2>/dev/null || true;
   <soap:Body>
     <${WS_METHOD} xmlns="${WS_NS}">
 XML
-  [[ -n "$ID_EMPRESA"  ]] && echo "      <IdEmpresa>${ID_EMPRESA}</IdEmpresa>"
-  echo "      <DesdeFec>${CHUNK_START}</DesdeFec>"
-  echo "      <HastaFec>${CHUNK_END}</HastaFec>"
-  # Si GROUPS contiene varios, iterar (el script original iteraba fuera; aquí soportamos solo IdGrupo)
-  if [[ "${GROUPS}" =~ ^[0-9]+(,[0-9]+)*$ ]]; then
-    # pasar como IdGrupo el primer valor si viene coma-separado, o mejor construir multiples llamadas:
-    echo "      <IdGrupo>${GROUPS}</IdGrupo>"
-  else
-    [[ -n "$ID_GRUPO" ]] && echo "      <IdGrupo>${ID_GRUPO}</IdGrupo>"
-  fi
-  [[ -n "$S_DEPOSITOS" ]] && echo "      <sDepositos>${S_DEPOSITOS}</sDepositos>"
-  cat <<XML
+    [[ -n "$ID_EMPRESA" ]] && echo "      <IdEmpresa>${ID_EMPRESA}</IdEmpresa>"
+    echo "      <DesdeFec>${CHUNK_START}</DesdeFec>"
+    echo "      <HastaFec>${CHUNK_END}</HastaFec>"
+    if [[ "${GROUPS}" =~ ^[0-9]+(,[0-9]+)*$ ]]; then
+      echo "      <IdGrupo>${GROUPS}</IdGrupo>"
+    else
+      [[ -n "$ID_GRUPO" ]] && echo "      <IdGrupo>${ID_GRUPO}</IdGrupo>"
+    fi
+    [[ -n "$dep" ]] && echo "      <sDepositos>${dep}</sDepositos>"
+    cat <<XML
     </${WS_METHOD}>
   </soap:Body>
 </soap:Envelope>
 XML
-} > "$TMP_REQ"
+  } > "$TMP_REQ"
 
-curl -sS --http1.1 \
-  -D "$TMP_HDR" \
-  -H "Content-Type: text/xml; charset=utf-8" \
-  -H "SOAPAction: \"${WS_SOAP_ACTION}\"" \
-  --data-binary @"$TMP_REQ" \
-  "${ENDPOINT}" \
-  -o "$TMP_XML"
+  curl -sS --http1.1 \
+    -D "$TMP_HDR" \
+    -H "Content-Type: text/xml; charset=utf-8" \
+    -H "SOAPAction: \"${WS_SOAP_ACTION}\"" \
+    --data-binary @"$TMP_REQ" \
+    "${ENDPOINT}" \
+    -o "$TMP_XML"
 
-if [[ ! -s "$TMP_XML" ]]; then
-  echo "[ERROR] Respuesta vacía de ConsStockVenta"
-  exit 10
+  # Conservar últimos archivos para debug
+  cp -f "$TMP_REQ" /tmp/last_soap_request_sales.xml   2>/dev/null || true
+  cp -f "$TMP_HDR" /tmp/soap_headers_sales.txt         2>/dev/null || true
+  cp -f "$TMP_XML" /tmp/soap_response_sales.xml        2>/dev/null || true
+
+  if [[ ! -s "$TMP_XML" ]]; then
+    echo "[ERROR] Respuesta vacía de ConsStockVenta (deposito ${dep})"
+    rm -f "$TMP_REQ" "$TMP_HDR" "$TMP_XML" "$TMP_JSON"
+    return 10
+  fi
+
+  local JSON
+  JSON="$(perl -0777 -ne "print \$1 if m{<${WS_METHOD}Result>([\\s\\S]*?)</${WS_METHOD}Result>}i" "$TMP_XML" || true)"
+  [[ -z "$JSON" ]] && JSON="$(perl -0777 -ne 'print $1 if m{<string[^>]*>([\s\S]*?)</string>}i'           "$TMP_XML" || true)"
+  [[ -z "$JSON" ]] && JSON="$(perl -0777 -ne 'print $1 if m{<!\[CDATA\[(.*?)\]\]>}is'                      "$TMP_XML" || true)"
+
+  if [[ -z "$JSON" ]]; then
+    echo "[WARN] No se detectó JSON en ConsStockVenta (deposito ${dep})"
+    echo "[DUMP] Inicio de body (1200 chars):"; head -c 1200 "$TMP_XML"; echo
+    rm -f "$TMP_REQ" "$TMP_HDR" "$TMP_XML" "$TMP_JSON"
+    return 11
+  fi
+
+  JSON="$(printf "%s" "$JSON" | sed -e 's/&quot;/"/g' -e 's/&amp;/\&/g' -e 's/&lt;/</g' -e 's/&gt;/>/g')"
+  printf '%s' "$JSON" > "$TMP_JSON"
+  [[ -s "$TMP_JSON" ]] && cp -f "$TMP_JSON" /tmp/last_ws_json_sales.json 2>/dev/null || true
+
+  export TMP_JSON_PATH="$TMP_JSON"
+  python3 /app/services/etl/run_extract_sales_chunk.py
+
+  rm -f "$TMP_REQ" "$TMP_HDR" "$TMP_XML" "$TMP_JSON"
+}
+
+# ── Main: iterar por depósito si viene lista separada por comas ──────────────
+if [[ "${S_DEPOSITOS}" == *","* ]]; then
+  OLD_IFS="$IFS"
+  IFS=","
+  for dep in ${S_DEPOSITOS}; do
+    dep="$(echo "$dep" | tr -d '[:space:]')"
+    [[ -z "$dep" ]] && continue
+    echo "[INFO] Ejecutando ConsStockVenta para deposito: ${dep}"
+    call_for_deposito "${dep}" || echo "[WARN] Fallo en deposito ${dep}, continuando con el siguiente..."
+  done
+  IFS="$OLD_IFS"
+else
+  call_for_deposito "${S_DEPOSITOS:-}"
 fi
-
-JSON="$(perl -0777 -ne "print \$1 if m{<${WS_METHOD}Result>([\\s\\S]*?)</${WS_METHOD}Result>}i" "$TMP_XML" || true)"
-[[ -z "$JSON" ]] && JSON="$(perl -0777 -ne 'print $1 if m{<string[^>]*>([\s\S]*?)</string>}i' "$TMP_XML" || true)"
-[[ -z "$JSON" ]] && JSON="$(perl -0777 -ne 'print $1 if m{<!\[CDATA\[(.*?)\]\]>}is' "$TMP_XML" || true)"
-
-if [[ -z "$JSON" ]]; then
-  echo "[WARN] No se detectó JSON en ConsStockVenta"
-  echo "[DUMP] Inicio de body (1200 chars):"; head -c 1200 "$TMP_XML"; echo
-  exit 11
-fi
-
-JSON="$(printf "%s" "$JSON" | sed -e 's/&quot;/"/g' -e 's/&amp;/\&/g' -e 's/&lt;/</g' -e 's/&gt;/>/g')"
-printf '%s' "$JSON" > "$TMP_JSON"
-export TMP_JSON_PATH="$TMP_JSON"
-
-python3 /app/services/etl/run_extract_sales_chunk.py

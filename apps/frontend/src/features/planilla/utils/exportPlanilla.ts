@@ -60,7 +60,7 @@ export async function exportPlanillaExcel(params: PlanillaVentasParams): Promise
     'SKU',
     'Descripción',
     'Género',
-    'Stock mín.',
+    'VTA',              // ventas totales 12 meses cerrados
     ...mesLabels,
     'Rot. DesEstac.',
     'DDSTK',
@@ -71,7 +71,7 @@ export async function exportPlanillaExcel(params: PlanillaVentasParams): Promise
     { width: 13 },                        // SKU
     { width: 34 },                        // Descripción
     { width: 18 },                        // Género
-    { width: 11 },                        // Stock mín.
+    { width: 10 },                        // VTA
     ...mesesRef.map((_, i) => ({          // Monthly (last one slightly different)
       width: i === lastMesIdx ? 10 : 9,
     })),
@@ -83,7 +83,8 @@ export async function exportPlanillaExcel(params: PlanillaVentasParams): Promise
   const headerRow = ws.addRow(headers);
   headerRow.height = 22;
   headerRow.eachCell((cell: Cell, colNum: number) => {
-    const isSummary = colNum > 4 + mesesRef.length;
+    // cols 1-3 = SKU/Desc/Género (header), col 4 = VTA (summary), rest = monthly, last 2 = summary
+    const isSummary = colNum === 4 || colNum > 4 + mesesRef.length;
     cell.fill   = { type: 'pattern', pattern: 'solid', fgColor: { argb: `FF${isSummary ? COLOR_SUMMARY : COLOR_HEADER}` } };
     cell.font   = { bold: true, color: { argb: 'FFFFFFFF' }, size: 10 };
     cell.alignment = { vertical: 'middle', horizontal: colNum <= 2 ? 'left' : 'center', wrapText: false };
@@ -97,11 +98,13 @@ export async function exportPlanillaExcel(params: PlanillaVentasParams): Promise
     const rd = rotDesEstac(item.meses);
     const dd = ddstk(item.meses);
 
+    const vta = item.meses.slice(0, -1).reduce((s, m) => s + Number(m.ventasCantidad), 0);
+
     const rowValues = [
       item.sku,
       item.descripcion ?? '',
       item.generoDescripcion ?? '',
-      item.stockMinimo ?? '',
+      vta,
       ...item.meses.map(m => (m.rotacionDiariaReal != null ? m.rotacionDiariaReal : 0)),
       rd,
       dd,
@@ -114,6 +117,13 @@ export async function exportPlanillaExcel(params: PlanillaVentasParams): Promise
     const skuCell = row.getCell(1);
     skuCell.font      = { bold: true, size: 10 };
     skuCell.alignment = { vertical: 'middle' };
+
+    // VTA col (col 4): summary style
+    const vtaCell = row.getCell(4);
+    vtaCell.numFmt    = '#,##0';
+    vtaCell.alignment = { horizontal: 'right', vertical: 'middle' };
+    vtaCell.font      = { bold: true, size: 10, color: { argb: 'FF065F46' } };
+    vtaCell.fill      = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFD1FAE5' } };
 
     // Style monthly cols with estado color
     item.meses.forEach((mes, i) => {
@@ -142,7 +152,7 @@ export async function exportPlanillaExcel(params: PlanillaVentasParams): Promise
       };
     });
 
-    // Summary cols
+    // Summary cols (col 4=VTA ya estilizada, los siguientes son meses 5..5+n-1, luego Rot y DDSTK)
     const rdCell = row.getCell(5 + mesesRef.length);
     rdCell.numFmt    = '0.0000';
     rdCell.alignment = { horizontal: 'right', vertical: 'middle' };

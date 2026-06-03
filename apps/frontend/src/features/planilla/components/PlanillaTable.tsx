@@ -30,6 +30,11 @@ function calcDdstk(meses: PlanillaMesDto[]): string {
   return (totalVentas / totalDias).toFixed(4);
 }
 
+// VTA: suma de ventasCantidad de los 12 meses cerrados (excluye el mes de referencia)
+function calcVta(meses: PlanillaMesDto[]): number {
+  return meses.slice(0, -1).reduce((s, m) => s + Number(m.ventasCantidad), 0);
+}
+
 // ── Tooltip via portal (escapes overflow-x: auto) ─────────────────────────────
 
 const TIP_STYLE: React.CSSProperties = {
@@ -106,7 +111,7 @@ export default function PlanillaTable({ params, onPageChange }: Props) {
   const totalPages = Math.max(1, Math.ceil(total / params.pageSize));
   const mesHeaders: { year: number; month: number }[] = items[0]?.meses ?? [];
   const lastMesIdx = mesHeaders.length - 1;
-  const totalCols  = 3 + mesHeaders.length + 2; // SKU+Desc, Género, Stock, months, Rot, DDSTK
+  const totalCols  = 3 + mesHeaders.length + 2; // SKU+Desc, Género, VTA, months, Rot.DesEstac., DDSTK
 
   const handleExport = async () => {
     setExporting(true);
@@ -146,8 +151,15 @@ export default function PlanillaTable({ params, onPageChange }: Props) {
               <th>
                 <Tip label="Género" tip="Género del artículo según el catálogo." />
               </th>
-              <th className="planilla-col-stock">
-                <Tip label="Stock mín." tip="Stock mínimo configurado para el artículo." />
+              <th className="planilla-col-summary">
+                <Tip
+                  label="VTA"
+                  tip={
+                    'Ventas Totales del período\n' +
+                    'Suma de unidades vendidas en los 12 meses cerrados.\n' +
+                    'Excluye el mes de referencia más reciente.'
+                  }
+                />
               </th>
 
               {isLoading
@@ -207,7 +219,7 @@ export default function PlanillaTable({ params, onPageChange }: Props) {
                 <tr key={i}>
                   <td className="planilla-sticky-col"><span className="skeleton skel-120" /></td>
                   <td><span className="skeleton skel-80" /></td>
-                  <td><span className="skeleton skel-40" /></td>
+                  <td><span className="skeleton skel-60" /></td>
                   {Array.from({ length: 13 }).map((__, j) => <td key={j}><span className="skeleton skel-40" /></td>)}
                   <td><span className="skeleton skel-60" /></td>
                   <td><span className="skeleton skel-60" /></td>
@@ -227,8 +239,9 @@ export default function PlanillaTable({ params, onPageChange }: Props) {
               </tr>
             ) : (
               items.map((row: PlanillaVentasDto) => {
-                const rd = calcRotDesEstac(row.meses);
-                const dd = calcDdstk(row.meses);
+                const rd  = calcRotDesEstac(row.meses);
+                const dd  = calcDdstk(row.meses);
+                const vta = calcVta(row.meses);
                 return (
                   <tr key={row.sku}>
                     <td className="planilla-sticky-col planilla-col-sku">
@@ -236,7 +249,7 @@ export default function PlanillaTable({ params, onPageChange }: Props) {
                       <span className="planilla-desc">{row.descripcion ?? '—'}</span>
                     </td>
                     <td>{row.generoDescripcion ?? '—'}</td>
-                    <td className="planilla-col-stock">{row.stockMinimo ?? '—'}</td>
+                    <td className="planilla-col-summary">{vta.toLocaleString('es-UY')}</td>
 
                     {row.meses.map((mes, idx) => (
                       <td

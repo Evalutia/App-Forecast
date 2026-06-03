@@ -95,7 +95,7 @@ WS_URL=https://cliente.com/VsWebProduccion/SwNadWeb.asmx
 WS_USER=
 WS_PASS=
 WS_ID_GRUPO=201
-S_DEPOSITOS=1,5
+S_DEPOSITOS=1,5,8,9,10,11
 WS_TIMEOUT_MS=30000
 WS_SOURCE_NAME=grupo201
 
@@ -180,9 +180,9 @@ docker compose run --rm etl /opt/pentaho/data-integration/kitchen.sh \
 ### 5) **Backfill de 2 años** (ejemplo exacto probado)
 **Windows PowerShell (exacto que usamos):**
 ```powershell
-docker compose exec etl /bin/bash -lc "/opt/pentaho/data-integration/kitchen.sh -file=/app/services/etl/job_etl_diario.kjb -level=Basic -param:WS_URL=http://200.125.29.194:81 -param:DATE_FMT=dmy -param:ID_EMPRESA=1 -param:S_DEPOSITOS=1,5 -param:GRUPOS=201 -param:MYSQL_HOST=mysql -param:MYSQL_DB=evalutia -param:MYSQL_USER=evalutia -param:MYSQL_PASSWORD=evalutia -param:MYSQL_PORT=3306 -param:PREDICT_PERIODS=2 -param:PREDICT_RESAMPLE_RULE=QS -param:PREDICT_MODEL_SET=classic -param:PREDICT_VERSION=mvp-002 -param:FORCE_START=03/10/2016 -param:FORCE_END=25/02/2026"
+docker compose exec etl /bin/bash -lc "/opt/pentaho/data-integration/kitchen.sh -file=/app/services/etl/job_etl_diario.kjb -level=Basic -param:WS_URL=http://200.125.29.194:81 -param:DATE_FMT=dmy -param:ID_EMPRESA=1 -param:S_DEPOSITOS=1,5,8,9,10,11 -param:GRUPOS=201 -param:MYSQL_HOST=mysql -param:MYSQL_DB=evalutia -param:MYSQL_USER=evalutia -param:MYSQL_PASSWORD=evalutia -param:MYSQL_PORT=3306 -param:PREDICT_PERIODS=2 -param:PREDICT_RESAMPLE_RULE=QS -param:PREDICT_MODEL_SET=classic -param:PREDICT_VERSION=mvp-002 -param:FORCE_START=30/05/2023 -param:FORCE_END=30/05/2026"
 
-docker compose exec etl /bin/bash -lc "STEP_DAYS=365 /opt/pentaho/data-integration/kitchen.sh -file=/app/services/etl/job_etl_diario.kjb -level=Basic -param:WS_URL=http://200.125.29.194:81 -param:DATE_FMT=dmy -param:ID_EMPRESA=1 -param:S_DEPOSITOS=1,5 -param:GRUPOS=201 -param:MYSQL_HOST=mysql -param:MYSQL_DB=evalutia -param:MYSQL_USER=evalutia -param:MYSQL_PASSWORD=evalutia -param:MYSQL_PORT=3306 -param:PREDICT_PERIODS=2 -param:PREDICT_RESAMPLE_RULE=QS -param:PREDICT_MODEL_SET=classic -param:PREDICT_VERSION=mvp-002 -param:FORCE_START=03/10/2016 -param:FORCE_END=25/02/2026"
+docker compose exec etl /bin/bash -lc "STEP_DAYS=365 /opt/pentaho/data-integration/kitchen.sh -file=/app/services/etl/job_etl_diario.kjb -level=Basic -param:WS_URL=http://200.125.29.194:81 -param:DATE_FMT=dmy -param:ID_EMPRESA=1 -param:S_DEPOSITOS=1,5,8,9,10,11 -param:GRUPOS=201 -param:MYSQL_HOST=mysql -param:MYSQL_DB=evalutia -param:MYSQL_USER=evalutia -param:MYSQL_PASSWORD=evalutia -param:MYSQL_PORT=3306 -param:PREDICT_PERIODS=2 -param:PREDICT_RESAMPLE_RULE=QS -param:PREDICT_MODEL_SET=classic -param:PREDICT_VERSION=mvp-002 -param:FORCE_START=03/10/2016 -param:FORCE_END=25/02/2026"
 ```
 
 **Backfill de 2 años relativo (PowerShell):**
