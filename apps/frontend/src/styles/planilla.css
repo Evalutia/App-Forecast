@@ -110,6 +110,42 @@ thead .planilla-sticky-col {
 }
 .planilla-leyenda-sinstock::before { background: rgba(100,116,139,0.6); }
 
+/* ── Badge fiabilidad (columna AE) ──────────────────────────────────────────── */
+.planilla-ae-cell {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 3px;
+}
+.planilla-ae-rot {
+  font-variant-numeric: tabular-nums;
+  font-size: .82rem;
+}
+.planilla-badge {
+  display: inline-block;
+  padding: .1rem .4rem;
+  border-radius: .3rem;
+  font-size: .72rem;
+  font-weight: 600;
+  letter-spacing: .02em;
+  white-space: nowrap;
+}
+.planilla-badge--verde {
+  background: rgba(22, 163, 74, 0.20);
+  color: #4ade80;
+  border: 1px solid rgba(22, 163, 74, 0.30);
+}
+.planilla-badge--amarillo {
+  background: rgba(202, 138, 4, 0.20);
+  color: #fcd34d;
+  border: 1px solid rgba(202, 138, 4, 0.30);
+}
+.planilla-badge--rojo {
+  background: rgba(220, 38, 38, 0.20);
+  color: #f87171;
+  border: 1px solid rgba(220, 38, 38, 0.30);
+}
+
 /* ── Aviso artículos incompletos ─────────────────────────────────────────────── */
 .planilla-aviso-incompletos {
   margin-top: .75rem;

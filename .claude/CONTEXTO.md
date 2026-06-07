@@ -419,6 +419,20 @@ PREDICT_PERIODS, PREDICT_MODEL_SET, PREDICT_VERSION, PREDICT_SCHEDULE_HOUR
 
 > **Nota para frontend (#19, #20):** el frontend carga este endpoint al montar `PlanillaPage` (una sola vez), lo indexa por SKU, y une los valores a cada fila de la tabla de planilla client-side. No hacer un request por página de planilla.
 
+### Columna AE en `PlanillaTable` — Issue #19 (sesión 2026-06-07)
+
+| Decisión | Definición |
+|----------|-----------|
+| **Dónde se fetcha** | En `PlanillaPage` — hook `usePlanillaSugerencias` al mismo nivel que los filtros. Se construye `Map<sku, sugerencia>` y se pasa como prop a `PlanillaTable`. Un solo fetch para toda la sesión, independiente de paginación y filtros. |
+| **Formato de celda** | Dos elementos apilados (opción A): número de rotación arriba (`2.9710`), badge de fiabilidad abajo (`78%` con fondo de color). |
+| **Posición en tabla** | Última columna, después de DDSTK. Es el "veredicto" del sistema tras el contexto histórico. |
+| **`fiabilidad = null`** | Mostrar `—` con clase `sin-datos`, igual que Rot. DesEstac. y DDSTK. No usar badge gris. |
+| **`staleTime`** | `5 * 60_000` (5 minutos) — igual que `usePlanillaFiltros`. Datos cambian solo con el ETL nocturno. |
+| **Loading state** | Skeleton `skel-60` en cada celda de AE mientras el fetch de sugerencias está pendiente. Distingue "cargando" de "sin datos". |
+| **Colores del badge** | Verde (`#16a34a` bg suave) ≥70% · Amarillo (`#ca8a04` bg suave) 40–69% · Rojo (`#dc2626` bg suave) <40% |
+
+> **Nota:** `rotacionSugerida = null` también muestra `—` sin badge. El badge solo aparece cuando `rotacionSugerida` tiene valor (aunque `fiabilidad` podría ser 0 — en ese caso badge rojo). El Map de sugerencias se construye en `PlanillaPage` con `useMemo`.
+
 ## Issues conocidos / TODOs en código
 
 | Issue | Ubicación | Descripción |
