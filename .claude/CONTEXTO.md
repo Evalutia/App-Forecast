@@ -378,6 +378,23 @@ PREDICT_PERIODS, PREDICT_MODEL_SET, PREDICT_VERSION, PREDICT_SCHEDULE_HOUR
 
 > **Nota:** El set de SKUs procesados se acumula en memoria durante el upsert loop y se pasa como `IN (...)` al UPDATE final. Para >10.000 SKUs considerar usar una tabla temporal, pero no es el caso actual.
 
+### `run_calc_sugerencias.py` — Issue #15 (sesión 2026-06-07)
+
+| Decisión | Definición |
+|----------|-----------|
+| **Qué es `rotacion_sugerida`** | Tendencia suavizada de rotación histórica reciente — **no** un forecast. Promedio ponderado de los últimos N meses `normal` de `rotacion_diaria_real` en `planilla_ventas_calculada`. Semántica: "a qué ritmo está rotando este SKU hoy". |
+| **Filtro de meses** | Solo `estado_mes = 'normal'`. Meses con `quiebre_parcial` o `sin_stock` tienen rotación artificialmente suprimida y distorsionarían la tendencia hacia abajo. |
+| **Mínimo de meses** | 3 meses `normal`. Si un SKU tiene menos → `rotacion_sugerida = NULL`, `fiabilidad_porcentaje = NULL`. |
+| **Ventana** | Todos los meses `normal` disponibles, hasta 13 (ventana completa de `planilla_ventas_calculada`). No se limita a 6 — productos de tecnología tienen ciclos largos y 13 meses da más robustez. |
+| **Pesos** | Lineales: mes más antiguo = peso 1, mes más reciente = peso N (donde N = cantidad de meses normales usados). |
+| **`fiabilidad_porcentaje`** | Coeficiente de variación inverso: `max(0, (1 - std/mean) * 100)`. Mide estabilidad de la rotación. CV > 1 → fiabilidad 0. Rotación consistente → fiabilidad alta. No usar R² (penalizaría SKUs con rotación estable horizontal) ni % de meses con datos (mide calidad de datos, no del modelo). |
+| **`modelo`** | `'weighted_avg_13m'` — nombre fijo en la columna `modelo` de `planilla_sugerencias`. |
+| **Arquitectura** | Nuevo script `run_calc_sugerencias.py` + wrapper `run_calc_sugerencias.sh`. Invocado desde `job_etl_diario.kjb` después de `RUN CALC_PLANILLA`, antes de `TRUNCATE VENTAS_STAGE END`. |
+| **Atomicidad** | Una sola transacción: calcular todos los SKUs en memoria → INSERT masivo con ON DUPLICATE KEY UPDATE → COMMIT. ROLLBACK en fallo → tabla conserva valores anteriores. |
+| **Bloqueante** | No — fallo del script no aborta el ETL. Se loguea en `jobs_historial` con `subtipo = 'calc_sugerencias'`. |
+
+> **Nota para frontend (#19):** `fiabilidad_porcentaje` debe mostrarse como badge de color en la columna AE: verde (≥70), amarillo (40–69), rojo (<40). NULL = sin datos suficientes, mostrar "—". `rotacion_sugerida` NULL también muestra "—" sin crashear.
+
 ## Issues conocidos / TODOs en código
 
 | Issue | Ubicación | Descripción |
