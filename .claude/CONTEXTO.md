@@ -433,6 +433,21 @@ PREDICT_PERIODS, PREDICT_MODEL_SET, PREDICT_VERSION, PREDICT_SCHEDULE_HOUR
 
 > **Nota:** `rotacionSugerida = null` también muestra `—` sin badge. El badge solo aparece cuando `rotacionSugerida` tiene valor (aunque `fiabilidad` podría ser 0 — en ese caso badge rojo). El Map de sugerencias se construye en `PlanillaPage` con `useMemo`.
 
+### Columna QBK en `PlanillaTable` — Issue #20 (sesión 2026-06-07)
+
+| Decisión | Definición |
+|----------|-----------|
+| **Fuente de datos** | `diasHastaQuiebre` ya está en `PlanillaSugerenciaDto` cargado en #19. No hay nuevo endpoint ni hook — reutiliza el mismo `Map<sku, sugerencia>` de `PlanillaPage`. |
+| **Ubicación en tabla** | Columna nueva separada, inmediatamente después de AE (última columna). |
+| **Formato de celda** | Badge simple (opción B): número redondeado a entero + "d". Ej: `15d`, `5d`, `0d`. No apilado vertical. |
+| **Umbrales de color** | Rojo = 0 (quiebre ya) · Amarillo > 0 y ≤ 15d (urgencia alta) · Verde > 15d (OK). |
+| **Texto en `= 0`** | `0d` — consistente con el formato numérico. El rojo comunica la urgencia. |
+| **`null`** | `—` con clase `sin-datos`, igual que AE y DDSTK. |
+| **Nombre de columna** | `QBK` — sigue el patrón de abreviaturas del proyecto (VTA, DDSTK, AE). Tooltip explica el significado. |
+| **Loading state** | Skeleton `skel-60` igual que AE — reutiliza `sugerenciasLoading` ya disponible en `PlanillaTable`. |
+
+> **Nota:** el umbral de 15 días es el lead time típico de reposición para productos de tecnología. Es arbitrario y documentado en el tooltip para que el cliente lo entienda.
+
 ## Issues conocidos / TODOs en código
 
 | Issue | Ubicación | Descripción |

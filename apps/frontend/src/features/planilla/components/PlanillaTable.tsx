@@ -41,6 +41,18 @@ function fiabilidadClass(pct: number): string {
   return 'planilla-badge planilla-badge--rojo';
 }
 
+function qbkClass(dias: number): string {
+  if (dias === 0)  return 'planilla-badge planilla-badge--rojo';
+  if (dias <= 15)  return 'planilla-badge planilla-badge--amarillo';
+  return 'planilla-badge planilla-badge--verde';
+}
+
+function QbkCell({ s }: { s: PlanillaSugerenciaDto | undefined }) {
+  if (!s || s.diasHastaQuiebre === null) return <span className="muted">—</span>;
+  const dias = Math.round(s.diasHastaQuiebre);
+  return <span className={qbkClass(dias)}>{dias}d</span>;
+}
+
 function AeCell({ s }: { s: PlanillaSugerenciaDto | undefined }) {
   if (!s || s.rotacionSugerida === null) return <span className="muted">—</span>;
   return (
@@ -133,7 +145,7 @@ export default function PlanillaTable({ params, onPageChange, sugerencias, suger
   const totalPages = Math.max(1, Math.ceil(total / params.pageSize));
   const mesHeaders: { year: number; month: number }[] = items[0]?.meses ?? [];
   const lastMesIdx = mesHeaders.length - 1;
-  const totalCols  = 3 + mesHeaders.length + 3; // SKU+Desc, Género, VTA, months, Rot.DesEstac., DDSTK, AE
+  const totalCols  = 3 + mesHeaders.length + 4; // SKU+Desc, Género, VTA, months, Rot.DesEstac., DDSTK, AE, QBK
 
   const handleExport = async () => {
     setExporting(true);
@@ -247,6 +259,20 @@ export default function PlanillaTable({ params, onPageChange, sugerencias, suger
                   }
                 />
               </th>
+              <th className="planilla-col-summary">
+                <Tip
+                  label="QBK"
+                  tip={
+                    'Días estimados hasta quiebre de stock\n' +
+                    'Fórmula: stock_actual ÷ rotación_sugerida (AE)\n\n' +
+                    'Badge de urgencia:\n' +
+                    '  Rojo    = 0d — sin stock ya\n' +
+                    '  Amarillo ≤ 15d — menos de 2 semanas (lead time típico)\n' +
+                    '  Verde   > 15d — margen suficiente\n\n' +
+                    '— = sin datos suficientes para calcular.'
+                  }
+                />
+              </th>
             </tr>
           </thead>
 
@@ -258,6 +284,7 @@ export default function PlanillaTable({ params, onPageChange, sugerencias, suger
                   <td><span className="skeleton skel-80" /></td>
                   <td><span className="skeleton skel-60" /></td>
                   {Array.from({ length: 13 }).map((__, j) => <td key={j}><span className="skeleton skel-40" /></td>)}
+                  <td><span className="skeleton skel-60" /></td>
                   <td><span className="skeleton skel-60" /></td>
                   <td><span className="skeleton skel-60" /></td>
                   <td><span className="skeleton skel-60" /></td>
@@ -308,6 +335,11 @@ export default function PlanillaTable({ params, onPageChange, sugerencias, suger
                       {sugerenciasLoading
                         ? <span className="skeleton skel-60" />
                         : <AeCell s={sugerencias.get(row.sku)} />}
+                    </td>
+                    <td className="planilla-col-summary">
+                      {sugerenciasLoading
+                        ? <span className="skeleton skel-60" />
+                        : <QbkCell s={sugerencias.get(row.sku)} />}
                     </td>
                   </tr>
                 );
