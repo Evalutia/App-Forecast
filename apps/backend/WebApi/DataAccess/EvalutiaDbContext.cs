@@ -35,6 +35,8 @@ public class EvalutiaDbContext : DbContext
 
   public virtual DbSet<PlanillaVentasCalculada> PlanillasVentasCalculadas { get; set; }
 
+  public virtual DbSet<PlanillaSugerencias> PlanillasSugerencias { get; set; }
+
   protected override void OnModelCreating(ModelBuilder modelBuilder)
   {
     modelBuilder
@@ -355,6 +357,26 @@ public class EvalutiaDbContext : DbContext
       entity.Property(e => e.EstadoMes)
           .HasColumnType("enum('normal','quiebre_parcial','sin_stock')")
           .HasColumnName("estado_mes");
+    });
+
+    modelBuilder.Entity<PlanillaSugerencias>(entity =>
+    {
+      entity.HasKey(e => e.Sku).HasName("PRIMARY");
+
+      entity.ToTable("planilla_sugerencias");
+
+      entity.Property(e => e.Sku)
+          .HasMaxLength(128)
+          .HasColumnName("sku");
+      entity.Property(e => e.RotacionSugerida)
+          .HasPrecision(10, 4)
+          .HasColumnName("rotacion_sugerida");
+      entity.Property(e => e.FiabilidadPorcentaje)
+          .HasPrecision(5, 2)
+          .HasColumnName("fiabilidad_porcentaje");
+      entity.Property(e => e.DiasHastaQuiebre)
+          .HasPrecision(10, 2)
+          .HasColumnName("dias_hasta_quiebre");
     });
   }
 }

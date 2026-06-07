@@ -36,5 +36,12 @@ namespace WebApi.Controllers.Planilla
       var dto = _planillaService.GetFiltros();
       return Ok(new PlanillaFiltrosOutDto(dto));
     }
+
+    [HttpGet("sugerencias")]
+    public ActionResult<IReadOnlyList<PlanillaSugerenciaOutDto>> GetSugerencias()
+    {
+      var items = _planillaService.GetSugerencias();
+      return Ok(items.Select(i => new PlanillaSugerenciaOutDto(i)).ToList());
+    }
   }
 }

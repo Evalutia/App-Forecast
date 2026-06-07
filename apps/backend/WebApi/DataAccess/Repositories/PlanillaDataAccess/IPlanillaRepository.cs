@@ -13,5 +13,7 @@ namespace DataAccess.Repositories.PlanillaDataAccess
     );
 
     (List<(uint Id, string Nombre)> Marcas, List<(uint Id, string Nombre)> Generos, int SinMarca, int SinGenero) GetFiltros();
+
+    IReadOnlyList<PlanillaSugerencias> GetSugerencias();
   }
 }
