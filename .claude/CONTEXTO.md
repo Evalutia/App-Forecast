@@ -395,6 +395,17 @@ PREDICT_PERIODS, PREDICT_MODEL_SET, PREDICT_VERSION, PREDICT_SCHEDULE_HOUR
 
 > **Nota para frontend (#19):** `fiabilidad_porcentaje` debe mostrarse como badge de color en la columna AE: verde (≥70), amarillo (40–69), rojo (<40). NULL = sin datos suficientes, mostrar "—". `rotacion_sugerida` NULL también muestra "—" sin crashear.
 
+### `run_calc_sugerencias.py` (ampliación) — Issue #17 (sesión 2026-06-07)
+
+| Decisión | Definición |
+|----------|-----------|
+| **Integración** | Dentro del mismo `run_calc_sugerencias.py`, misma pasada en memoria. `dias_hasta_quiebre` se calcula justo después de `rotacion_sugerida` para cada SKU, antes del INSERT. Sin script separado. |
+| **`stock_actual`** | `MAX(fecha)` por SKU individual + `SUM(cantidad)` de todos los depósitos en esa fecha. Cada SKU usa su último dato disponible, independientemente de la fecha del último ETL. |
+| **Stock negativo** | Se trata como `0` → `dias_hasta_quiebre = 0`. Es un artefacto de timing del ETL, no un estado real. No se guardan valores negativos. |
+| **Fórmula** | `max(0, stock_actual) / rotacion_sugerida`. Si `rotacion_sugerida` es NULL o 0 → `NULL`. Si stock = 0 → `0`. Resultado en `DECIMAL(10,2)`. |
+
+> **Nota para frontend (#20):** `dias_hasta_quiebre = 0` significa quiebre ya (mostrar badge rojo). `NULL` significa que no hay datos suficientes para calcular (mostrar "—"). Valor positivo = días estimados hasta quiebre con la rotación actual.
+
 ## Issues conocidos / TODOs en código
 
 | Issue | Ubicación | Descripción |

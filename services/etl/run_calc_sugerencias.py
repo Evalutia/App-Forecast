@@ -1,17 +1,23 @@
 #!/usr/bin/env python3
 """
-run_calc_sugerencias.py — Calcula rotacion_sugerida y fiabilidad_porcentaje
-por SKU y persiste en planilla_sugerencias.
+run_calc_sugerencias.py — Calcula rotacion_sugerida, fiabilidad_porcentaje
+y dias_hasta_quiebre por SKU y persiste en planilla_sugerencias.
 
-Algoritmo:
+Algoritmo rotacion_sugerida:
   - Toma los meses con estado_mes='normal' de planilla_ventas_calculada
     (hasta MAX_MESES meses, los más recientes).
   - Si un SKU tiene < MIN_MESES_NORMAL meses normal → rotacion_sugerida = NULL.
-  - Rotación sugerida: promedio ponderado con pesos lineales
-    (más reciente = mayor peso).
-  - Fiabilidad: max(0, (1 - std/mean) * 100) — CV inverso.
-    Alta fiabilidad = rotación estable mes a mes.
-  - Una sola transacción atómica (ON DUPLICATE KEY UPDATE), no bloqueante.
+  - Promedio ponderado con pesos lineales (más reciente = mayor peso).
+
+Algoritmo fiabilidad_porcentaje:
+  - CV inverso: max(0, (1 - std/mean) * 100). Alta fiabilidad = rotación estable.
+
+Algoritmo dias_hasta_quiebre:
+  - stock_actual = SUM de todos los depósitos en MAX(fecha) por SKU desde stock_diario.
+  - dias_hasta_quiebre = max(0, stock_actual) / rotacion_sugerida.
+  - NULL si rotacion_sugerida es NULL o 0. Stock negativo se trata como 0.
+
+Una sola transacción atómica (ON DUPLICATE KEY UPDATE), no bloqueante.
 
 Uso:
   MYSQL_HOST=mysql MYSQL_DB=evalutia MYSQL_USER=evalutia \
@@ -66,11 +72,33 @@ def job_end(conn: pymysql.Connection, job_id: int, estado: str, detalle: dict) -
         )
     conn.commit()
 
+# ── Stock actual ───────────────────────────────────────────────────────────────
+
+def cargar_stock_actual(conn: pymysql.Connection) -> dict[str, float]:
+    """
+    Retorna {sku: stock_actual} usando el último registro disponible por SKU
+    (MAX fecha individual) sumando todos los depósitos.
+    Stock negativo se normaliza a 0.
+    """
+    sql = """
+        SELECT sd.sku, SUM(sd.cantidad) AS stock_actual
+        FROM stock_diario sd
+        INNER JOIN (
+            SELECT sku, MAX(fecha) AS ultima_fecha
+            FROM stock_diario
+            GROUP BY sku
+        ) ult ON sd.sku = ult.sku AND sd.fecha = ult.ultima_fecha
+        GROUP BY sd.sku
+    """
+    with conn.cursor() as cur:
+        cur.execute(sql)
+        return {sku: max(0.0, float(cant)) for sku, cant in cur.fetchall()}
+
 # ── Cálculo ────────────────────────────────────────────────────────────────────
 
-def calcular_sugerencias(conn: pymysql.Connection) -> tuple[list[dict], int, int]:
+def calcular_sugerencias(conn: pymysql.Connection, stock_por_sku: dict[str, float]) -> tuple[list[dict], int, int, int]:
     """
-    Retorna (filas, skus_con_sugerencia, skus_sin_datos).
+    Retorna (filas, skus_con_sugerencia, skus_sin_datos, skus_con_quiebre).
 
     skus_sin_datos: SKUs con < MIN_MESES_NORMAL meses normal — se insertan con NULL
     para que el ON DUPLICATE KEY UPDATE limpie valores stale de ciclos anteriores.
@@ -97,6 +125,7 @@ def calcular_sugerencias(conn: pymysql.Connection) -> tuple[list[dict], int, int
     filas = []
     skus_con_sugerencia = 0
     skus_sin_datos      = 0
+    skus_con_quiebre    = 0
 
     for sku, valores in por_sku.items():
         n = len(valores)
@@ -104,10 +133,11 @@ def calcular_sugerencias(conn: pymysql.Connection) -> tuple[list[dict], int, int
         if n < MIN_MESES_NORMAL:
             skus_sin_datos += 1
             filas.append({
-                "sku":                  sku,
-                "rotacion_sugerida":    None,
+                "sku":                   sku,
+                "rotacion_sugerida":     None,
                 "fiabilidad_porcentaje": None,
-                "modelo":               MODELO,
+                "dias_hasta_quiebre":    None,
+                "modelo":                MODELO,
             })
             continue
 
@@ -126,27 +156,38 @@ def calcular_sugerencias(conn: pymysql.Connection) -> tuple[list[dict], int, int
         else:
             fiabilidad = 0.0
 
+        # dias_hasta_quiebre: stock actual (negativo → 0) / rotacion_sugerida
+        stock = stock_por_sku.get(sku, 0.0)
+        if rotacion_sugerida > 0:
+            dias_hasta_quiebre = round(stock / rotacion_sugerida, 2)
+            skus_con_quiebre += 1
+        else:
+            dias_hasta_quiebre = None
+
         skus_con_sugerencia += 1
         filas.append({
             "sku":                   sku,
             "rotacion_sugerida":     round(rotacion_sugerida, 4),
             "fiabilidad_porcentaje": round(fiabilidad, 2),
+            "dias_hasta_quiebre":    dias_hasta_quiebre,
             "modelo":                MODELO,
         })
 
-    return filas, skus_con_sugerencia, skus_sin_datos
+    return filas, skus_con_sugerencia, skus_sin_datos, skus_con_quiebre
 
 # ── Escritura atómica ──────────────────────────────────────────────────────────
 
 _SQL_UPSERT = """
     INSERT INTO planilla_sugerencias
-        (sku, rotacion_sugerida, fiabilidad_porcentaje, modelo, ts_generacion, ts_carga)
+        (sku, rotacion_sugerida, fiabilidad_porcentaje, dias_hasta_quiebre,
+         modelo, ts_generacion, ts_carga)
     VALUES
         (%(sku)s, %(rotacion_sugerida)s, %(fiabilidad_porcentaje)s,
-         %(modelo)s, NOW(6), NOW(6))
+         %(dias_hasta_quiebre)s, %(modelo)s, NOW(6), NOW(6))
     ON DUPLICATE KEY UPDATE
         rotacion_sugerida     = VALUES(rotacion_sugerida),
         fiabilidad_porcentaje = VALUES(fiabilidad_porcentaje),
+        dias_hasta_quiebre    = VALUES(dias_hasta_quiebre),
         modelo                = VALUES(modelo),
         ts_generacion         = NOW(6),
         actualizado_en        = NOW(6)
@@ -169,7 +210,8 @@ def main() -> None:
     print(f"[SUGERENCIAS] Job id={job_id} iniciado")
 
     try:
-        filas, skus_con_sugerencia, skus_sin_datos = calcular_sugerencias(conn)
+        stock_por_sku = cargar_stock_actual(conn)
+        filas, skus_con_sugerencia, skus_sin_datos, skus_con_quiebre = calcular_sugerencias(conn, stock_por_sku)
         escribir_sugerencias(conn, filas)
 
         duracion = round(time.time() - t0, 2)
@@ -177,6 +219,7 @@ def main() -> None:
             "subtipo":              "calc_sugerencias",
             "modelo":               MODELO,
             "skus_con_sugerencia":  skus_con_sugerencia,
+            "skus_con_quiebre":     skus_con_quiebre,
             "skus_sin_datos":       skus_sin_datos,
             "filas_upserted":       len(filas),
             "duracion_seg":         duracion,
@@ -187,6 +230,7 @@ def main() -> None:
         print(
             f"[SUGERENCIAS] OK en {duracion}s — "
             f"{skus_con_sugerencia} SKUs con sugerencia, "
+            f"{skus_con_quiebre} con días hasta quiebre, "
             f"{skus_sin_datos} sin datos suficientes"
         )
 
