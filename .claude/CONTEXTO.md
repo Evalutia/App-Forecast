@@ -365,6 +365,19 @@ PREDICT_PERIODS, PREDICT_MODEL_SET, PREDICT_VERSION, PREDICT_SCHEDULE_HOUR
 
 > **Nota para ETL/frontend:** `estado` no es fuente de verdad para "excluir productos descontinuados" de lógica crítica (predicciones, planilla) — es informativo. Si en el futuro se necesita excluir inactivos de algún cálculo, eso requiere una decisión explícita y separada, no inferirla silenciosamente de este campo.
 
+### `run_extract_articulos.py` — Issues #2 y #5 (sesión 2026-06-07)
+
+| Decisión | Definición |
+|----------|-----------|
+| **Fuente de `factor_estacional`** | Campos `Mes01`–`Mes12` dentro de cada `<Articulo>` en `ConsArticulosWeb` — mismo endpoint, sin llamada SOAP adicional. Issues #2 y #5 se resuelven en un único toque a `run_extract_articulos.py`. |
+| **Mes a usar** | `datetime.now().month` sin parámetro — siempre el mes en que corre el ETL. En junio toma `Mes06`, en julio `Mes07`, etc. |
+| **Valor 0 o campo ausente** | `factor_estacional = 0` → almacenar `NULL`. Campo `MesXX` no presente → `NULL`. La columna es `DECIMAL(5,3) NULL`. |
+| **Mecánica de `estado`** | **Opción A:** al final del batch, `UPDATE articulos SET estado='inactivo' WHERE sku NOT IN (skus_vistos)`. Solo se ejecuta si `rows_ins > 0` — si el SOAP falló y no se procesó ningún artículo, se omite para no marcar todo como inactivo. |
+| **Reactivación** | El `ON DUPLICATE KEY UPDATE` incluye `estado = 'activo'` — si un SKU reaparece en el feed después de estar inactivo, queda activo en la misma transacción, antes del `NOT IN`. |
+| **Atomicidad** | Upserts + UPDATE estado en una sola transacción (`autocommit=False`, commit único al final). Si falla el UPDATE de estado, el commit no ocurre y los upserts se revierten. |
+
+> **Nota:** El set de SKUs procesados se acumula en memoria durante el upsert loop y se pasa como `IN (...)` al UPDATE final. Para >10.000 SKUs considerar usar una tabla temporal, pero no es el caso actual.
+
 ## Issues conocidos / TODOs en código
 
 | Issue | Ubicación | Descripción |

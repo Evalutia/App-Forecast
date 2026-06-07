@@ -6,6 +6,7 @@ import sys
 import json
 import re
 import html
+import datetime
 import pymysql
 import xml.etree.ElementTree as ET
 from decimal import Decimal
@@ -46,6 +47,20 @@ def normalize_sku_from_value(raw):
     if s == "":
         return None
     return s[:128]
+
+def get_factor_estacional(it: dict):
+    key = f"Mes{datetime.datetime.now().month:02d}"
+    val = it.get(key)
+    if val is None:
+        return None
+    s = str(val).strip()
+    if s == "":
+        return None
+    try:
+        f = float(Decimal(s))
+        return f if f > 0 else None
+    except Exception:
+        return None
 
 def normalize_sku_from_item(it: dict):
     raw = (
@@ -177,7 +192,8 @@ def normalize_item(it: dict, barcode_map: dict):
         "fact_desc_max": trunc(fact_desc_max, 32) if fact_desc_max else None,
         "desc_valida": trunc(desc_valida, 16) if desc_valida else None,
         "stock_minimo": stock_minimo,
-        "barcode": trunc(barcode, 255) if barcode else None,  # <- nuevo
+        "barcode": trunc(barcode, 255) if barcode else None,
+        "factor_estacional": get_factor_estacional(it),
     }
 
 def load_payload_raw():
@@ -265,8 +281,8 @@ def main():
       (sku, descripcion, familia_id, familia_nombre, genero_id, genero_descripcion,
        seccion_id, seccion_nombre, marca_id, marca_nombre, temporada_id, temporada_nombre,
        fec_alta, fec_modif, comentario, fact_desc_min, fact_desc_max, desc_valida,
-       stock_minimo, barcode, fuente, ts_carga)
-    VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,NOW(6))
+       stock_minimo, barcode, factor_estacional, estado, fuente, ts_carga)
+    VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,NOW(6))
     ON DUPLICATE KEY UPDATE
       descripcion = VALUES(descripcion),
       familia_id = VALUES(familia_id),
@@ -287,6 +303,8 @@ def main():
       desc_valida = VALUES(desc_valida),
       stock_minimo = VALUES(stock_minimo),
       barcode = VALUES(barcode),
+      factor_estacional = VALUES(factor_estacional),
+      estado = 'activo',
       fuente = VALUES(fuente),
       actualizado_en = NOW(6),
       ts_carga = NOW(6)
@@ -294,8 +312,10 @@ def main():
 
     rows_ins = 0
     rows_skip = 0
+    rows_inactivados = 0
     skipped_samples = []
     err_log = []
+    skus_seen = set()
 
     try:
         with conn.cursor() as cur:
@@ -333,9 +353,12 @@ def main():
                             normalized["desc_valida"],
                             normalized["stock_minimo"],
                             normalized["barcode"],
+                            normalized["factor_estacional"],
+                            "activo",
                             "ConsArticulosWeb",
                         ),
                     )
+                    skus_seen.add(normalized["sku"])
                     rows_ins += 1
                 except Exception as e:
                     rows_skip += 1
@@ -348,6 +371,15 @@ def main():
                             "raw_keys": list(raw.keys()),
                         }
                     )
+
+            if rows_ins > 0 and skus_seen:
+                placeholders = ",".join(["%s"] * len(skus_seen))
+                cur.execute(
+                    f"UPDATE articulos SET estado='inactivo' WHERE sku NOT IN ({placeholders})",
+                    list(skus_seen),
+                )
+                rows_inactivados = cur.rowcount
+
             conn.commit()
     finally:
         conn.close()
@@ -369,7 +401,7 @@ def main():
         except Exception:
             pass
 
-    print(f"[INFO] Inserted/Upserted {rows_ins} articulos (skipped {rows_skip})")
+    print(f"[INFO] Inserted/Upserted {rows_ins} articulos (skipped {rows_skip}, inactivados {rows_inactivados})")
     return 0
 
 if __name__ == "__main__":
