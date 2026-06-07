@@ -393,7 +393,7 @@ PREDICT_PERIODS, PREDICT_MODEL_SET, PREDICT_VERSION, PREDICT_SCHEDULE_HOUR
 | **Atomicidad** | Una sola transacción: calcular todos los SKUs en memoria → INSERT masivo con ON DUPLICATE KEY UPDATE → COMMIT. ROLLBACK en fallo → tabla conserva valores anteriores. |
 | **Bloqueante** | No — fallo del script no aborta el ETL. Se loguea en `jobs_historial` con `subtipo = 'calc_sugerencias'`. |
 
-> **Nota para frontend (#19):** `fiabilidad_porcentaje` debe mostrarse como badge de color en la columna AE: verde (≥70), amarillo (40–69), rojo (<40). NULL = sin datos suficientes, mostrar "—". `rotacion_sugerida` NULL también muestra "—" sin crashear.
+> **Nota para frontend (#19):** `fiabilidad_porcentaje` debe mostrarse como badge de color en la columna ROT.S: verde (≥70), amarillo (40–69), rojo (<40). NULL = sin datos suficientes, mostrar "—". `rotacion_sugerida` NULL también muestra "—" sin crashear.
 
 ### `run_calc_sugerencias.py` (ampliación) — Issue #17 (sesión 2026-06-07)
 
@@ -413,13 +413,13 @@ PREDICT_PERIODS, PREDICT_MODEL_SET, PREDICT_VERSION, PREDICT_SCHEDULE_HOUR
 | **Paginación** | Sin paginación — devuelve todos los SKUs en un solo array. La tabla es plana (una fila por SKU) y el volumen es manejable (~200 KB sin comprimir). El frontend la carga una vez e indexa por SKU con `Map<sku, SugerenciaDto>`. |
 | **Shape del response** | Array plano de objetos: `[{ sku, rotacionSugerida, fiabilidadPorcentaje, diasHastaQuiebre }, ...]`. No objeto indexado por SKU — el indexado lo hace el frontend. |
 | **Campo `modelo`** | Excluido del response. YAGNI — el frontend no lo necesita y actualmente solo hay un modelo. Si en el futuro hay múltiples modelos, es un cambio de schema primero. |
-| **SKUs con NULLs** | Se incluyen en el response. `rotacionSugerida = null` significa menos de 3 meses normales — señal explícita para que el frontend muestre "—" en columna AE. |
+| **SKUs con NULLs** | Se incluyen en el response. `rotacionSugerida = null` significa menos de 3 meses normales — señal explícita para que el frontend muestre "—" en columna ROT.S. |
 | **Autorización** | `[Authorize]` heredado de `PlanillaController` — sin restricción de rol. Tanto `administrador` como `duenoDeEmpresa` pueden acceder. |
 | **Ubicación** | Nuevo método `[HttpGet("sugerencias")]` dentro del `PlanillaController` existente. Sin controller separado. |
 
 > **Nota para frontend (#19, #20):** el frontend carga este endpoint al montar `PlanillaPage` (una sola vez), lo indexa por SKU, y une los valores a cada fila de la tabla de planilla client-side. No hacer un request por página de planilla.
 
-### Columna AE en `PlanillaTable` — Issue #19 (sesión 2026-06-07)
+### Columna ROT.S en `PlanillaTable` — Issue #19 (sesión 2026-06-07)
 
 | Decisión | Definición |
 |----------|-----------|

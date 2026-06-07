@@ -246,9 +246,9 @@ export default function PlanillaTable({ params, onPageChange, sugerencias, suger
               </th>
               <th className="planilla-col-summary">
                 <Tip
-                  label="AE"
+                  label="ROT.S"
                   tip={
-                    'Rotación Sugerida (Análisis Estadístico)\n' +
+                    'Rotación Sugerida\n' +
                     'Promedio ponderado de la rotación real en meses normales\n' +
                     '(pesos lineales: más reciente = mayor peso, hasta 13 meses).\n\n' +
                     'Badge de fiabilidad:\n' +
@@ -264,7 +264,7 @@ export default function PlanillaTable({ params, onPageChange, sugerencias, suger
                   label="QBK"
                   tip={
                     'Días estimados hasta quiebre de stock\n' +
-                    'Fórmula: stock_actual ÷ rotación_sugerida (AE)\n\n' +
+                    'Fórmula: stock_actual ÷ rotación_sugerida (ROT.S)\n\n' +
                     'Badge de urgencia:\n' +
                     '  Rojo    = 0d — sin stock ya\n' +
                     '  Amarillo ≤ 15d — menos de 2 semanas (lead time típico)\n' +
