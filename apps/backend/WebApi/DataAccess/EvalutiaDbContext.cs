@@ -105,6 +105,13 @@ public class EvalutiaDbContext : DbContext
           .HasColumnName("genero_descripcion");
       entity.Property(e => e.StockMinimo)
           .HasColumnName("stock_minimo");
+      entity.Property(e => e.FactorEstacional)
+          .HasColumnType("decimal(5,3)")
+          .HasColumnName("factor_estacional");
+      entity.Property(e => e.Estado)
+          .HasColumnType("enum('activo','inactivo')")
+          .HasDefaultValue("activo")
+          .HasColumnName("estado");
       // The column 'frecuencia_mensual' is not present in the current 'articulos' table.
       // Ignore this property to avoid mapping and query errors.
       entity.Ignore(e => e.FrecuenciaMensual);
