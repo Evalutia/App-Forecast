@@ -47,3 +47,10 @@ export interface PlanillaVentasParams {
   generoId?: number;
   estadoMes?: string;
 }
+
+export interface PlanillaSugerenciaDto {
+  sku: string;
+  rotacionSugerida: number | null;
+  fiabilidadPorcentaje: number | null;
+  diasHastaQuiebre: number | null;
+}

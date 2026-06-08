@@ -120,5 +120,10 @@ namespace DataAccess.Repositories.PlanillaDataAccess
 
       return (marcas, generos, sinMarca, sinGenero);
     }
+
+    public IReadOnlyList<PlanillaSugerencias> GetSugerencias()
+    {
+      return _db.PlanillasSugerencias.OrderBy(s => s.Sku).ToList();
+    }
   }
 }

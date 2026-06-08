@@ -1,6 +1,6 @@
 import { createPortal } from 'react-dom';
 import { useRef, useState } from 'react';
-import type { PlanillaMesDto, PlanillaVentasDto, PlanillaVentasParams } from '../types/planilla';
+import type { PlanillaMesDto, PlanillaSugerenciaDto, PlanillaVentasDto, PlanillaVentasParams } from '../types/planilla';
 import { usePlanillaVentas } from '../hooks/usePlanilla';
 import { exportPlanillaExcel } from '../utils/exportPlanilla';
 
@@ -33,6 +33,38 @@ function calcDdstk(meses: PlanillaMesDto[]): string {
 // VTA: suma de ventasCantidad de los 12 meses cerrados (excluye el mes de referencia)
 function calcVta(meses: PlanillaMesDto[]): number {
   return meses.slice(0, -1).reduce((s, m) => s + Number(m.ventasCantidad), 0);
+}
+
+function fiabilidadClass(pct: number): string {
+  if (pct >= 70) return 'planilla-badge planilla-badge--verde';
+  if (pct >= 40) return 'planilla-badge planilla-badge--amarillo';
+  return 'planilla-badge planilla-badge--rojo';
+}
+
+function qbkClass(dias: number): string {
+  if (dias === 0)  return 'planilla-badge planilla-badge--rojo';
+  if (dias <= 15)  return 'planilla-badge planilla-badge--amarillo';
+  return 'planilla-badge planilla-badge--verde';
+}
+
+function QbkCell({ s }: { s: PlanillaSugerenciaDto | undefined }) {
+  if (!s || s.diasHastaQuiebre === null) return <span className="muted">—</span>;
+  const dias = Math.round(s.diasHastaQuiebre);
+  return <span className={qbkClass(dias)}>{dias}d</span>;
+}
+
+function AeCell({ s }: { s: PlanillaSugerenciaDto | undefined }) {
+  if (!s || s.rotacionSugerida === null) return <span className="muted">—</span>;
+  return (
+    <div className="planilla-ae-cell">
+      <span className="planilla-ae-rot">{s.rotacionSugerida.toFixed(4)}</span>
+      {s.fiabilidadPorcentaje !== null && (
+        <span className={fiabilidadClass(s.fiabilidadPorcentaje)}>
+          {s.fiabilidadPorcentaje.toFixed(0)}%
+        </span>
+      )}
+    </div>
+  );
 }
 
 // ── Tooltip via portal (escapes overflow-x: auto) ─────────────────────────────
@@ -100,9 +132,11 @@ function Leyenda() {
 type Props = {
   params: PlanillaVentasParams;
   onPageChange: (page: number) => void;
+  sugerencias: Map<string, PlanillaSugerenciaDto>;
+  sugerenciasLoading: boolean;
 };
 
-export default function PlanillaTable({ params, onPageChange }: Props) {
+export default function PlanillaTable({ params, onPageChange, sugerencias, sugerenciasLoading }: Props) {
   const { data, isLoading, isFetching, isError } = usePlanillaVentas(params);
   const [exporting, setExporting] = useState(false);
 
@@ -111,7 +145,7 @@ export default function PlanillaTable({ params, onPageChange }: Props) {
   const totalPages = Math.max(1, Math.ceil(total / params.pageSize));
   const mesHeaders: { year: number; month: number }[] = items[0]?.meses ?? [];
   const lastMesIdx = mesHeaders.length - 1;
-  const totalCols  = 3 + mesHeaders.length + 2; // SKU+Desc, Género, VTA, months, Rot.DesEstac., DDSTK
+  const totalCols  = 3 + mesHeaders.length + 4; // SKU+Desc, Género, VTA, months, Rot.DesEstac., DDSTK, AE, QBK
 
   const handleExport = async () => {
     setExporting(true);
@@ -210,6 +244,35 @@ export default function PlanillaTable({ params, onPageChange }: Props) {
                   }
                 />
               </th>
+              <th className="planilla-col-summary">
+                <Tip
+                  label="ROT.S"
+                  tip={
+                    'Rotación Sugerida\n' +
+                    'Promedio ponderado de la rotación real en meses normales\n' +
+                    '(pesos lineales: más reciente = mayor peso, hasta 13 meses).\n\n' +
+                    'Badge de fiabilidad:\n' +
+                    '  Verde  ≥ 70% — rotación estable\n' +
+                    '  Amarillo 40–69% — variabilidad moderada\n' +
+                    '  Rojo  < 40% — alta variabilidad\n\n' +
+                    '— = menos de 3 meses con stock normal disponibles.'
+                  }
+                />
+              </th>
+              <th className="planilla-col-summary">
+                <Tip
+                  label="QBK"
+                  tip={
+                    'Días estimados hasta quiebre de stock\n' +
+                    'Fórmula: stock_actual ÷ rotación_sugerida (ROT.S)\n\n' +
+                    'Badge de urgencia:\n' +
+                    '  Rojo    = 0d — sin stock ya\n' +
+                    '  Amarillo ≤ 15d — menos de 2 semanas (lead time típico)\n' +
+                    '  Verde   > 15d — margen suficiente\n\n' +
+                    '— = sin datos suficientes para calcular.'
+                  }
+                />
+              </th>
             </tr>
           </thead>
 
@@ -221,6 +284,8 @@ export default function PlanillaTable({ params, onPageChange }: Props) {
                   <td><span className="skeleton skel-80" /></td>
                   <td><span className="skeleton skel-60" /></td>
                   {Array.from({ length: 13 }).map((__, j) => <td key={j}><span className="skeleton skel-40" /></td>)}
+                  <td><span className="skeleton skel-60" /></td>
+                  <td><span className="skeleton skel-60" /></td>
                   <td><span className="skeleton skel-60" /></td>
                   <td><span className="skeleton skel-60" /></td>
                 </tr>
@@ -266,6 +331,16 @@ export default function PlanillaTable({ params, onPageChange }: Props) {
 
                     <td className={`planilla-col-summary${rd === '—' ? ' sin-datos' : ''}`}>{rd}</td>
                     <td className={`planilla-col-summary${dd === '—' ? ' sin-datos' : ''}`}>{dd}</td>
+                    <td className="planilla-col-summary">
+                      {sugerenciasLoading
+                        ? <span className="skeleton skel-60" />
+                        : <AeCell s={sugerencias.get(row.sku)} />}
+                    </td>
+                    <td className="planilla-col-summary">
+                      {sugerenciasLoading
+                        ? <span className="skeleton skel-60" />
+                        : <QbkCell s={sugerencias.get(row.sku)} />}
+                    </td>
                   </tr>
                 );
               })

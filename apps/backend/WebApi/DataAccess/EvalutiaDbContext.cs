@@ -35,6 +35,8 @@ public class EvalutiaDbContext : DbContext
 
   public virtual DbSet<PlanillaVentasCalculada> PlanillasVentasCalculadas { get; set; }
 
+  public virtual DbSet<PlanillaSugerencias> PlanillasSugerencias { get; set; }
+
   protected override void OnModelCreating(ModelBuilder modelBuilder)
   {
     modelBuilder
@@ -105,6 +107,13 @@ public class EvalutiaDbContext : DbContext
           .HasColumnName("genero_descripcion");
       entity.Property(e => e.StockMinimo)
           .HasColumnName("stock_minimo");
+      entity.Property(e => e.FactorEstacional)
+          .HasColumnType("decimal(5,3)")
+          .HasColumnName("factor_estacional");
+      entity.Property(e => e.Estado)
+          .HasColumnType("enum('activo','inactivo')")
+          .HasDefaultValue("activo")
+          .HasColumnName("estado");
       // The column 'frecuencia_mensual' is not present in the current 'articulos' table.
       // Ignore this property to avoid mapping and query errors.
       entity.Ignore(e => e.FrecuenciaMensual);
@@ -348,6 +357,26 @@ public class EvalutiaDbContext : DbContext
       entity.Property(e => e.EstadoMes)
           .HasColumnType("enum('normal','quiebre_parcial','sin_stock')")
           .HasColumnName("estado_mes");
+    });
+
+    modelBuilder.Entity<PlanillaSugerencias>(entity =>
+    {
+      entity.HasKey(e => e.Sku).HasName("PRIMARY");
+
+      entity.ToTable("planilla_sugerencias");
+
+      entity.Property(e => e.Sku)
+          .HasMaxLength(128)
+          .HasColumnName("sku");
+      entity.Property(e => e.RotacionSugerida)
+          .HasPrecision(10, 4)
+          .HasColumnName("rotacion_sugerida");
+      entity.Property(e => e.FiabilidadPorcentaje)
+          .HasPrecision(5, 2)
+          .HasColumnName("fiabilidad_porcentaje");
+      entity.Property(e => e.DiasHastaQuiebre)
+          .HasPrecision(10, 2)
+          .HasColumnName("dias_hasta_quiebre");
     });
   }
 }

@@ -86,6 +86,22 @@ namespace WebApi.Controllers.Planilla.DTOs
     }
   }
 
+  public sealed class PlanillaSugerenciaOutDto
+  {
+    public string Sku { get; init; } = string.Empty;
+    public decimal? RotacionSugerida { get; init; }
+    public decimal? FiabilidadPorcentaje { get; init; }
+    public decimal? DiasHastaQuiebre { get; init; }
+
+    public PlanillaSugerenciaOutDto(PlanillaSugerenciaDto dto)
+    {
+      Sku                  = dto.Sku;
+      RotacionSugerida     = dto.RotacionSugerida;
+      FiabilidadPorcentaje = dto.FiabilidadPorcentaje;
+      DiasHastaQuiebre     = dto.DiasHastaQuiebre;
+    }
+  }
+
   public sealed class PagedResultDto<T>
   {
     public IEnumerable<T> Items { get; init; } = [];

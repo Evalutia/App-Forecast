@@ -1,5 +1,5 @@
 import api from '../../../api/client';
-import type { PlanillaFiltrosDto, PlanillaVentasPagedResponse, PlanillaVentasParams } from '../types/planilla';
+import type { PlanillaFiltrosDto, PlanillaSugerenciaDto, PlanillaVentasPagedResponse, PlanillaVentasParams } from '../types/planilla';
 
 const BASE = '/api/planilla';
 
@@ -18,5 +18,10 @@ export async function fetchPlanillaVentas(params: PlanillaVentasParams): Promise
 
 export async function fetchPlanillaFiltros(): Promise<PlanillaFiltrosDto> {
   const { data } = await api.get<PlanillaFiltrosDto>(`${BASE}/filtros`);
+  return data;
+}
+
+export async function fetchPlanillaSugerencias(): Promise<PlanillaSugerenciaDto[]> {
+  const { data } = await api.get<PlanillaSugerenciaDto[]>(`${BASE}/sugerencias`);
   return data;
 }

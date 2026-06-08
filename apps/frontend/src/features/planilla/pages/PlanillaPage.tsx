@@ -1,7 +1,8 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import FiltrosPlanilla from '../components/FiltrosPlanilla';
 import PlanillaTable from '../components/PlanillaTable';
-import type { PlanillaVentasParams } from '../types/planilla';
+import { usePlanillaSugerencias } from '../hooks/usePlanilla';
+import type { PlanillaSugerenciaDto, PlanillaVentasParams } from '../types/planilla';
 import '../../../styles/dark-layout.css';
 import '../../../styles/planilla.css';
 
@@ -15,6 +16,12 @@ export default function PlanillaPage() {
   const [estadoMes, setEstadoMes] = useState<string | undefined>();
 
   const params: PlanillaVentasParams = { page, pageSize, marcaId, generoId, estadoMes };
+
+  const { data: sugerenciasData, isLoading: sugerenciasLoading } = usePlanillaSugerencias();
+  const sugerencias = useMemo<Map<string, PlanillaSugerenciaDto>>(
+    () => new Map((sugerenciasData ?? []).map(s => [s.sku, s])),
+    [sugerenciasData]
+  );
 
   const handlePageChange = (nextPage: number) => setPage(nextPage);
 
@@ -55,7 +62,12 @@ export default function PlanillaPage() {
           onReset={handleReset}
         />
 
-        <PlanillaTable params={params} onPageChange={handlePageChange} />
+        <PlanillaTable
+          params={params}
+          onPageChange={handlePageChange}
+          sugerencias={sugerencias}
+          sugerenciasLoading={sugerenciasLoading}
+        />
       </div>
 
     </div>

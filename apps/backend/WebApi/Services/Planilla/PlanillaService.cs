@@ -71,6 +71,19 @@ namespace Services.Planilla
       return (items, totalSkus);
     }
 
+    public IReadOnlyList<PlanillaSugerenciaDto> GetSugerencias()
+    {
+      return _repo.GetSugerencias()
+          .Select(s => new PlanillaSugerenciaDto
+          {
+            Sku                  = s.Sku,
+            RotacionSugerida     = s.RotacionSugerida,
+            FiabilidadPorcentaje = s.FiabilidadPorcentaje,
+            DiasHastaQuiebre     = s.DiasHastaQuiebre
+          })
+          .ToList();
+    }
+
     public PlanillaFiltrosDto GetFiltros()
     {
       var (marcas, generos, sinMarca, sinGenero) = _repo.GetFiltros();
