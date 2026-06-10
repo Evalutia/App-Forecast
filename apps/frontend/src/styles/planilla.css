@@ -94,13 +94,29 @@ thead .planilla-sticky-col {
 }
 .planilla-leyenda-normal::before { background: rgba(255,255,255,0.3); }
 
-/* Quiebre parcial: amarillo */
-.planilla-leyenda-quiebre {
+/* Quiebre alta frecuencia: amarillo */
+.planilla-leyenda-quiebre-alta {
   background: rgba(234,179,8,0.15);
   border: 1px solid rgba(234,179,8,0.25);
   color: #fcd34d;
 }
-.planilla-leyenda-quiebre::before { background: rgba(234,179,8,0.7); }
+.planilla-leyenda-quiebre-alta::before { background: rgba(234,179,8,0.7); }
+
+/* Quiebre media frecuencia: naranja */
+.planilla-leyenda-quiebre-media {
+  background: rgba(234,88,12,0.15);
+  border: 1px solid rgba(234,88,12,0.25);
+  color: #fb923c;
+}
+.planilla-leyenda-quiebre-media::before { background: rgba(234,88,12,0.7); }
+
+/* Quiebre baja frecuencia: rojo */
+.planilla-leyenda-quiebre-baja {
+  background: rgba(220,38,38,0.15);
+  border: 1px solid rgba(220,38,38,0.25);
+  color: #f87171;
+}
+.planilla-leyenda-quiebre-baja::before { background: rgba(220,38,38,0.7); }
 
 /* Sin stock: gris */
 .planilla-leyenda-sinstock {

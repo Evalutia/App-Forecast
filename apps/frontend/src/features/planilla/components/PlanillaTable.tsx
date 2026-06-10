@@ -9,18 +9,27 @@ import { exportPlanillaExcel } from '../utils/exportPlanilla';
 const MESES = ['Ene','Feb','Mar','Abr','May','Jun','Jul','Ago','Sep','Oct','Nov','Dic'];
 const mesLabel = (year: number, month: number) => `${MESES[month - 1]}/${String(year).slice(2)}`;
 
-function estadoMesBg(estado: string): string {
-  if (estado === 'quiebre_parcial') return 'rgba(234,179,8,0.18)';
-  if (estado === 'sin_stock')       return 'rgba(100,116,139,0.18)';
+function estadoMesBg(estado: string, frecuenciaNivel?: string | null): string {
+  if (estado === 'quiebre_parcial') {
+    if (frecuenciaNivel === 'baja')  return 'rgba(220,38,38,0.18)';
+    if (frecuenciaNivel === 'media') return 'rgba(234,88,12,0.18)';
+    return 'rgba(234,179,8,0.18)';
+  }
+  if (estado === 'sin_stock') return 'rgba(100,116,139,0.18)';
   return '';
 }
 
 function calcRotDesEstac(meses: PlanillaMesDto[]): string {
-  const closed   = meses.slice(0, -1);
-  const normales = closed.filter(m => m.estadoMes === 'normal' && m.rotacionDiariaReal != null);
-  if (normales.length === 0) return '—';
-  const avg = normales.reduce((s, m) => s + (m.rotacionDiariaReal ?? 0), 0) / normales.length;
-  return avg.toFixed(4);
+  const closed = meses.slice(0, -1);
+  const vals: number[] = [];
+  for (const m of closed) {
+    if (m.estadoMes === 'normal' && m.rotacionDiariaReal != null)
+      vals.push(m.rotacionDiariaReal);
+    else if (m.estadoMes === 'quiebre_parcial' && m.rotacionAjustada != null)
+      vals.push(m.rotacionAjustada);
+  }
+  if (vals.length === 0) return '—';
+  return (vals.reduce((s, v) => s + v, 0) / vals.length).toFixed(4);
 }
 
 function calcDdstk(meses: PlanillaMesDto[]): string {
@@ -121,7 +130,9 @@ function Leyenda() {
     <div className="planilla-leyenda">
       <span className="planilla-leyenda-titulo">Estado mensual:</span>
       <span className="planilla-leyenda-item planilla-leyenda-normal">Normal (≥90% días con stock)</span>
-      <span className="planilla-leyenda-item planilla-leyenda-quiebre">Quiebre parcial</span>
+      <span className="planilla-leyenda-item planilla-leyenda-quiebre-alta">Quiebre alta freq</span>
+      <span className="planilla-leyenda-item planilla-leyenda-quiebre-media">Quiebre media freq</span>
+      <span className="planilla-leyenda-item planilla-leyenda-quiebre-baja">Quiebre baja freq</span>
       <span className="planilla-leyenda-item planilla-leyenda-sinstock">Sin stock (mes completo)</span>
     </div>
   );
@@ -214,7 +225,7 @@ export default function PlanillaTable({ params, onPageChange, sugerencias, suger
                             tip={
                               esRef
                                 ? `Vta.${mesLabel(m.year, m.month)} — Mes de referencia\nUnidades vendidas (mes en curso, incompleto).`
-                                : `Vta.${mesLabel(m.year, m.month)} — Unidades vendidas\nTotal de unidades vendidas en el mes.\nAmarillo = quiebre parcial · Gris = sin stock`
+                                : `Vta.${mesLabel(m.year, m.month)} — Unidades vendidas\nTotal de unidades vendidas en el mes.\nAmarillo = quiebre alta freq · Naranja = quiebre media · Rojo = quiebre baja freq · Gris = sin stock`
                             }
                           />
                         </th>
@@ -233,7 +244,7 @@ export default function PlanillaTable({ params, onPageChange, sugerencias, suger
                             tip={
                               esRef
                                 ? `${mesLabel(m.year, m.month)} — Mes de referencia\nNo entra en el promedio de Rot. DesEstac.\nFórmula: ventas ÷ días_con_stock`
-                                : `${mesLabel(m.year, m.month)} — Rotación diaria real\nFórmula: ventas_mes ÷ días_con_stock\nAmarillo = quiebre parcial · Gris = sin stock`
+                                : `${mesLabel(m.year, m.month)} — Rotación diaria real\nFórmula: ventas_mes ÷ días_con_stock\nAmarillo = quiebre alta freq · Naranja = quiebre media · Rojo = quiebre baja freq · Gris = sin stock`
                             }
                           />
                         </th>
@@ -245,10 +256,11 @@ export default function PlanillaTable({ params, onPageChange, sugerencias, suger
                 <Tip
                   label="Rot. DesEstac."
                   tip={
-                    'Rotación Diaria Promedio (meses normales)\n' +
-                    'Promedio de la rotación real en meses sin quiebre (≥90% días con stock),\n' +
-                    'excluyendo el mes de referencia más reciente.\n' +
-                    'Fórmula: AVG(ventas ÷ días_con_stock) donde estado = normal\n\n' +
+                    'Rotación Diaria Promedio\n' +
+                    'Promedio de rotación en meses cerrados, excluyendo el mes de referencia.\n' +
+                    '  · Meses normales: ventas ÷ días_con_stock\n' +
+                    '  · Meses con quiebre: rotación ajustada por frecuencia del SKU\n' +
+                    '  · Meses sin stock: excluidos\n\n' +
                     'Nota: en Fase 2 se reemplaza por el valor desestacionalizado con\n' +
                     'el factor estacional del sistema de origen.'
                   }
@@ -341,7 +353,7 @@ export default function PlanillaTable({ params, onPageChange, sugerencias, suger
                       <td
                         key={`vta-${mes.year}-${mes.month}`}
                         className="planilla-col-mes"
-                        style={{ backgroundColor: estadoMesBg(mes.estadoMes) }}
+                        style={{ backgroundColor: estadoMesBg(mes.estadoMes, mes.frecuenciaNivel) }}
                         title={`Vta.${mesLabel(mes.year, mes.month)} · ${mes.ventasCantidad} uds.`}
                       >
                         <span style={idx === lastMesIdx ? { opacity: 0.6, fontStyle: 'italic' } : undefined}>
@@ -354,7 +366,7 @@ export default function PlanillaTable({ params, onPageChange, sugerencias, suger
                       <td
                         key={`rot-${mes.year}-${mes.month}`}
                         className="planilla-col-mes"
-                        style={{ backgroundColor: estadoMesBg(mes.estadoMes) }}
+                        style={{ backgroundColor: estadoMesBg(mes.estadoMes, mes.frecuenciaNivel) }}
                         title={`${mesLabel(mes.year, mes.month)} · ${mes.diasConStock}/${mes.diasNaturalesMes} días con stock · ${mes.ventasCantidad} uds.`}
                       >
                         <span style={idx === lastMesIdx ? { opacity: 0.6, fontStyle: 'italic' } : undefined}>

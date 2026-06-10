@@ -516,7 +516,12 @@ PREDICT_PERIODS, PREDICT_MODEL_SET, PREDICT_VERSION, PREDICT_SCHEDULE_HOUR
 | **DB schema** | Option B: mantener `estadoMes = quiebre_parcial` + agregar `frecuencia_nivel ENUM('alta','media','baja') NULL` y `rotacion_ajustada DECIMAL(10,4) NULL` a `planilla_ventas_calculada`. `frecuencia_nivel` es atributo del SKU (mismo valor en todas sus filas). |
 | **Fórmulas por nivel** | Alta: `ventas / dias_con_stock` (igual que hoy) · Baja: `ventas / dias_naturales_mes` · Media: promedio de ambas. Se aplica SOLO en meses `quiebre_parcial`; meses `normal` y `sin_stock` no cambian. |
 | **Rot. DesEstac. (Issue #28)** | Incluir meses `quiebre_parcial` usando `rotacion_ajustada` además de los meses `normal`. Actualmente solo usa meses normales. |
-| **Colores frontend (#28)** | `quiebre_parcial + alta` → amarillo (igual que hoy) · `+ media` → naranja · `+ baja` → rojo. `sin_stock` → gris (sin cambio). |
+| **Colores frontend (#28)** | `quiebre_parcial + alta` → amarillo (igual que hoy) · `+ media` → naranja · `+ baja` → rojo. `sin_stock` → gris (sin cambio). Referencia visual: el cliente usa amarillo en su planilla para quiebre → amarillo = alta (comportamiento conocido), escalando a colores más fuertes para frecuencias menores. |
+| **Valor en celda mensual (#28)** | Siempre `rotacionDiariaReal` — no se modifica. Solo cambia el color de fondo. `rotacionAjustada` se usa únicamente en `calcRotDesEstac`, no en la celda individual. |
+| **`calcRotDesEstac` (#28)** | Incluye meses `quiebre_parcial` usando `rotacionAjustada` además de los meses `normal`. Fórmula: `AVG(rotacionDiariaReal para normal ∪ rotacionAjustada para quiebre_parcial)`, excluyendo mes de referencia. Si `rotacionAjustada` es null en un quiebre, ese mes se omite del promedio. |
+| **Leyenda (#28)** | 3 ítems separados en lugar del único "Quiebre parcial": `Quiebre alta freq` (amarillo) · `Quiebre media freq` (naranja) · `Quiebre baja freq` (rojo). |
+| **Indicador de nivel en fila (#28)** | Solo el color de celda — sin badge ni columna adicional de `frecuenciaNivel`. La leyenda explica el código de colores. |
+| **Tooltips de celdas mensuales (#28)** | Actualizar a: `"Amarillo = quiebre alta freq · Naranja = quiebre media · Rojo = quiebre baja freq · Gris = sin stock"`. |
 
 > **Nota:** `frecuencia_nivel` y `rotacion_ajustada` se calculan en `run_calc_planilla.py`. Primero se calcula el nivel por SKU (sobre todos los meses), luego se aplica la fórmula correspondiente a cada fila de quiebre. El cambio visual y de Rot. DesEstac. queda para Issue #28 (Frontend).
 
