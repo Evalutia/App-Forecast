@@ -484,6 +484,29 @@ PREDICT_PERIODS, PREDICT_MODEL_SET, PREDICT_VERSION, PREDICT_SCHEDULE_HOUR
 | **Issue #30** | Es auditoría/investigación, no feature. No bloquea ni es bloqueado por ningún otro issue. Si el audit da luz verde, se abre issue #31 para surfacear la fiabilidad en planilla. |
 | **Umbrales de frecuencia (#27)** | Se definen al arrancar el issue, en conjunto con el cliente/equipo. No están hardcodeados aún. |
 
+### `Rot. DesEstac.` — Issues #31 y #32 (sesión 2026-06-10)
+
+| Decisión | Definición |
+|----------|-----------|
+| **Columnas afectadas** | Solo la columna resumen `Rot. DesEstac.`. Las 13 celdas mensuales siguen mostrando `rotacionDiariaReal` sin cambios. |
+| **Fórmula Fase 2** | `avg(rotacionDiariaDesestacionalizada para meses normales, excluyendo mes de referencia)`. Si ningún mes tiene valor → `—`. |
+| **Fuente del factor estacional** | SOAP provee `Mes01`–`Mes12` por SKU. Se almacenan como 12 columnas en `articulos` (`factor_mes_01`…`factor_mes_12`). Un factor por mes del año calendario. |
+| **Cálculo en ETL** | `rotacion_diaria_desestacionalizada = rotacion_diaria_real / factor_mes_{MM}`. Si factor es NULL o 0, queda NULL. Se calcula en `run_calc_planilla.py` con JOIN a `articulos`. |
+| **Orden de implementación** | Primero Issue #31 (migración DB + ETL), luego Issue #32 (frontend). El cambio frontend no tiene efecto visible hasta que el ETL pueble el campo. |
+
+> **Nota:** La migración `07-articulos-factor-estacional-estado.sql` (que agrega `factor_estacional` y `estado` a `articulos`) aún no está aplicada en producción. Issue #31 debe aplicarla junto con las 12 nuevas columnas de factores mensuales.
+
+### `Vta.Mes/Año` en PlanillaTable — Issue #23 (sesión 2026-06-10)
+
+| Decisión | Definición |
+|----------|-----------|
+| **Columnas nuevas** | 13 columnas `Vta.Ene/25`…`Vta.Mes/Año` insertadas ANTES de las 13 columnas de rotación mensual. |
+| **Datos** | `mes.ventasCantidad.toLocaleString('es-UY')` — entero, formato locale UY. |
+| **Estilo** | Mismo `estadoMesBg(mes.estadoMes)` que la columna de rotación correspondiente. Mes de referencia con italic/opaco. |
+| **Export en #23** | No se toca `exportPlanilla.ts` en este issue. El export completo se reescribe en Issue #29 cuando todas las columnas nuevas estén definidas. |
+
+> **Nota:** Solo se modifica `PlanillaTable.tsx`. El `totalCols` pasa de `3 + n + 4` a `3 + n*2 + 4`.
+
 ---
 
 ## Issues conocidos / TODOs en código
