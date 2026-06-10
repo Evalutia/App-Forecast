@@ -23,10 +23,14 @@ function calcRotDesEstac(meses: PlanillaMesDto[]): string {
   const closed = meses.slice(0, -1);
   const vals: number[] = [];
   for (const m of closed) {
-    if (m.estadoMes === 'normal' && m.rotacionDiariaReal != null)
-      vals.push(m.rotacionDiariaReal);
-    else if (m.estadoMes === 'quiebre_parcial' && m.rotacionAjustada != null)
-      vals.push(m.rotacionAjustada);
+    if (m.estadoMes === 'normal' && m.rotacionDiariaDesestacionalizada != null) {
+      vals.push(m.rotacionDiariaDesestacionalizada);
+    } else if (m.estadoMes === 'quiebre_parcial' && m.rotacionAjustada != null) {
+      if (m.rotacionDiariaDesestacionalizada != null && m.rotacionDiariaReal != null && m.rotacionDiariaReal > 0)
+        vals.push(m.rotacionAjustada * (m.rotacionDiariaDesestacionalizada / m.rotacionDiariaReal));
+      else
+        vals.push(m.rotacionAjustada);
+    }
   }
   if (vals.length === 0) return '—';
   return (vals.reduce((s, v) => s + v, 0) / vals.length).toFixed(4);
@@ -256,13 +260,11 @@ export default function PlanillaTable({ params, onPageChange, sugerencias, suger
                 <Tip
                   label="Rot. DesEstac."
                   tip={
-                    'Rotación Diaria Promedio\n' +
-                    'Promedio de rotación en meses cerrados, excluyendo el mes de referencia.\n' +
-                    '  · Meses normales: ventas ÷ días_con_stock\n' +
-                    '  · Meses con quiebre: rotación ajustada por frecuencia del SKU\n' +
-                    '  · Meses sin stock: excluidos\n\n' +
-                    'Nota: en Fase 2 se reemplaza por el valor desestacionalizado con\n' +
-                    'el factor estacional del sistema de origen.'
+                    'Rotación diaria promedio corregida por estacionalidad.\n' +
+                    'Promedio de meses cerrados, excluyendo el mes de referencia.\n' +
+                    '  · Meses normales: rotación real ÷ factor estacional del mes\n' +
+                    '  · Meses con quiebre: rotación ajustada por frecuencia × factor estacional\n' +
+                    '  · Meses sin stock o sin factor: excluidos'
                   }
                 />
               </th>

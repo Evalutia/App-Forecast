@@ -495,7 +495,11 @@ PREDICT_PERIODS, PREDICT_MODEL_SET, PREDICT_VERSION, PREDICT_SCHEDULE_HOUR
 | **`factor_estacional`** | Se mantiene sin cambios — sigue almacenando el factor del mes actual (escalar, issue #3). Issue #31 agrega las 12 columnas nuevas sin tocar este campo. |
 | **Lookup strategy en ETL** | Preload dict al inicio de `calcular_filas`: `SELECT sku, factor_mes_01…factor_mes_12 FROM articulos` → dict `factors[sku][1..12]`. Lookup O(1) por fila. Sin JOIN dinámico en SQL. |
 | **C# modelo** | Sin cambios en `Articulo.cs` ni `EvalutiaDbContext.cs`. Las 12 columnas son ETL-internas. El backend lee `rotacion_diaria_desestacionalizada` de `planilla_ventas_calculada` (ya mapeado). |
-| **Scope del cálculo** | `rotacion_diaria_desestacionalizada` se calcula para toda fila donde `rotacion_diaria_real != NULL` (normal y quiebre_parcial). `sin_stock` queda NULL (ds==0 → rot_real==None). Issue #32 filtra a meses `normal` al agregar en el frontend. |
+| **Scope del cálculo ETL** | `rotacion_diaria_desestacionalizada` se calcula para toda fila donde `rotacion_diaria_real != NULL` (normal y quiebre_parcial). `sin_stock` queda NULL (ds==0 → rot_real==None). |
+| **`calcRotDesEstac` (#32) — meses normales** | Usa `rotacionDiariaDesestacionalizada`. Si es NULL (factor no disponible), ese mes se omite del promedio — sin fallback a `rotacionDiariaReal`. |
+| **`calcRotDesEstac` (#32) — meses quiebre_parcial** | Opción C: `rotacionAjustada * (rotacionDiariaDesestacionalizada / rotacionDiariaReal)`. Fallback a `rotacionAjustada` si `rotacionDiariaDesestacionalizada` es NULL. Omitir si `rotacionAjustada` es NULL. |
+| **`calcRotDesEstac` (#32) — sin valores** | Si `vals.length === 0` → mostrar `—`. Sin fallback ni mezcla de valores desestacionalizados/no-desestacionalizados. |
+| **Tooltip (#32)** | "Rotación diaria promedio corregida por estacionalidad.\nMeses normales: rotación real ÷ factor estacional del mes.\nMeses con quiebre: rotación ajustada por frecuencia × factor estacional.\nExcluye el mes de referencia." |
 | **Migración** | `09-articulos-factores-mensuales.sql`: `ALTER TABLE articulos ADD COLUMN factor_mes_01 DECIMAL(5,3) NULL, …, ADD COLUMN factor_mes_12 DECIMAL(5,3) NULL`. |
 | **Orden de implementación** | Primero Issue #31 (migración DB + ETL), luego Issue #32 (frontend). El cambio frontend no tiene efecto visible hasta que el ETL pueble el campo. |
 
