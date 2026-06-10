@@ -63,6 +63,8 @@ namespace DataAccess.Repositories.PlanillaDataAccess
                      p.RotacionDiariaBruta,
                      p.RotacionDiariaDesestacionalizada,
                      p.EstadoMes,
+                     p.FrecuenciaNivel,
+                     p.RotacionAjustada,
                      Descripcion = a != null ? a.Descripcion : null,
                      MarcaNombre = a != null ? a.MarcaNombre : null,
                      GeneroDescripcion = a != null ? a.GeneroDescripcion : null,
@@ -82,7 +84,9 @@ namespace DataAccess.Repositories.PlanillaDataAccess
             RotacionDiariaReal = f.RotacionDiariaReal,
             RotacionDiariaBruta = f.RotacionDiariaBruta,
             RotacionDiariaDesestacionalizada = f.RotacionDiariaDesestacionalizada,
-            EstadoMes = f.EstadoMes
+            EstadoMes = f.EstadoMes,
+            FrecuenciaNivel = f.FrecuenciaNivel,
+            RotacionAjustada = f.RotacionAjustada
           },
           Descripcion: f.Descripcion,
           MarcaNombre: f.MarcaNombre,

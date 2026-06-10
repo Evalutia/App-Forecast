@@ -30,6 +30,12 @@ import pymysql
 VENTANA_MESES        = 13     # mes actual + 12 anteriores completos
 ESTADO_UMBRAL_NORMAL = 0.90   # fracción de días naturales necesaria para "normal"
 
+# Umbrales de frecuencia de quiebre (Issue #27)
+# Medida: cantidad de meses cerrados (de 12) con ventas_cantidad > 0
+FREQ_ALTA_MIN  = 9   # >= 9 meses con ventas → alta frecuencia
+FREQ_BAJA_MAX  = 3   # <= 3 meses con ventas → baja frecuencia
+                     # 4–8 meses → media frecuencia
+
 # ── Conexión ───────────────────────────────────────────────────────────────────
 
 def db_connect() -> pymysql.Connection:
@@ -186,7 +192,7 @@ def calcular_filas(conn: pymysql.Connection) -> tuple[list[dict], int]:
     if skus_omitidos:
         print(f"[PLANILLA][WARN] {skus_omitidos} SKU(s) con ventas sin registro en articulos — omitidos.")
 
-    # ── Construir filas ────────────────────────────────────────────────────────
+    # ── Construir filas (paso 1: calcular datos por mes) ──────────────────────
     todas_keys = (set(ventas.keys()) | set(dias_stock.keys()))
 
     filas = []
@@ -207,11 +213,60 @@ def calcular_filas(conn: pymysql.Connection) -> tuple[list[dict], int]:
             "dias_naturales_mes":                dn,
             "rotacion_diaria_real":              rot_real,
             "rotacion_diaria_bruta":             rot_bruta,
-            "rotacion_diaria_desestacionalizada": None,  # TODO issue #2/#3/#5
+            "rotacion_diaria_desestacionalizada": None,  # TODO issue #31
             "estado_mes":                        clasificar_estado(ds, dn),
+            "frecuencia_nivel":                  None,  # se rellena en paso 2
+            "rotacion_ajustada":                 None,  # se rellena en paso 2
         })
 
-    print(f"[PLANILLA] {len({f['sku'] for f in filas})} SKUs · {len(filas)} filas calculadas")
+    # ── Paso 2: frecuencia de quiebre por SKU ─────────────────────────────────
+    # Mes de referencia = meses[0] (más reciente). Los 12 cerrados son meses[1..12].
+    meses_ordenados = sorted(meses, reverse=True)          # más reciente primero
+    meses_cerrados  = set(meses_ordenados[1:])             # excluye el mes actual
+
+    # Contar meses cerrados con ventas > 0 por SKU
+    meses_con_ventas: dict[str, int] = {}
+    for (sku, yr, mo), vq in ventas.items():
+        if (yr, mo) in meses_cerrados and vq > 0:
+            meses_con_ventas[sku] = meses_con_ventas.get(sku, 0) + 1
+
+    def clasificar_frecuencia(n_meses_con_ventas: int) -> str:
+        if n_meses_con_ventas >= FREQ_ALTA_MIN:
+            return "alta"
+        if n_meses_con_ventas <= FREQ_BAJA_MAX:
+            return "baja"
+        return "media"
+
+    def rotacion_ajustada(vq: int, ds: int, dn: int, nivel: str) -> float | None:
+        if nivel == "alta":
+            return round(vq / ds, 4) if ds > 0 else None
+        if nivel == "baja":
+            return round(vq / dn, 4)
+        # media: promedio de ambas fórmulas
+        r_alta = vq / ds if ds > 0 else None
+        r_baja = vq / dn
+        if r_alta is None:
+            return round(r_baja, 4)
+        return round((r_alta + r_baja) / 2, 4)
+
+    # Anotar frecuencia_nivel y rotacion_ajustada en cada fila
+    for fila in filas:
+        sku = fila["sku"]
+        n   = meses_con_ventas.get(sku, 0)
+        nivel = clasificar_frecuencia(n)
+        fila["frecuencia_nivel"] = nivel
+
+        if fila["estado_mes"] == "quiebre_parcial":
+            fila["rotacion_ajustada"] = rotacion_ajustada(
+                fila["ventas_cantidad"],
+                fila["dias_con_stock"],
+                fila["dias_naturales_mes"],
+                nivel,
+            )
+
+    skus_procesados = len({f["sku"] for f in filas})
+    dist = {lvl: sum(1 for f in filas if f["frecuencia_nivel"] == lvl and f["month"] == meses[0][1] and f["year"] == meses[0][0]) for lvl in ("alta","media","baja")}
+    print(f"[PLANILLA] {skus_procesados} SKUs · {len(filas)} filas · frecuencia: alta={dist['alta']} media={dist['media']} baja={dist['baja']}")
     return filas, skus_omitidos
 
 # ── Escritura atómica ──────────────────────────────────────────────────────────
@@ -221,13 +276,13 @@ _SQL_INSERT = """
         (sku, year, month,
          ventas_cantidad, dias_con_stock, dias_naturales_mes,
          rotacion_diaria_real, rotacion_diaria_bruta, rotacion_diaria_desestacionalizada,
-         estado_mes, ts_carga)
+         estado_mes, frecuencia_nivel, rotacion_ajustada, ts_carga)
     VALUES
         (%(sku)s, %(year)s, %(month)s,
          %(ventas_cantidad)s, %(dias_con_stock)s, %(dias_naturales_mes)s,
          %(rotacion_diaria_real)s, %(rotacion_diaria_bruta)s,
          %(rotacion_diaria_desestacionalizada)s,
-         %(estado_mes)s, NOW(6))
+         %(estado_mes)s, %(frecuencia_nivel)s, %(rotacion_ajustada)s, NOW(6))
 """
 
 def escribir_planilla(conn: pymysql.Connection, filas: list[dict]) -> None:

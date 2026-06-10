@@ -57,5 +57,7 @@ namespace Services.Planilla
     public decimal? RotacionDiariaBruta { get; init; }
     public decimal? RotacionDiariaDesestacionalizada { get; init; }
     public string EstadoMes { get; init; } = string.Empty;
+    public string? FrecuenciaNivel { get; init; }
+    public decimal? RotacionAjustada { get; init; }
   }
 }

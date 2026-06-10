@@ -8,6 +8,8 @@ export interface PlanillaMesDto {
   rotacionDiariaBruta: number | null;
   rotacionDiariaDesestacionalizada: number | null;
   estadoMes: 'normal' | 'quiebre_parcial' | 'sin_stock';
+  frecuenciaNivel: 'alta' | 'media' | 'baja' | null;
+  rotacionAjustada: number | null;
 }
 
 export interface PlanillaVentasDto {

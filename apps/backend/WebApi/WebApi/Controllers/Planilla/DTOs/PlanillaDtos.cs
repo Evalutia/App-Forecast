@@ -33,6 +33,8 @@ namespace WebApi.Controllers.Planilla.DTOs
     public decimal? RotacionDiariaBruta { get; init; }
     public decimal? RotacionDiariaDesestacionalizada { get; init; }
     public string EstadoMes { get; init; } = string.Empty;
+    public string? FrecuenciaNivel { get; init; }
+    public decimal? RotacionAjustada { get; init; }
 
     public PlanillaMesOutDto(PlanillaMesDto dto)
     {
@@ -45,6 +47,8 @@ namespace WebApi.Controllers.Planilla.DTOs
       RotacionDiariaBruta            = dto.RotacionDiariaBruta;
       RotacionDiariaDesestacionalizada = dto.RotacionDiariaDesestacionalizada;
       EstadoMes                      = dto.EstadoMes;
+      FrecuenciaNivel                = dto.FrecuenciaNivel;
+      RotacionAjustada               = dto.RotacionAjustada;
     }
   }
 

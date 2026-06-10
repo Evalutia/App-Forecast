@@ -12,5 +12,7 @@ namespace WebApi.Models
     public decimal? RotacionDiariaBruta { get; set; }
     public decimal? RotacionDiariaDesestacionalizada { get; set; }
     public string EstadoMes { get; set; } = string.Empty;
+    public string? FrecuenciaNivel { get; set; }
+    public decimal? RotacionAjustada { get; set; }
   }
 }

@@ -357,6 +357,12 @@ public class EvalutiaDbContext : DbContext
       entity.Property(e => e.EstadoMes)
           .HasColumnType("enum('normal','quiebre_parcial','sin_stock')")
           .HasColumnName("estado_mes");
+      entity.Property(e => e.FrecuenciaNivel)
+          .HasColumnType("enum('alta','media','baja')")
+          .HasColumnName("frecuencia_nivel");
+      entity.Property(e => e.RotacionAjustada)
+          .HasPrecision(10, 4)
+          .HasColumnName("rotacion_ajustada");
     });
 
     modelBuilder.Entity<PlanillaSugerencias>(entity =>
