@@ -491,10 +491,15 @@ PREDICT_PERIODS, PREDICT_MODEL_SET, PREDICT_VERSION, PREDICT_SCHEDULE_HOUR
 | **Columnas afectadas** | Solo la columna resumen `Rot. DesEstac.`. Las 13 celdas mensuales siguen mostrando `rotacionDiariaReal` sin cambios. |
 | **Fórmula Fase 2** | `avg(rotacionDiariaDesestacionalizada para meses normales, excluyendo mes de referencia)`. Si ningún mes tiene valor → `—`. |
 | **Fuente del factor estacional** | SOAP provee `Mes01`–`Mes12` por SKU. Se almacenan como 12 columnas en `articulos` (`factor_mes_01`…`factor_mes_12`). Un factor por mes del año calendario. |
-| **Cálculo en ETL** | `rotacion_diaria_desestacionalizada = rotacion_diaria_real / factor_mes_{MM}`. Si factor es NULL o 0, queda NULL. Se calcula en `run_calc_planilla.py` con JOIN a `articulos`. |
+| **Cálculo en ETL** | `rotacion_diaria_desestacionalizada = rotacion_diaria_real / factor_mes_{MM}`. Si factor es NULL o 0, queda NULL. Se calcula en `run_calc_planilla.py` con preload dict de `articulos`. |
+| **`factor_estacional`** | Se mantiene sin cambios — sigue almacenando el factor del mes actual (escalar, issue #3). Issue #31 agrega las 12 columnas nuevas sin tocar este campo. |
+| **Lookup strategy en ETL** | Preload dict al inicio de `calcular_filas`: `SELECT sku, factor_mes_01…factor_mes_12 FROM articulos` → dict `factors[sku][1..12]`. Lookup O(1) por fila. Sin JOIN dinámico en SQL. |
+| **C# modelo** | Sin cambios en `Articulo.cs` ni `EvalutiaDbContext.cs`. Las 12 columnas son ETL-internas. El backend lee `rotacion_diaria_desestacionalizada` de `planilla_ventas_calculada` (ya mapeado). |
+| **Scope del cálculo** | `rotacion_diaria_desestacionalizada` se calcula para toda fila donde `rotacion_diaria_real != NULL` (normal y quiebre_parcial). `sin_stock` queda NULL (ds==0 → rot_real==None). Issue #32 filtra a meses `normal` al agregar en el frontend. |
+| **Migración** | `09-articulos-factores-mensuales.sql`: `ALTER TABLE articulos ADD COLUMN factor_mes_01 DECIMAL(5,3) NULL, …, ADD COLUMN factor_mes_12 DECIMAL(5,3) NULL`. |
 | **Orden de implementación** | Primero Issue #31 (migración DB + ETL), luego Issue #32 (frontend). El cambio frontend no tiene efecto visible hasta que el ETL pueble el campo. |
 
-> **Nota:** La migración `07-articulos-factor-estacional-estado.sql` (que agrega `factor_estacional` y `estado` a `articulos`) aún no está aplicada en producción. Issue #31 debe aplicarla junto con las 12 nuevas columnas de factores mensuales.
+> **Nota:** La migración `07-articulos-factor-estacional-estado.sql` (que agrega `factor_estacional` y `estado` a `articulos`) aún no está aplicada en producción. Para prod, aplicar `07` primero, luego `09`. En dev, solo `09` (07 ya aplicada). `run_extract_articulos.py` necesita actualizar INSERT + ON DUPLICATE KEY UPDATE con los 12 nuevos campos. El TODO en `run_calc_planilla.py` línea 216 se rellena con el preload dict.
 
 ### `Vta.Mes/Año` en PlanillaTable — Issue #23 (sesión 2026-06-10)
 

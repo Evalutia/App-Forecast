@@ -48,9 +48,7 @@ def normalize_sku_from_value(raw):
         return None
     return s[:128]
 
-def get_factor_estacional(it: dict):
-    key = f"Mes{datetime.datetime.now().month:02d}"
-    val = it.get(key)
+def _parse_factor(val) -> float | None:
     if val is None:
         return None
     s = str(val).strip()
@@ -61,6 +59,13 @@ def get_factor_estacional(it: dict):
         return f if f > 0 else None
     except Exception:
         return None
+
+def get_factor_estacional(it: dict):
+    key = f"Mes{datetime.datetime.now().month:02d}"
+    return _parse_factor(it.get(key))
+
+def get_factores_mensuales(it: dict) -> list:
+    return [_parse_factor(it.get(f"Mes{i:02d}")) for i in range(1, 13)]
 
 def normalize_sku_from_item(it: dict):
     raw = (
@@ -194,6 +199,7 @@ def normalize_item(it: dict, barcode_map: dict):
         "stock_minimo": stock_minimo,
         "barcode": trunc(barcode, 255) if barcode else None,
         "factor_estacional": get_factor_estacional(it),
+        **{f"factor_mes_{i:02d}": v for i, v in enumerate(get_factores_mensuales(it), 1)},
     }
 
 def load_payload_raw():
@@ -281,8 +287,14 @@ def main():
       (sku, descripcion, familia_id, familia_nombre, genero_id, genero_descripcion,
        seccion_id, seccion_nombre, marca_id, marca_nombre, temporada_id, temporada_nombre,
        fec_alta, fec_modif, comentario, fact_desc_min, fact_desc_max, desc_valida,
-       stock_minimo, barcode, factor_estacional, estado, fuente, ts_carga)
-    VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,NOW(6))
+       stock_minimo, barcode, factor_estacional,
+       factor_mes_01, factor_mes_02, factor_mes_03, factor_mes_04,
+       factor_mes_05, factor_mes_06, factor_mes_07, factor_mes_08,
+       factor_mes_09, factor_mes_10, factor_mes_11, factor_mes_12,
+       estado, fuente, ts_carga)
+    VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,
+            %s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,
+            %s,%s,NOW(6))
     ON DUPLICATE KEY UPDATE
       descripcion = VALUES(descripcion),
       familia_id = VALUES(familia_id),
@@ -304,6 +316,18 @@ def main():
       stock_minimo = VALUES(stock_minimo),
       barcode = VALUES(barcode),
       factor_estacional = VALUES(factor_estacional),
+      factor_mes_01 = VALUES(factor_mes_01),
+      factor_mes_02 = VALUES(factor_mes_02),
+      factor_mes_03 = VALUES(factor_mes_03),
+      factor_mes_04 = VALUES(factor_mes_04),
+      factor_mes_05 = VALUES(factor_mes_05),
+      factor_mes_06 = VALUES(factor_mes_06),
+      factor_mes_07 = VALUES(factor_mes_07),
+      factor_mes_08 = VALUES(factor_mes_08),
+      factor_mes_09 = VALUES(factor_mes_09),
+      factor_mes_10 = VALUES(factor_mes_10),
+      factor_mes_11 = VALUES(factor_mes_11),
+      factor_mes_12 = VALUES(factor_mes_12),
       estado = 'activo',
       fuente = VALUES(fuente),
       actualizado_en = NOW(6),
@@ -354,6 +378,7 @@ def main():
                             normalized["stock_minimo"],
                             normalized["barcode"],
                             normalized["factor_estacional"],
+                            *[normalized[f"factor_mes_{i:02d}"] for i in range(1, 13)],
                             "activo",
                             "ConsArticulosWeb",
                         ),

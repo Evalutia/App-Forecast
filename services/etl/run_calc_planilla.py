@@ -107,11 +107,28 @@ def job_end(conn: pymysql.Connection, job_id: int, estado: str, detalle: dict) -
 
 # ── Cálculo ────────────────────────────────────────────────────────────────────
 
+def cargar_factores(conn: pymysql.Connection) -> dict[str, dict[int, float | None]]:
+    """Preload de factores estacionales por SKU×mes. factors[sku][1..12]."""
+    with conn.cursor() as cur:
+        cur.execute(
+            "SELECT sku, factor_mes_01, factor_mes_02, factor_mes_03, factor_mes_04, "
+            "       factor_mes_05, factor_mes_06, factor_mes_07, factor_mes_08, "
+            "       factor_mes_09, factor_mes_10, factor_mes_11, factor_mes_12 "
+            "FROM articulos"
+        )
+        rows = cur.fetchall()
+    return {
+        row[0]: {i + 1: (float(row[i + 1]) if row[i + 1] is not None else None) for i in range(12)}
+        for row in rows
+    }
+
+
 def calcular_filas(conn: pymysql.Connection) -> tuple[list[dict], int]:
     """
     Retorna (filas_para_insert, skus_omitidos).
     skus_omitidos: SKUs que tienen ventas pero no existe en articulos (FK violation evitada).
     """
+    factors = cargar_factores(conn)
     meses = ventana_meses(VENTANA_MESES)
     meses_set = set(meses)
 
@@ -204,6 +221,9 @@ def calcular_filas(conn: pymysql.Connection) -> tuple[list[dict], int]:
         rot_real  = round(vq / ds, 4) if ds > 0 else None
         rot_bruta = round(vq / dn, 4)
 
+        factor = (factors.get(sku) or {}).get(mo)
+        rot_desest = round(rot_real / factor, 4) if rot_real is not None and factor else None
+
         filas.append({
             "sku":                               sku,
             "year":                              yr,
@@ -213,7 +233,7 @@ def calcular_filas(conn: pymysql.Connection) -> tuple[list[dict], int]:
             "dias_naturales_mes":                dn,
             "rotacion_diaria_real":              rot_real,
             "rotacion_diaria_bruta":             rot_bruta,
-            "rotacion_diaria_desestacionalizada": None,  # TODO issue #31
+            "rotacion_diaria_desestacionalizada": rot_desest,
             "estado_mes":                        clasificar_estado(ds, dn),
             "frecuencia_nivel":                  None,  # se rellena en paso 2
             "rotacion_ajustada":                 None,  # se rellena en paso 2
