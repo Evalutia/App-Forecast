@@ -448,6 +448,44 @@ PREDICT_PERIODS, PREDICT_MODEL_SET, PREDICT_VERSION, PREDICT_SCHEDULE_HOUR
 
 > **Nota:** el umbral de 15 días es el lead time típico de reposición para productos de tecnología. Es arbitrario y documentado en el tooltip para que el cliente lo entienda.
 
+### `DashboardPage.tsx` — Issue #22 (sesión 2026-06-10)
+
+| Decisión | Definición |
+|----------|-----------|
+| **Causa raíz** | `DashboardPage` llamaba a `searchJobs()` (→ `GET /api/jobs`) sin condición de rol. El endpoint es admin-only, retorna 403 para `duenoDeEmpresa`, y el interceptor Axios mostraba el toast. |
+| **Fix** | `enabled: isAdmin` en ambos `useQuery` de jobs. El bloque de estado ETL en la stats bar también se wrappea en `{isAdmin && ...}`. |
+| **Scope** | Solo `DashboardPage.tsx`. No se tocó el interceptor Axios ni el `RequireAdmin` — ambos funcionaban correctamente. |
+| **Visibilidad para duenoDeEmpresa** | El home muestra: bienvenida, "X módulos disponibles", "Acceso completo" (solo admin). Sin estado ETL para no-admins — no es info relevante para ellos. |
+
+> **Nota:** Si en el futuro se agregan más `useQuery` en páginas accesibles a ambos roles que llamen a endpoints admin-only, aplicar el mismo patrón `enabled: isAdmin`. El interceptor NO se debe tocar para suprimir 403 globalmente — es una señal válida para acciones reales del usuario.
+
+---
+
+### Plan Fase 3 — Ajustes cliente v2 (sesión 2026-06-09)
+
+| Issue | Capa | Título | Depende de | Estado |
+|-------|------|--------|------------|--------|
+| #22 | Frontend/Bug | Toast "Prohibido" para duenoDeEmpresa | — | Listo para arrancar |
+| #23 | Frontend | Columnas Vta.Mes/Año en PlanillaTable | — | Listo para arrancar |
+| #24 | ETL+DB | Estado artículo A/D desde SOAP | XML del cliente | **BLOQUEADO** |
+| #25 | Backend | Exponer estado en GET /api/planilla/ventas | #24 | Bloqueado por #24 |
+| #26 | Frontend | Columna Estado Artículo en PlanillaTable | #25 | Bloqueado por #25 |
+| #27 | Python+DB | 3 niveles de quiebre por frecuencia de venta | — | Listo para arrancar |
+| #28 | Frontend | Colores y cálculo por nivel de frecuencia | #27 | Bloqueado por #27 |
+| #29 | Frontend | Fix exportPlanilla.ts (todas las columnas) | #23, #26, #28 | Bloqueado por deps |
+| #30 | ML | Auditoría modelos de predicción | — | Separado del sprint |
+
+**Decisiones clave de esta sesión:**
+
+| Decisión | Definición |
+|----------|-----------|
+| **Estado Art. desde SOAP** | El SOAP expone solo `A` (activo) y `D` (discontinuo). `inactivo` sigue siendo derivado por ausencia en el feed — lógica ya existente de issue #3. |
+| **`Rot. Manual`** | Columna presente en el CSV del cliente (override manual de rotación). Fuera de scope para esta fase. |
+| **Issue #30** | Es auditoría/investigación, no feature. No bloquea ni es bloqueado por ningún otro issue. Si el audit da luz verde, se abre issue #31 para surfacear la fiabilidad en planilla. |
+| **Umbrales de frecuencia (#27)** | Se definen al arrancar el issue, en conjunto con el cliente/equipo. No están hardcodeados aún. |
+
+---
+
 ## Issues conocidos / TODOs en código
 
 | Issue | Ubicación | Descripción |
