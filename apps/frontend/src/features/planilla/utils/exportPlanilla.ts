@@ -1,31 +1,82 @@
 import ExcelJS, { type Cell } from 'exceljs';
 import { fetchPlanillaVentas } from './api';
-import type { PlanillaVentasDto, PlanillaVentasParams } from '../types/planilla';
+import type { PlanillaMesDto, PlanillaSugerenciaDto, PlanillaVentasDto, PlanillaVentasParams } from '../types/planilla';
 
 const MESES = ['Ene','Feb','Mar','Abr','May','Jun','Jul','Ago','Sep','Oct','Nov','Dic'];
 const mesLabel = (year: number, month: number) => `${MESES[month - 1]}/${String(year).slice(2)}`;
 
-// Colors matching the UI
-const COLOR_QUIEBRE  = 'FFCA28'; // amber
-const COLOR_SINSTOCK = '90A4AE'; // slate grey
-const COLOR_HEADER   = '0D5C2E'; // dark green for headers
-const COLOR_SUMMARY  = '1B4332'; // darker green for summary cols
+// Cell background colors matching the UI (issue #28)
+const COLOR_QUIEBRE_ALTA  = 'FFCA28'; // amber — alta frecuencia
+const COLOR_QUIEBRE_MEDIA = 'FFB74D'; // orange — media frecuencia
+const COLOR_QUIEBRE_BAJA  = 'EF9A9A'; // rose — baja frecuencia
+const COLOR_SINSTOCK      = '90A4AE'; // slate grey
+const COLOR_HEADER        = '0D5C2E'; // dark green for headers
+const COLOR_SUMMARY       = '1B4332'; // darker green for summary col headers
+const COLOR_SUMMARY_BG    = 'D1FAE5'; // light green for summary data cells
+const COLOR_SUMMARY_FG    = '065F46'; // dark green text for summary data cells
 
-function rotDesEstac(meses: PlanillaVentasDto['meses']): number | null {
-  const closed   = meses.slice(0, -1);
-  const normales = closed.filter(m => m.estadoMes === 'normal' && m.rotacionDiariaReal != null);
-  if (normales.length === 0) return null;
-  return normales.reduce((s, m) => s + (m.rotacionDiariaReal ?? 0), 0) / normales.length;
+function mesBgColor(estadoMes: string, frecuenciaNivel?: string | null): string | null {
+  if (estadoMes === 'quiebre_parcial') {
+    if (frecuenciaNivel === 'baja')  return COLOR_QUIEBRE_BAJA;
+    if (frecuenciaNivel === 'media') return COLOR_QUIEBRE_MEDIA;
+    return COLOR_QUIEBRE_ALTA;
+  }
+  if (estadoMes === 'sin_stock') return COLOR_SINSTOCK;
+  return null;
 }
 
-function ddstk(meses: PlanillaVentasDto['meses']): number | null {
+function mesFgColor(estadoMes: string, frecuenciaNivel?: string | null): string {
+  if (estadoMes === 'quiebre_parcial') {
+    return frecuenciaNivel === 'baja' ? 'FF7F1D1D' : 'FF7B4A00';
+  }
+  if (estadoMes === 'sin_stock') return 'FF374151';
+  return 'FF111827';
+}
+
+function applyMesStyle(cell: ExcelJS.Cell, mes: PlanillaMesDto, isRef: boolean): void {
+  const bg = mesBgColor(mes.estadoMes, mes.frecuenciaNivel);
+  if (bg) {
+    cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: `FF${bg}` } };
+    cell.font = { color: { argb: mesFgColor(mes.estadoMes, mes.frecuenciaNivel) }, size: 10 };
+  } else if (isRef) {
+    cell.font = { color: { argb: 'FF6B7280' }, italic: true, size: 10 };
+  } else {
+    cell.font = { size: 10 };
+  }
+  cell.alignment = { vertical: 'middle', horizontal: 'right' };
+  cell.border    = { right: { style: 'hair', color: { argb: 'FFD1D5DB' } } };
+}
+
+function applySummaryStyle(cell: ExcelJS.Cell, numFmt: string): void {
+  cell.numFmt    = numFmt;
+  cell.alignment = { horizontal: 'right', vertical: 'middle' };
+  cell.font      = { bold: true, size: 10, color: { argb: `FF${COLOR_SUMMARY_FG}` } };
+  cell.fill      = { type: 'pattern', pattern: 'solid', fgColor: { argb: `FF${COLOR_SUMMARY_BG}` } };
+}
+
+function rotDesEstac(meses: PlanillaMesDto[]): number | null {
+  const closed = meses.slice(0, -1);
+  const vals: number[] = [];
+  for (const m of closed) {
+    if (m.estadoMes === 'normal' && m.rotacionDiariaDesestacionalizada != null) {
+      vals.push(m.rotacionDiariaDesestacionalizada);
+    } else if (m.estadoMes === 'quiebre_parcial' && m.rotacionAjustada != null) {
+      if (m.rotacionDiariaDesestacionalizada != null && m.rotacionDiariaReal != null && m.rotacionDiariaReal > 0)
+        vals.push(m.rotacionAjustada * (m.rotacionDiariaDesestacionalizada / m.rotacionDiariaReal));
+      else
+        vals.push(m.rotacionAjustada);
+    }
+  }
+  return vals.length === 0 ? null : vals.reduce((s, v) => s + v, 0) / vals.length;
+}
+
+function ddstk(meses: PlanillaMesDto[]): number | null {
   const totalVentas = meses.reduce((s, m) => s + Number(m.ventasCantidad), 0);
   const totalDias   = meses.reduce((s, m) => s + m.diasConStock, 0);
   return totalDias === 0 ? null : totalVentas / totalDias;
 }
 
 async function fetchAll(params: PlanillaVentasParams): Promise<PlanillaVentasDto[]> {
-  // Backend limits pageSize to 200 — fetch in chunks if needed
   const first = await fetchPlanillaVentas({ ...params, page: 1, pageSize: 200 });
   const total = first.total;
   if (first.items.length >= total) return first.items;
@@ -39,7 +90,10 @@ async function fetchAll(params: PlanillaVentasParams): Promise<PlanillaVentasDto
   return [first.items, ...rest.map(r => r.items)].flat();
 }
 
-export async function exportPlanillaExcel(params: PlanillaVentasParams): Promise<void> {
+export async function exportPlanillaExcel(
+  params: PlanillaVentasParams,
+  sugerencias: Map<string, PlanillaSugerenciaDto>,
+): Promise<void> {
   const items = await fetchAll(params);
   if (items.length === 0) return;
 
@@ -51,122 +105,116 @@ export async function exportPlanillaExcel(params: PlanillaVentasParams): Promise
     views: [{ state: 'frozen', xSplit: 1, ySplit: 1 }],
   });
 
-  // ── Build headers ──────────────────────────────────────────────────────────
-  const mesesRef = items[0].meses;
-  const mesLabels = mesesRef.map(m => mesLabel(m.year, m.month));
-  const lastMesIdx = mesesRef.length - 1; // reference month
+  // ── Column layout ──────────────────────────────────────────────────────────
+  // Fixed (4): SKU, Descripción, Género, Estado
+  // Monthly Vta (n): Vta.Mes/Año × 13
+  // Monthly Rot (n): Rot.Mes/Año × 13
+  // Summary (6): VTA, Rot.DesEstac., DDSTK, ROT.S, Fiabilidad%, QBK
+  const mesesRef   = items[0].meses;
+  const n          = mesesRef.length;
+  const lastMesIdx = n - 1;
+  const mesLabels  = mesesRef.map(m => mesLabel(m.year, m.month));
+
+  // Column index helpers (1-based)
+  const COL_VTA_MES  = (i: number) => 5 + i;          // i = 0..n-1
+  const COL_ROT_MES  = (i: number) => 5 + n + i;      // i = 0..n-1
+  const COL_VTA      = 5 + 2 * n;
+  const COL_RD       = 6 + 2 * n;
+  const COL_DD       = 7 + 2 * n;
+  const COL_ROTS     = 8 + 2 * n;
+  const COL_FIAB     = 9 + 2 * n;
+  const COL_QBK      = 10 + 2 * n;
 
   const headers = [
     'SKU',
     'Descripción',
     'Género',
-    'Estado',           // estado del artículo
-    'VTA',              // ventas totales 12 meses cerrados
-    ...mesLabels,
+    'Estado',
+    ...mesLabels.map(l => `Vta.${l}`),
+    ...mesLabels.map(l => `Rot.${l}`),
+    'VTA',
     'Rot. DesEstac.',
     'DDSTK',
+    'ROT.S',
+    'Fiabilidad %',
+    'QBK (días)',
   ];
 
-  // Column widths
   ws.columns = [
-    { width: 13 },                        // SKU
-    { width: 34 },                        // Descripción
-    { width: 18 },                        // Género
-    { width: 13 },                        // Estado
-    { width: 10 },                        // VTA
-    ...mesesRef.map((_, i) => ({          // Monthly (last one slightly different)
-      width: i === lastMesIdx ? 10 : 9,
-    })),
-    { width: 15 },                        // Rot. DesEstac.
-    { width: 12 },                        // DDSTK
+    { width: 13 },                                          // SKU
+    { width: 34 },                                          // Descripción
+    { width: 18 },                                          // Género
+    { width: 13 },                                          // Estado
+    ...mesesRef.map((_, i) => ({ width: i === lastMesIdx ? 10 : 9 })),  // Vta months
+    ...mesesRef.map((_, i) => ({ width: i === lastMesIdx ? 10 : 9 })),  // Rot months
+    { width: 10 },                                          // VTA
+    { width: 15 },                                          // Rot. DesEstac.
+    { width: 12 },                                          // DDSTK
+    { width: 10 },                                          // ROT.S
+    { width: 13 },                                          // Fiabilidad %
+    { width: 11 },                                          // QBK
   ];
 
-  // Header row
+  // ── Header row ─────────────────────────────────────────────────────────────
   const headerRow = ws.addRow(headers);
   headerRow.height = 22;
   headerRow.eachCell((cell: Cell, colNum: number) => {
-    // cols 1-4 = SKU/Desc/Género/Estado (header), col 5 = VTA (summary), rest = monthly, last 2 = summary
-    const isSummary = colNum === 5 || colNum > 5 + mesesRef.length;
-    cell.fill   = { type: 'pattern', pattern: 'solid', fgColor: { argb: `FF${isSummary ? COLOR_SUMMARY : COLOR_HEADER}` } };
-    cell.font   = { bold: true, color: { argb: 'FFFFFFFF' }, size: 10 };
+    const isSummary = colNum >= COL_VTA;
+    cell.fill      = { type: 'pattern', pattern: 'solid', fgColor: { argb: `FF${isSummary ? COLOR_SUMMARY : COLOR_HEADER}` } };
+    cell.font      = { bold: true, color: { argb: 'FFFFFFFF' }, size: 10 };
     cell.alignment = { vertical: 'middle', horizontal: colNum <= 2 ? 'left' : 'center', wrapText: false };
-    cell.border = {
-      bottom: { style: 'medium', color: { argb: 'FF34C48F' } },
-    };
+    cell.border    = { bottom: { style: 'medium', color: { argb: 'FF34C48F' } } };
   });
 
   // ── Data rows ──────────────────────────────────────────────────────────────
   for (const item of items) {
-    const rd = rotDesEstac(item.meses);
-    const dd = ddstk(item.meses);
-
+    const rd  = rotDesEstac(item.meses);
+    const dd  = ddstk(item.meses);
     const vta = item.meses.slice(0, -1).reduce((s, m) => s + Number(m.ventasCantidad), 0);
+    const sug = sugerencias.get(item.sku);
 
     const rowValues = [
       item.sku,
       item.descripcion ?? '',
       item.generoDescripcion ?? '',
       item.estadoArticulo ?? 'activo',
+      ...item.meses.map(m => Number(m.ventasCantidad)),
+      ...item.meses.map(m => m.rotacionDiariaReal ?? 0),
       vta,
-      ...item.meses.map(m => (m.rotacionDiariaReal != null ? m.rotacionDiariaReal : 0)),
       rd,
       dd,
+      sug?.rotacionSugerida ?? null,
+      sug?.fiabilidadPorcentaje ?? null,
+      sug?.diasHastaQuiebre != null ? Math.round(sug.diasHastaQuiebre) : null,
     ];
 
     const row = ws.addRow(rowValues);
     row.height = 18;
 
-    // Style fixed cols
-    const skuCell = row.getCell(1);
-    skuCell.font      = { bold: true, size: 10 };
-    skuCell.alignment = { vertical: 'middle' };
+    row.getCell(1).font      = { bold: true, size: 10 };
+    row.getCell(1).alignment = { vertical: 'middle' };
 
-    // VTA col (col 5): summary style
-    const vtaCell = row.getCell(5);
-    vtaCell.numFmt    = '#,##0';
-    vtaCell.alignment = { horizontal: 'right', vertical: 'middle' };
-    vtaCell.font      = { bold: true, size: 10, color: { argb: 'FF065F46' } };
-    vtaCell.fill      = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFD1FAE5' } };
-
-    // Style monthly cols with estado color
+    // Vta monthly cells
     item.meses.forEach((mes, i) => {
-      const col  = 6 + i;
-      const cell = row.getCell(col);
-      cell.numFmt    = '0.0000';
-      cell.alignment = { vertical: 'middle', horizontal: 'right' };
-
-      if (mes.estadoMes === 'quiebre_parcial') {
-        cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: `FF${COLOR_QUIEBRE}` } };
-        cell.font = { color: { argb: 'FF7B4A00' }, size: 10 };
-      } else if (mes.estadoMes === 'sin_stock') {
-        cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: `FF${COLOR_SINSTOCK}` } };
-        cell.font = { color: { argb: 'FF374151' }, size: 10 };
-      } else {
-        // Reference month (last): subtle grey
-        if (i === lastMesIdx) {
-          cell.font = { color: { argb: 'FF6B7280' }, italic: true, size: 10 };
-        } else {
-          cell.font = { size: 10 };
-        }
-      }
-
-      cell.border = {
-        right: { style: 'hair', color: { argb: 'FFD1D5DB' } },
-      };
+      const cell = row.getCell(COL_VTA_MES(i));
+      cell.numFmt = '#,##0';
+      applyMesStyle(cell, mes, i === lastMesIdx);
     });
 
-    // Summary cols (col 5=VTA ya estilizada, los siguientes son meses 6..6+n-1, luego Rot y DDSTK)
-    const rdCell = row.getCell(6 + mesesRef.length);
-    rdCell.numFmt    = '0.0000';
-    rdCell.alignment = { horizontal: 'right', vertical: 'middle' };
-    rdCell.font      = { bold: true, size: 10, color: { argb: 'FF065F46' } };
-    rdCell.fill      = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFD1FAE5' } };
+    // Rot monthly cells (same color, different format)
+    item.meses.forEach((mes, i) => {
+      const cell = row.getCell(COL_ROT_MES(i));
+      cell.numFmt = '0.0000';
+      applyMesStyle(cell, mes, i === lastMesIdx);
+    });
 
-    const dCell = row.getCell(7 + mesesRef.length);
-    dCell.numFmt    = '0.0000';
-    dCell.alignment = { horizontal: 'right', vertical: 'middle' };
-    dCell.font      = { bold: true, size: 10, color: { argb: 'FF065F46' } };
-    dCell.fill      = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFD1FAE5' } };
+    // Summary cells
+    applySummaryStyle(row.getCell(COL_VTA),  '#,##0');
+    applySummaryStyle(row.getCell(COL_RD),   '0.0000');
+    applySummaryStyle(row.getCell(COL_DD),   '0.0000');
+    applySummaryStyle(row.getCell(COL_ROTS), '0.0000');
+    applySummaryStyle(row.getCell(COL_FIAB), '0.0"%"');
+    applySummaryStyle(row.getCell(COL_QBK),  '0');
   }
 
   // ── Download ───────────────────────────────────────────────────────────────

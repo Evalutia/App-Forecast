@@ -574,6 +574,20 @@ PREDICT_PERIODS, PREDICT_MODEL_SET, PREDICT_VERSION, PREDICT_SCHEDULE_HOUR
 
 ---
 
+### `exportPlanilla.ts` — Issue #29 (sesión 2026-06-11)
+
+| Decisión | Definición |
+|----------|-----------|
+| **Sugerencias en el export** | Se pasan como parámetro `sugerencias: Map<string, PlanillaSugerenciaDto>` desde `PlanillaTable.handleExport`. No se hace fetch adicional — los datos ya están en caché de TanStack Query. |
+| **Orden columnas mensuales** | Igual que la UI: todas las Vta.Mes juntas, luego todas las Rot.Mes. No alternado. |
+| **Posición de VTA** | Al final, en el bloque de columnas resumen (después de las 26 columnas mensuales), como especifica el issue. |
+| **Colores quiebre** | Tres colores distintos por `frecuenciaNivel`: alta → #FFCA28, media → #FFB74D, baja → #EF9A9A. Sin stock → #90A4AE. |
+| **Columnas nuevas resumen** | ROT.S, Fiabilidad% y QBK con estilo summary (verde suave). Fiabilidad% con formato `0.0%`, QBK con `0.0 "días"`. |
+
+> **Nota:** Tanto las celdas Vta mensual como Rot mensual reciben el mismo color de fondo por `estadoMes`/`frecuenciaNivel`.
+
+---
+
 ## Issues conocidos / TODOs en código
 
 | Issue | Ubicación | Descripción |

@@ -172,7 +172,7 @@ export default function PlanillaTable({ params, onPageChange, sugerencias, suger
   const handleExport = async () => {
     setExporting(true);
     try {
-      await exportPlanillaExcel(params);
+      await exportPlanillaExcel(params, sugerencias);
     } finally {
       setExporting(false);
     }
