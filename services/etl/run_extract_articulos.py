@@ -48,6 +48,17 @@ def normalize_sku_from_value(raw):
         return None
     return s[:128]
 
+def get_estado(it: dict) -> str:
+    raw = it.get("Inactivo")
+    if raw is None:
+        return "activo"
+    s = str(raw).strip()
+    if s == "1":
+        return "inactivo"
+    if s == "2":
+        return "discontinuo"
+    return "activo"
+
 def _parse_factor(val) -> float | None:
     if val is None:
         return None
@@ -200,6 +211,7 @@ def normalize_item(it: dict, barcode_map: dict):
         "barcode": trunc(barcode, 255) if barcode else None,
         "factor_estacional": get_factor_estacional(it),
         **{f"factor_mes_{i:02d}": v for i, v in enumerate(get_factores_mensuales(it), 1)},
+        "estado": get_estado(it),
     }
 
 def load_payload_raw():
@@ -328,7 +340,7 @@ def main():
       factor_mes_10 = VALUES(factor_mes_10),
       factor_mes_11 = VALUES(factor_mes_11),
       factor_mes_12 = VALUES(factor_mes_12),
-      estado = 'activo',
+      estado = VALUES(estado),
       fuente = VALUES(fuente),
       actualizado_en = NOW(6),
       ts_carga = NOW(6)
@@ -336,10 +348,8 @@ def main():
 
     rows_ins = 0
     rows_skip = 0
-    rows_inactivados = 0
     skipped_samples = []
     err_log = []
-    skus_seen = set()
 
     try:
         with conn.cursor() as cur:
@@ -379,11 +389,10 @@ def main():
                             normalized["barcode"],
                             normalized["factor_estacional"],
                             *[normalized[f"factor_mes_{i:02d}"] for i in range(1, 13)],
-                            "activo",
+                            normalized["estado"],
                             "ConsArticulosWeb",
                         ),
                     )
-                    skus_seen.add(normalized["sku"])
                     rows_ins += 1
                 except Exception as e:
                     rows_skip += 1
@@ -396,14 +405,6 @@ def main():
                             "raw_keys": list(raw.keys()),
                         }
                     )
-
-            if rows_ins > 0 and skus_seen:
-                placeholders = ",".join(["%s"] * len(skus_seen))
-                cur.execute(
-                    f"UPDATE articulos SET estado='inactivo' WHERE sku NOT IN ({placeholders})",
-                    list(skus_seen),
-                )
-                rows_inactivados = cur.rowcount
 
             conn.commit()
     finally:
@@ -426,7 +427,7 @@ def main():
         except Exception:
             pass
 
-    print(f"[INFO] Inserted/Upserted {rows_ins} articulos (skipped {rows_skip}, inactivados {rows_inactivados})")
+    print(f"[INFO] Inserted/Upserted {rows_ins} articulos (skipped {rows_skip})")
     return 0
 
 if __name__ == "__main__":

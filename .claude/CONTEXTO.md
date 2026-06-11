@@ -534,6 +534,18 @@ PREDICT_PERIODS, PREDICT_MODEL_SET, PREDICT_VERSION, PREDICT_SCHEDULE_HOUR
 
 > **Nota:** `frecuencia_nivel` y `rotacion_ajustada` se calculan en `run_calc_planilla.py`. Primero se calcula el nivel por SKU (sobre todos los meses), luego se aplica la fórmula correspondiente a cada fila de quiebre. El cambio visual y de Rot. DesEstac. queda para Issue #28 (Frontend).
 
+### `run_extract_articulos.py` + `08-articulos-estado-discontinuo.sql` — Issue #24 (sesión 2026-06-11)
+
+| Decisión | Definición |
+|----------|-----------|
+| **Campo SOAP** | `<Inactivo>` con valores numéricos: `0`=activo, `1`=inactivo, `2`=discontinuo |
+| **Mapping** | `get_estado()`: `"1"→inactivo`, `"2"→discontinuo`, cualquier otro valor (incluido ausente) → `"activo"` |
+| **ENUM** | `ENUM('activo','inactivo','discontinuo')` — 'discontinuo' agregado al final para compatibilidad MySQL |
+| **Lógica de ausencia eliminada** | El `UPDATE SET estado='inactivo' WHERE sku NOT IN (...)` fue removido. El SOAP es fuente de verdad: envía los 3 estados en el feed nocturno completo |
+| **ON DUPLICATE KEY UPDATE** | `estado = VALUES(estado)` — ya no se hardcodea `'activo'` en el upsert |
+
+> **Nota:** el feed nocturno trae TODOS los artículos (activos, inactivos y discontinuos) con su `<Inactivo>` seteado. No existe el caso de "ausencia implica inactivo" — si un artículo no aparece es un error del SOAP, no un cambio de estado.
+
 ---
 
 ## Issues conocidos / TODOs en código
