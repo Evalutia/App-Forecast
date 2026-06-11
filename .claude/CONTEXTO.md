@@ -546,6 +546,17 @@ PREDICT_PERIODS, PREDICT_MODEL_SET, PREDICT_VERSION, PREDICT_SCHEDULE_HOUR
 
 > **Nota:** el feed nocturno trae TODOS los artículos (activos, inactivos y discontinuos) con su `<Inactivo>` seteado. No existe el caso de "ausencia implica inactivo" — si un artículo no aparece es un error del SOAP, no un cambio de estado.
 
+### `PlanillaRepository` + `PlanillaService` + DTOs — Issue #25 (sesión 2026-06-11)
+
+| Decisión | Definición |
+|----------|-----------|
+| **Ubicación en response** | `estadoArticulo` en `PlanillaVentasOutDto` (nivel SKU), no en `PlanillaMesOutDto`. El estado no varía por mes. |
+| **Fallback LEFT JOIN** | Si un SKU no tiene fila en `articulos`, `estadoArticulo = "activo"`. |
+| **Nombre del campo JSON** | `estadoArticulo` — distingue del `estadoMes` que ya existe en cada mes. |
+| **Archivos modificados** | `IPlanillaRepository.cs`, `PlanillaRepository.cs`, `IPlanillaService.cs`, `PlanillaService.cs`, `PlanillaDtos.cs` |
+
+> **Nota:** No se agregó filtro por `estadoArticulo` — el issue lo excluye explícitamente. Si se necesita en el futuro, el patrón a seguir es el mismo que `marcaId`/`generoId` (subquery en artículos).
+
 ---
 
 ## Issues conocidos / TODOs en código

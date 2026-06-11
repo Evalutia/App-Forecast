@@ -43,6 +43,7 @@ namespace Services.Planilla
     public string? MarcaNombre { get; init; }
     public string? GeneroDescripcion { get; init; }
     public int? StockMinimo { get; init; }
+    public string EstadoArticulo { get; init; } = "activo";
     public IReadOnlyList<PlanillaMesDto> Meses { get; init; } = [];
   }
 

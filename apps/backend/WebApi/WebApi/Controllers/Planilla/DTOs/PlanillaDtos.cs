@@ -9,6 +9,7 @@ namespace WebApi.Controllers.Planilla.DTOs
     public string? MarcaNombre { get; init; }
     public string? GeneroDescripcion { get; init; }
     public int? StockMinimo { get; init; }
+    public string EstadoArticulo { get; init; } = "activo";
     public IReadOnlyList<PlanillaMesOutDto> Meses { get; init; } = [];
 
     public PlanillaVentasOutDto(PlanillaSkuDto dto)
@@ -18,6 +19,7 @@ namespace WebApi.Controllers.Planilla.DTOs
       MarcaNombre       = dto.MarcaNombre;
       GeneroDescripcion = dto.GeneroDescripcion;
       StockMinimo       = dto.StockMinimo;
+      EstadoArticulo    = dto.EstadoArticulo;
       Meses             = dto.Meses.Select(m => new PlanillaMesOutDto(m)).ToList();
     }
   }

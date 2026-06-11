@@ -47,6 +47,7 @@ namespace Services.Planilla
               MarcaNombre     = primera.MarcaNombre,
               GeneroDescripcion = primera.GeneroDescripcion,
               StockMinimo     = primera.StockMinimo,
+              EstadoArticulo  = primera.EstadoArticulo,
               Meses           = g
                   .OrderBy(f => f.Fila.Year)
                   .ThenBy(f => f.Fila.Month)

@@ -12,7 +12,7 @@ namespace DataAccess.Repositories.PlanillaDataAccess
       _db = db;
     }
 
-    public (IReadOnlyList<(PlanillaVentasCalculada Fila, string? Descripcion, string? MarcaNombre, string? GeneroDescripcion, int? StockMinimo)> Items, int TotalSkus) GetVentas(
+    public (IReadOnlyList<(PlanillaVentasCalculada Fila, string? Descripcion, string? MarcaNombre, string? GeneroDescripcion, int? StockMinimo, string EstadoArticulo)> Items, int TotalSkus) GetVentas(
         int page,
         int pageSize,
         uint? marcaId,
@@ -44,7 +44,7 @@ namespace DataAccess.Repositories.PlanillaDataAccess
       var skusPaginados = skuQuery.OrderBy(s => s).Skip((page - 1) * pageSize).Take(pageSize).ToList();
 
       if (!skusPaginados.Any())
-        return (new List<(PlanillaVentasCalculada, string?, string?, string?, int?)>(), totalSkus);
+        return (new List<(PlanillaVentasCalculada, string?, string?, string?, int?, string)>(), totalSkus);
 
       // Filas de planilla para los SKUs del page
       var filas = (from p in _db.PlanillasVentasCalculadas
@@ -68,7 +68,8 @@ namespace DataAccess.Repositories.PlanillaDataAccess
                      Descripcion = a != null ? a.Descripcion : null,
                      MarcaNombre = a != null ? a.MarcaNombre : null,
                      GeneroDescripcion = a != null ? a.GeneroDescripcion : null,
-                     StockMinimo = a != null ? (int?)a.StockMinimo : null
+                     StockMinimo = a != null ? (int?)a.StockMinimo : null,
+                     EstadoArticulo = a != null ? a.Estado : "activo"
                    })
                   .ToList();
 
@@ -91,7 +92,8 @@ namespace DataAccess.Repositories.PlanillaDataAccess
           Descripcion: f.Descripcion,
           MarcaNombre: f.MarcaNombre,
           GeneroDescripcion: f.GeneroDescripcion,
-          StockMinimo: f.StockMinimo
+          StockMinimo: f.StockMinimo,
+          EstadoArticulo: f.EstadoArticulo
       )).ToList();
 
       return (result, totalSkus);
