@@ -559,6 +559,21 @@ PREDICT_PERIODS, PREDICT_MODEL_SET, PREDICT_VERSION, PREDICT_SCHEDULE_HOUR
 
 ---
 
+### `PlanillaTable.tsx` + `exportPlanilla.ts` — Issue #26 (sesión 2026-06-11)
+
+| Decisión | Definición |
+|----------|-----------|
+| **Visibilidad del badge** | Solo se renderiza badge para `inactivo` y `discontinuo`. Para `activo` la celda queda vacía — la ausencia de badge implica normalidad. |
+| **Posición de columna** | Entre Género y VTA, tanto en la tabla como en el Excel export. Es metadata del artículo, no una métrica. |
+| **Tratamiento de fila** | Sin opacidad ni fondo diferente. Solo el badge en la columna Estado; los números de la fila permanecen sin cambios. |
+| **Filtro por estado** | Diferido. El #26 solo requiere mostrar el estado. Filtro = issue separado futuro. |
+| **Excel export** | Sí, columna D (entre Género y VTA). Valor: string literal "activo" / "inactivo" / "discontinuo". |
+| **CSS nuevo** | `planilla-badge--gris` para inactivo, `planilla-badge--naranja` para discontinuo. |
+
+> **Nota:** El tipo `PlanillaVentasDto` en el frontend requiere `estadoArticulo?: string` (optional para compatibilidad con respuestas cacheadas antiguas).
+
+---
+
 ## Issues conocidos / TODOs en código
 
 | Issue | Ubicación | Descripción |

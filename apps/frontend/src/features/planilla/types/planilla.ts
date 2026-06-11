@@ -18,6 +18,7 @@ export interface PlanillaVentasDto {
   marcaNombre: string | null;
   generoDescripcion: string | null;
   stockMinimo: number | null;
+  estadoArticulo?: string;
   meses: PlanillaMesDto[];
 }
 

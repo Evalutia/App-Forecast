@@ -161,6 +161,16 @@ thead .planilla-sticky-col {
   color: #f87171;
   border: 1px solid rgba(220, 38, 38, 0.30);
 }
+.planilla-badge--gris {
+  background: rgba(100, 116, 139, 0.20);
+  color: #94a3b8;
+  border: 1px solid rgba(100, 116, 139, 0.30);
+}
+.planilla-badge--naranja {
+  background: rgba(234, 88, 12, 0.20);
+  color: #fb923c;
+  border: 1px solid rgba(234, 88, 12, 0.30);
+}
 
 /* ── Aviso artículos incompletos ─────────────────────────────────────────────── */
 .planilla-aviso-incompletos {
