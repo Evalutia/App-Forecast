@@ -8,14 +8,18 @@ export interface PlanillaMesDto {
   rotacionDiariaBruta: number | null;
   rotacionDiariaDesestacionalizada: number | null;
   estadoMes: 'normal' | 'quiebre_parcial' | 'sin_stock';
+  frecuenciaNivel: 'alta' | 'media' | 'baja' | null;
+  rotacionAjustada: number | null;
 }
 
 export interface PlanillaVentasDto {
   sku: string;
   descripcion: string | null;
+  codigoBarras: string | null;
   marcaNombre: string | null;
   generoDescripcion: string | null;
   stockMinimo: number | null;
+  estadoArticulo?: string;
   meses: PlanillaMesDto[];
 }
 
@@ -46,4 +50,11 @@ export interface PlanillaVentasParams {
   marcaId?: number;
   generoId?: number;
   estadoMes?: string;
+}
+
+export interface PlanillaSugerenciaDto {
+  sku: string;
+  rotacionSugerida: number | null;
+  fiabilidadPorcentaje: number | null;
+  diasHastaQuiebre: number | null;
 }

@@ -44,9 +44,11 @@ namespace Services.Planilla
             {
               Sku             = g.Key,
               Descripcion     = primera.Descripcion,
+              CodigoBarras    = primera.CodigoBarras,
               MarcaNombre     = primera.MarcaNombre,
               GeneroDescripcion = primera.GeneroDescripcion,
               StockMinimo     = primera.StockMinimo,
+              EstadoArticulo  = primera.EstadoArticulo,
               Meses           = g
                   .OrderBy(f => f.Fila.Year)
                   .ThenBy(f => f.Fila.Month)
@@ -60,7 +62,9 @@ namespace Services.Planilla
                     RotacionDiariaReal             = f.Fila.RotacionDiariaReal,
                     RotacionDiariaBruta            = f.Fila.RotacionDiariaBruta,
                     RotacionDiariaDesestacionalizada = f.Fila.RotacionDiariaDesestacionalizada,
-                    EstadoMes                      = f.Fila.EstadoMes
+                    EstadoMes                      = f.Fila.EstadoMes,
+                    FrecuenciaNivel                = f.Fila.FrecuenciaNivel,
+                    RotacionAjustada               = f.Fila.RotacionAjustada
                   })
                   .ToList()
             };
@@ -69,6 +73,19 @@ namespace Services.Planilla
           .ToList();
 
       return (items, totalSkus);
+    }
+
+    public IReadOnlyList<PlanillaSugerenciaDto> GetSugerencias()
+    {
+      return _repo.GetSugerencias()
+          .Select(s => new PlanillaSugerenciaDto
+          {
+            Sku                  = s.Sku,
+            RotacionSugerida     = s.RotacionSugerida,
+            FiabilidadPorcentaje = s.FiabilidadPorcentaje,
+            DiasHastaQuiebre     = s.DiasHastaQuiebre
+          })
+          .ToList();
     }
 
     public PlanillaFiltrosDto GetFiltros()

@@ -114,6 +114,7 @@ infra/sql/
   04-etl-staging.sql       → Tablas staging
   05-planilla.sql          → planilla_ventas_calculada (issue #4)
   06-planilla-sugerencias.sql → planilla_sugerencias (issue #16)
+  07-articulos-factor-estacional-estado.sql → ALTER TABLE articulos ADD factor_estacional + estado (issue #3)
   99-creacion-admin.sql    → Usuario admin inicial
 ```
 
@@ -348,6 +349,258 @@ PREDICT_PERIODS, PREDICT_MODEL_SET, PREDICT_VERSION, PREDICT_SCHEDULE_HOUR
 | **Colores de estadoMes** | Fondos desaturados: verde suave para `normal`, amarillo suave para `quiebre_parcial`, rojo suave para `sin_stock`. Opacidad ~10–15% para no competir con el número. |
 
 > **Nota:** El mes en el header se muestra como "Ene 25" (abreviado). Los colores deben funcionar sobre fondo blanco/claro del `card`. El componente de tabla se llama `PlanillaTable` y recibe los datos y handlers como props desde `PlanillaPage`.
+
+---
+
+### `07-articulos-factor-estacional-estado.sql` — Issue #3 (sesión 2026-06-06)
+
+| Decisión | Definición |
+|----------|-----------|
+| **Formato `factor_estacional`** | `DECIMAL(5,3) NULL` — un único escalar = coeficiente del **mes actual**, recalculado cada noche por el ETL (issue #5) tomando el `MesXX` correspondiente del SOAP. No se guardan los 12 valores mensuales: el TODO en `05-planilla.sql` ya esperaba un escalar para `rotacion_diaria_real / NULLIF(a.factor_estacional, 0)`. |
+| **Origen y semántica de `estado`** | `ENUM('activo','inactivo') NOT NULL DEFAULT 'activo'`. El SOAP **no** tiene un campo `Estado` — se deriva de la **presencia del SKU en el feed nocturno**: si un SKU deja de aparecer → `inactivo`; si reaparece → `activo`. Lo calcula el ETL (issue #5), no el usuario ni el backend. |
+| **Visibilidad de `estado`** | Es **puramente informativo** — no debe usarse para ocultar artículos por default en ninguna vista (planilla, predicciones, listado de artículos). El usuario puede filtrar por `estado` si quiere, pero por defecto se muestran todos (activos e inactivos por igual). |
+| **Alcance del issue** | Incluye script SQL **+** mapeo EF Core (`Articulo.cs` + `EvalutiaDbContext.cs`). No incluye DTOs ni endpoints — eso es "API surface", trabajo de otro issue. |
+| **Mecánica de la migración** | Archivo numerado `infra/sql/07-articulos-factor-estacional-estado.sql` con `ALTER TABLE ... ADD COLUMN` estándar (MySQL 8 no soporta `IF NOT EXISTS` en `ADD COLUMN` — eso es extensión MariaDB). Es un script de una sola ejecución. Sirve de fuente de verdad del esquema para instalaciones nuevas. Para bases ya existentes (esta y prod) se aplica manualmente vía `docker exec evalutia-mysql mysql ... -e "ALTER TABLE ..."`. |
+| **Índices** | `CREATE INDEX idx_articulos_estado ON articulos (estado)` — sigue el patrón existente de columnas categóricas filtrables (`familia_id`, `genero_id`, `barcode`). `factor_estacional` no se indexa: es un valor de cálculo, no un predicado de filtro. |
+
+> **Nota para ETL/frontend:** `estado` no es fuente de verdad para "excluir productos descontinuados" de lógica crítica (predicciones, planilla) — es informativo. Si en el futuro se necesita excluir inactivos de algún cálculo, eso requiere una decisión explícita y separada, no inferirla silenciosamente de este campo.
+
+### `run_extract_articulos.py` — Issues #2 y #5 (sesión 2026-06-07)
+
+| Decisión | Definición |
+|----------|-----------|
+| **Fuente de `factor_estacional`** | Campos `Mes01`–`Mes12` dentro de cada `<Articulo>` en `ConsArticulosWeb` — mismo endpoint, sin llamada SOAP adicional. Issues #2 y #5 se resuelven en un único toque a `run_extract_articulos.py`. |
+| **Mes a usar** | `datetime.now().month` sin parámetro — siempre el mes en que corre el ETL. En junio toma `Mes06`, en julio `Mes07`, etc. |
+| **Valor 0 o campo ausente** | `factor_estacional = 0` → almacenar `NULL`. Campo `MesXX` no presente → `NULL`. La columna es `DECIMAL(5,3) NULL`. |
+| **Mecánica de `estado`** | **Opción A:** al final del batch, `UPDATE articulos SET estado='inactivo' WHERE sku NOT IN (skus_vistos)`. Solo se ejecuta si `rows_ins > 0` — si el SOAP falló y no se procesó ningún artículo, se omite para no marcar todo como inactivo. |
+| **Reactivación** | El `ON DUPLICATE KEY UPDATE` incluye `estado = 'activo'` — si un SKU reaparece en el feed después de estar inactivo, queda activo en la misma transacción, antes del `NOT IN`. |
+| **Atomicidad** | Upserts + UPDATE estado en una sola transacción (`autocommit=False`, commit único al final). Si falla el UPDATE de estado, el commit no ocurre y los upserts se revierten. |
+
+> **Nota:** El set de SKUs procesados se acumula en memoria durante el upsert loop y se pasa como `IN (...)` al UPDATE final. Para >10.000 SKUs considerar usar una tabla temporal, pero no es el caso actual.
+
+### `run_calc_sugerencias.py` — Issue #15 (sesión 2026-06-07)
+
+| Decisión | Definición |
+|----------|-----------|
+| **Qué es `rotacion_sugerida`** | Tendencia suavizada de rotación histórica reciente — **no** un forecast. Promedio ponderado de los últimos N meses `normal` de `rotacion_diaria_real` en `planilla_ventas_calculada`. Semántica: "a qué ritmo está rotando este SKU hoy". |
+| **Filtro de meses** | Solo `estado_mes = 'normal'`. Meses con `quiebre_parcial` o `sin_stock` tienen rotación artificialmente suprimida y distorsionarían la tendencia hacia abajo. |
+| **Mínimo de meses** | 3 meses `normal`. Si un SKU tiene menos → `rotacion_sugerida = NULL`, `fiabilidad_porcentaje = NULL`. |
+| **Ventana** | Todos los meses `normal` disponibles, hasta 13 (ventana completa de `planilla_ventas_calculada`). No se limita a 6 — productos de tecnología tienen ciclos largos y 13 meses da más robustez. |
+| **Pesos** | Lineales: mes más antiguo = peso 1, mes más reciente = peso N (donde N = cantidad de meses normales usados). |
+| **`fiabilidad_porcentaje`** | Coeficiente de variación inverso: `max(0, (1 - std/mean) * 100)`. Mide estabilidad de la rotación. CV > 1 → fiabilidad 0. Rotación consistente → fiabilidad alta. No usar R² (penalizaría SKUs con rotación estable horizontal) ni % de meses con datos (mide calidad de datos, no del modelo). |
+| **`modelo`** | `'weighted_avg_13m'` — nombre fijo en la columna `modelo` de `planilla_sugerencias`. |
+| **Arquitectura** | Nuevo script `run_calc_sugerencias.py` + wrapper `run_calc_sugerencias.sh`. Invocado desde `job_etl_diario.kjb` después de `RUN CALC_PLANILLA`, antes de `TRUNCATE VENTAS_STAGE END`. |
+| **Atomicidad** | Una sola transacción: calcular todos los SKUs en memoria → INSERT masivo con ON DUPLICATE KEY UPDATE → COMMIT. ROLLBACK en fallo → tabla conserva valores anteriores. |
+| **Bloqueante** | No — fallo del script no aborta el ETL. Se loguea en `jobs_historial` con `subtipo = 'calc_sugerencias'`. |
+
+> **Nota para frontend (#19):** `fiabilidad_porcentaje` debe mostrarse como badge de color en la columna ROT.S: verde (≥70), amarillo (40–69), rojo (<40). NULL = sin datos suficientes, mostrar "—". `rotacion_sugerida` NULL también muestra "—" sin crashear.
+
+### `run_calc_sugerencias.py` (ampliación) — Issue #17 (sesión 2026-06-07)
+
+| Decisión | Definición |
+|----------|-----------|
+| **Integración** | Dentro del mismo `run_calc_sugerencias.py`, misma pasada en memoria. `dias_hasta_quiebre` se calcula justo después de `rotacion_sugerida` para cada SKU, antes del INSERT. Sin script separado. |
+| **`stock_actual`** | `MAX(fecha)` por SKU individual + `SUM(cantidad)` de todos los depósitos en esa fecha. Cada SKU usa su último dato disponible, independientemente de la fecha del último ETL. |
+| **Stock negativo** | Se trata como `0` → `dias_hasta_quiebre = 0`. Es un artefacto de timing del ETL, no un estado real. No se guardan valores negativos. |
+| **Fórmula** | `max(0, stock_actual) / rotacion_sugerida`. Si `rotacion_sugerida` es NULL o 0 → `NULL`. Si stock = 0 → `0`. Resultado en `DECIMAL(10,2)`. |
+
+> **Nota para frontend (#20):** `dias_hasta_quiebre = 0` significa quiebre ya (mostrar badge rojo). `NULL` significa que no hay datos suficientes para calcular (mostrar "—"). Valor positivo = días estimados hasta quiebre con la rotación actual.
+
+### `GET /api/planilla/sugerencias` — Issue #18 (sesión 2026-06-07)
+
+| Decisión | Definición |
+|----------|-----------|
+| **Paginación** | Sin paginación — devuelve todos los SKUs en un solo array. La tabla es plana (una fila por SKU) y el volumen es manejable (~200 KB sin comprimir). El frontend la carga una vez e indexa por SKU con `Map<sku, SugerenciaDto>`. |
+| **Shape del response** | Array plano de objetos: `[{ sku, rotacionSugerida, fiabilidadPorcentaje, diasHastaQuiebre }, ...]`. No objeto indexado por SKU — el indexado lo hace el frontend. |
+| **Campo `modelo`** | Excluido del response. YAGNI — el frontend no lo necesita y actualmente solo hay un modelo. Si en el futuro hay múltiples modelos, es un cambio de schema primero. |
+| **SKUs con NULLs** | Se incluyen en el response. `rotacionSugerida = null` significa menos de 3 meses normales — señal explícita para que el frontend muestre "—" en columna ROT.S. |
+| **Autorización** | `[Authorize]` heredado de `PlanillaController` — sin restricción de rol. Tanto `administrador` como `duenoDeEmpresa` pueden acceder. |
+| **Ubicación** | Nuevo método `[HttpGet("sugerencias")]` dentro del `PlanillaController` existente. Sin controller separado. |
+
+> **Nota para frontend (#19, #20):** el frontend carga este endpoint al montar `PlanillaPage` (una sola vez), lo indexa por SKU, y une los valores a cada fila de la tabla de planilla client-side. No hacer un request por página de planilla.
+
+### Columna ROT.S en `PlanillaTable` — Issue #19 (sesión 2026-06-07)
+
+| Decisión | Definición |
+|----------|-----------|
+| **Dónde se fetcha** | En `PlanillaPage` — hook `usePlanillaSugerencias` al mismo nivel que los filtros. Se construye `Map<sku, sugerencia>` y se pasa como prop a `PlanillaTable`. Un solo fetch para toda la sesión, independiente de paginación y filtros. |
+| **Formato de celda** | Dos elementos apilados (opción A): número de rotación arriba (`2.9710`), badge de fiabilidad abajo (`78%` con fondo de color). |
+| **Posición en tabla** | Última columna, después de DDSTK. Es el "veredicto" del sistema tras el contexto histórico. |
+| **`fiabilidad = null`** | Mostrar `—` con clase `sin-datos`, igual que Rot. DesEstac. y DDSTK. No usar badge gris. |
+| **`staleTime`** | `5 * 60_000` (5 minutos) — igual que `usePlanillaFiltros`. Datos cambian solo con el ETL nocturno. |
+| **Loading state** | Skeleton `skel-60` en cada celda de AE mientras el fetch de sugerencias está pendiente. Distingue "cargando" de "sin datos". |
+| **Colores del badge** | Verde (`#16a34a` bg suave) ≥70% · Amarillo (`#ca8a04` bg suave) 40–69% · Rojo (`#dc2626` bg suave) <40% |
+
+> **Nota:** `rotacionSugerida = null` también muestra `—` sin badge. El badge solo aparece cuando `rotacionSugerida` tiene valor (aunque `fiabilidad` podría ser 0 — en ese caso badge rojo). El Map de sugerencias se construye en `PlanillaPage` con `useMemo`.
+
+### Columna QBK en `PlanillaTable` — Issue #20 (sesión 2026-06-07)
+
+| Decisión | Definición |
+|----------|-----------|
+| **Fuente de datos** | `diasHastaQuiebre` ya está en `PlanillaSugerenciaDto` cargado en #19. No hay nuevo endpoint ni hook — reutiliza el mismo `Map<sku, sugerencia>` de `PlanillaPage`. |
+| **Ubicación en tabla** | Columna nueva separada, inmediatamente después de AE (última columna). |
+| **Formato de celda** | Badge simple (opción B): número redondeado a entero + "d". Ej: `15d`, `5d`, `0d`. No apilado vertical. |
+| **Umbrales de color** | Rojo = 0 (quiebre ya) · Amarillo > 0 y ≤ 15d (urgencia alta) · Verde > 15d (OK). |
+| **Texto en `= 0`** | `0d` — consistente con el formato numérico. El rojo comunica la urgencia. |
+| **`null`** | `—` con clase `sin-datos`, igual que AE y DDSTK. |
+| **Nombre de columna** | `QBK` — sigue el patrón de abreviaturas del proyecto (VTA, DDSTK, AE). Tooltip explica el significado. |
+| **Loading state** | Skeleton `skel-60` igual que AE — reutiliza `sugerenciasLoading` ya disponible en `PlanillaTable`. |
+
+> **Nota:** el umbral de 15 días es el lead time típico de reposición para productos de tecnología. Es arbitrario y documentado en el tooltip para que el cliente lo entienda.
+
+### `DashboardPage.tsx` — Issue #22 (sesión 2026-06-10)
+
+| Decisión | Definición |
+|----------|-----------|
+| **Causa raíz** | `DashboardPage` llamaba a `searchJobs()` (→ `GET /api/jobs`) sin condición de rol. El endpoint es admin-only, retorna 403 para `duenoDeEmpresa`, y el interceptor Axios mostraba el toast. |
+| **Fix** | `enabled: isAdmin` en ambos `useQuery` de jobs. El bloque de estado ETL en la stats bar también se wrappea en `{isAdmin && ...}`. |
+| **Scope** | Solo `DashboardPage.tsx`. No se tocó el interceptor Axios ni el `RequireAdmin` — ambos funcionaban correctamente. |
+| **Visibilidad para duenoDeEmpresa** | El home muestra: bienvenida, "X módulos disponibles", "Acceso completo" (solo admin). Sin estado ETL para no-admins — no es info relevante para ellos. |
+
+> **Nota:** Si en el futuro se agregan más `useQuery` en páginas accesibles a ambos roles que llamen a endpoints admin-only, aplicar el mismo patrón `enabled: isAdmin`. El interceptor NO se debe tocar para suprimir 403 globalmente — es una señal válida para acciones reales del usuario.
+
+---
+
+### Plan Fase 3 — Ajustes cliente v2 (sesión 2026-06-09)
+
+| Issue | Capa | Título | Depende de | Estado |
+|-------|------|--------|------------|--------|
+| #22 | Frontend/Bug | Toast "Prohibido" para duenoDeEmpresa | — | Listo para arrancar |
+| #23 | Frontend | Columnas Vta.Mes/Año en PlanillaTable | — | Listo para arrancar |
+| #24 | ETL+DB | Estado artículo A/D desde SOAP | XML del cliente | **BLOQUEADO** |
+| #25 | Backend | Exponer estado en GET /api/planilla/ventas | #24 | Bloqueado por #24 |
+| #26 | Frontend | Columna Estado Artículo en PlanillaTable | #25 | Bloqueado por #25 |
+| #27 | Python+DB | 3 niveles de quiebre por frecuencia de venta | — | Listo para arrancar |
+| #28 | Frontend | Colores y cálculo por nivel de frecuencia | #27 | Bloqueado por #27 |
+| #29 | Frontend | Fix exportPlanilla.ts (todas las columnas) | #23, #26, #28 | Bloqueado por deps |
+| #30 | ML | Auditoría modelos de predicción | — | Separado del sprint |
+
+**Decisiones clave de esta sesión:**
+
+| Decisión | Definición |
+|----------|-----------|
+| **Estado Art. desde SOAP** | El SOAP expone solo `A` (activo) y `D` (discontinuo). `inactivo` sigue siendo derivado por ausencia en el feed — lógica ya existente de issue #3. |
+| **`Rot. Manual`** | Columna presente en el CSV del cliente (override manual de rotación). Fuera de scope para esta fase. |
+| **Issue #30** | Es auditoría/investigación, no feature. No bloquea ni es bloqueado por ningún otro issue. Si el audit da luz verde, se abre issue #31 para surfacear la fiabilidad en planilla. |
+| **Umbrales de frecuencia (#27)** | Se definen al arrancar el issue, en conjunto con el cliente/equipo. No están hardcodeados aún. |
+
+### `Rot. DesEstac.` — Issues #31 y #32 (sesión 2026-06-10)
+
+| Decisión | Definición |
+|----------|-----------|
+| **Columnas afectadas** | Solo la columna resumen `Rot. DesEstac.`. Las 13 celdas mensuales siguen mostrando `rotacionDiariaReal` sin cambios. |
+| **Fórmula Fase 2** | `avg(rotacionDiariaDesestacionalizada para meses normales, excluyendo mes de referencia)`. Si ningún mes tiene valor → `—`. |
+| **Fuente del factor estacional** | SOAP provee `Mes01`–`Mes12` por SKU. Se almacenan como 12 columnas en `articulos` (`factor_mes_01`…`factor_mes_12`). Un factor por mes del año calendario. |
+| **Cálculo en ETL** | `rotacion_diaria_desestacionalizada = rotacion_diaria_real / factor_mes_{MM}`. Si factor es NULL o 0, queda NULL. Se calcula en `run_calc_planilla.py` con preload dict de `articulos`. |
+| **`factor_estacional`** | Se mantiene sin cambios — sigue almacenando el factor del mes actual (escalar, issue #3). Issue #31 agrega las 12 columnas nuevas sin tocar este campo. |
+| **Lookup strategy en ETL** | Preload dict al inicio de `calcular_filas`: `SELECT sku, factor_mes_01…factor_mes_12 FROM articulos` → dict `factors[sku][1..12]`. Lookup O(1) por fila. Sin JOIN dinámico en SQL. |
+| **C# modelo** | Sin cambios en `Articulo.cs` ni `EvalutiaDbContext.cs`. Las 12 columnas son ETL-internas. El backend lee `rotacion_diaria_desestacionalizada` de `planilla_ventas_calculada` (ya mapeado). |
+| **Scope del cálculo ETL** | `rotacion_diaria_desestacionalizada` se calcula para toda fila donde `rotacion_diaria_real != NULL` (normal y quiebre_parcial). `sin_stock` queda NULL (ds==0 → rot_real==None). |
+| **`calcRotDesEstac` (#32) — meses normales** | Usa `rotacionDiariaDesestacionalizada`. Si es NULL (factor no disponible), ese mes se omite del promedio — sin fallback a `rotacionDiariaReal`. |
+| **`calcRotDesEstac` (#32) — meses quiebre_parcial** | Opción C: `rotacionAjustada * (rotacionDiariaDesestacionalizada / rotacionDiariaReal)`. Fallback a `rotacionAjustada` si `rotacionDiariaDesestacionalizada` es NULL. Omitir si `rotacionAjustada` es NULL. |
+| **`calcRotDesEstac` (#32) — sin valores** | Si `vals.length === 0` → mostrar `—`. Sin fallback ni mezcla de valores desestacionalizados/no-desestacionalizados. |
+| **Tooltip (#32)** | "Rotación diaria promedio corregida por estacionalidad.\nMeses normales: rotación real ÷ factor estacional del mes.\nMeses con quiebre: rotación ajustada por frecuencia × factor estacional.\nExcluye el mes de referencia." |
+| **Migración** | `09-articulos-factores-mensuales.sql`: `ALTER TABLE articulos ADD COLUMN factor_mes_01 DECIMAL(5,3) NULL, …, ADD COLUMN factor_mes_12 DECIMAL(5,3) NULL`. |
+| **Orden de implementación** | Primero Issue #31 (migración DB + ETL), luego Issue #32 (frontend). El cambio frontend no tiene efecto visible hasta que el ETL pueble el campo. |
+
+> **Nota:** La migración `07-articulos-factor-estacional-estado.sql` (que agrega `factor_estacional` y `estado` a `articulos`) aún no está aplicada en producción. Para prod, aplicar `07` primero, luego `09`. En dev, solo `09` (07 ya aplicada). `run_extract_articulos.py` necesita actualizar INSERT + ON DUPLICATE KEY UPDATE con los 12 nuevos campos. El TODO en `run_calc_planilla.py` línea 216 se rellena con el preload dict.
+
+### `Vta.Mes/Año` en PlanillaTable — Issue #23 (sesión 2026-06-10)
+
+| Decisión | Definición |
+|----------|-----------|
+| **Columnas nuevas** | 13 columnas `Vta.Ene/25`…`Vta.Mes/Año` insertadas ANTES de las 13 columnas de rotación mensual. |
+| **Datos** | `mes.ventasCantidad.toLocaleString('es-UY')` — entero, formato locale UY. |
+| **Estilo** | Mismo `estadoMesBg(mes.estadoMes)` que la columna de rotación correspondiente. Mes de referencia con italic/opaco. |
+| **Export en #23** | No se toca `exportPlanilla.ts` en este issue. El export completo se reescribe en Issue #29 cuando todas las columnas nuevas estén definidas. |
+
+> **Nota:** Solo se modifica `PlanillaTable.tsx`. El `totalCols` pasa de `3 + n + 4` a `3 + n*2 + 4`.
+
+### Frecuencia de quiebre — Issues #27 y #28 (sesión 2026-06-10)
+
+| Decisión | Definición |
+|----------|-----------|
+| **Métrica de frecuencia** | Cantidad de meses con `ventas_cantidad > 0` en los 12 meses cerrados (excluye mes de referencia). `sin_stock` queda excluido naturalmente (0 ventas por definición). |
+| **Umbrales** | Alta ≥ 9 meses · Media 4–8 meses · Baja ≤ 3 meses. Revisables con Daniel (economista del cliente) cuando esté disponible. |
+| **DB schema** | Option B: mantener `estadoMes = quiebre_parcial` + agregar `frecuencia_nivel ENUM('alta','media','baja') NULL` y `rotacion_ajustada DECIMAL(10,4) NULL` a `planilla_ventas_calculada`. `frecuencia_nivel` es atributo del SKU (mismo valor en todas sus filas). |
+| **Fórmulas por nivel** | Alta: `ventas / dias_con_stock` (igual que hoy) · Baja: `ventas / dias_naturales_mes` · Media: promedio de ambas. Se aplica SOLO en meses `quiebre_parcial`; meses `normal` y `sin_stock` no cambian. |
+| **Rot. DesEstac. (Issue #28)** | Incluir meses `quiebre_parcial` usando `rotacion_ajustada` además de los meses `normal`. Actualmente solo usa meses normales. |
+| **Colores frontend (#28)** | `quiebre_parcial + alta` → amarillo (igual que hoy) · `+ media` → naranja · `+ baja` → rojo. `sin_stock` → gris (sin cambio). Referencia visual: el cliente usa amarillo en su planilla para quiebre → amarillo = alta (comportamiento conocido), escalando a colores más fuertes para frecuencias menores. |
+| **Valor en celda mensual (#28)** | Siempre `rotacionDiariaReal` — no se modifica. Solo cambia el color de fondo. `rotacionAjustada` se usa únicamente en `calcRotDesEstac`, no en la celda individual. |
+| **`calcRotDesEstac` (#28)** | Incluye meses `quiebre_parcial` usando `rotacionAjustada` además de los meses `normal`. Fórmula: `AVG(rotacionDiariaReal para normal ∪ rotacionAjustada para quiebre_parcial)`, excluyendo mes de referencia. Si `rotacionAjustada` es null en un quiebre, ese mes se omite del promedio. |
+| **Leyenda (#28)** | 3 ítems separados en lugar del único "Quiebre parcial": `Quiebre alta freq` (amarillo) · `Quiebre media freq` (naranja) · `Quiebre baja freq` (rojo). |
+| **Indicador de nivel en fila (#28)** | Solo el color de celda — sin badge ni columna adicional de `frecuenciaNivel`. La leyenda explica el código de colores. |
+| **Tooltips de celdas mensuales (#28)** | Actualizar a: `"Amarillo = quiebre alta freq · Naranja = quiebre media · Rojo = quiebre baja freq · Gris = sin stock"`. |
+
+> **Nota:** `frecuencia_nivel` y `rotacion_ajustada` se calculan en `run_calc_planilla.py`. Primero se calcula el nivel por SKU (sobre todos los meses), luego se aplica la fórmula correspondiente a cada fila de quiebre. El cambio visual y de Rot. DesEstac. queda para Issue #28 (Frontend).
+
+### `run_extract_articulos.py` + `08-articulos-estado-discontinuo.sql` — Issue #24 (sesión 2026-06-11)
+
+| Decisión | Definición |
+|----------|-----------|
+| **Campo SOAP** | `<Inactivo>` con valores numéricos: `0`=activo, `1`=inactivo, `2`=discontinuo |
+| **Mapping** | `get_estado()`: `"1"→inactivo`, `"2"→discontinuo`, cualquier otro valor (incluido ausente) → `"activo"` |
+| **ENUM** | `ENUM('activo','inactivo','discontinuo')` — 'discontinuo' agregado al final para compatibilidad MySQL |
+| **Lógica de ausencia eliminada** | El `UPDATE SET estado='inactivo' WHERE sku NOT IN (...)` fue removido. El SOAP es fuente de verdad: envía los 3 estados en el feed nocturno completo |
+| **ON DUPLICATE KEY UPDATE** | `estado = VALUES(estado)` — ya no se hardcodea `'activo'` en el upsert |
+
+> **Nota:** el feed nocturno trae TODOS los artículos (activos, inactivos y discontinuos) con su `<Inactivo>` seteado. No existe el caso de "ausencia implica inactivo" — si un artículo no aparece es un error del SOAP, no un cambio de estado.
+
+### `PlanillaRepository` + `PlanillaService` + DTOs — Issue #25 (sesión 2026-06-11)
+
+| Decisión | Definición |
+|----------|-----------|
+| **Ubicación en response** | `estadoArticulo` en `PlanillaVentasOutDto` (nivel SKU), no en `PlanillaMesOutDto`. El estado no varía por mes. |
+| **Fallback LEFT JOIN** | Si un SKU no tiene fila en `articulos`, `estadoArticulo = "activo"`. |
+| **Nombre del campo JSON** | `estadoArticulo` — distingue del `estadoMes` que ya existe en cada mes. |
+| **Archivos modificados** | `IPlanillaRepository.cs`, `PlanillaRepository.cs`, `IPlanillaService.cs`, `PlanillaService.cs`, `PlanillaDtos.cs` |
+
+> **Nota:** No se agregó filtro por `estadoArticulo` — el issue lo excluye explícitamente. Si se necesita en el futuro, el patrón a seguir es el mismo que `marcaId`/`generoId` (subquery en artículos).
+
+---
+
+### `PlanillaTable.tsx` + `exportPlanilla.ts` — Issue #26 (sesión 2026-06-11)
+
+| Decisión | Definición |
+|----------|-----------|
+| **Visibilidad del badge** | Solo se renderiza badge para `inactivo` y `discontinuo`. Para `activo` la celda queda vacía — la ausencia de badge implica normalidad. |
+| **Posición de columna** | Entre Género y VTA, tanto en la tabla como en el Excel export. Es metadata del artículo, no una métrica. |
+| **Tratamiento de fila** | Sin opacidad ni fondo diferente. Solo el badge en la columna Estado; los números de la fila permanecen sin cambios. |
+| **Filtro por estado** | Diferido. El #26 solo requiere mostrar el estado. Filtro = issue separado futuro. |
+| **Excel export** | Sí, columna D (entre Género y VTA). Valor: string literal "activo" / "inactivo" / "discontinuo". |
+| **CSS nuevo** | `planilla-badge--gris` para inactivo, `planilla-badge--naranja` para discontinuo. |
+
+> **Nota:** El tipo `PlanillaVentasDto` en el frontend requiere `estadoArticulo?: string` (optional para compatibilidad con respuestas cacheadas antiguas).
+
+---
+
+### `exportPlanilla.ts` — Issue #29 (sesión 2026-06-11)
+
+| Decisión | Definición |
+|----------|-----------|
+| **Sugerencias en el export** | Se pasan como parámetro `sugerencias: Map<string, PlanillaSugerenciaDto>` desde `PlanillaTable.handleExport`. No se hace fetch adicional — los datos ya están en caché de TanStack Query. |
+| **Orden columnas mensuales** | Igual que la UI: todas las Vta.Mes juntas, luego todas las Rot.Mes. No alternado. |
+| **Posición de VTA** | Al final, en el bloque de columnas resumen (después de las 26 columnas mensuales), como especifica el issue. |
+| **Colores quiebre** | Tres colores distintos por `frecuenciaNivel`: alta → #FFCA28, media → #FFB74D, baja → #EF9A9A. Sin stock → #90A4AE. |
+| **Columnas nuevas resumen** | ROT.S, Fiabilidad% y QBK con estilo summary (verde suave). Fiabilidad% con formato `0.0%`, QBK con `0.0 "días"`. |
+
+> **Nota:** Tanto las celdas Vta mensual como Rot mensual reciben el mismo color de fondo por `estadoMes`/`frecuenciaNivel`.
+
+---
+
+### `Codigos Barras` en planilla — Issue #33 (sesión 2026-06-12)
+
+| Decisión | Definición |
+|----------|-----------|
+| **Scope** | Solo `Codigos Barras`. `Rot. Manual` descartada permanentemente (no se implementará). |
+| **Posición en tabla** | Columna scrollable, inmediatamente después de la sticky SKU/Desc, antes de Género. |
+| **Valor vacío** | Muestra `—` igual que el resto de campos opcionales. No se oculta la columna si está vacía. |
+| **Export Excel** | Incluida entre Descripción y Género. Campo vacío exporta como string vacío `""`. |
+| **Fuente del dato** | Campo `Barcode` de `articulos` en DB, ya existente. Sin migración requerida. |
+
+> **Nota:** Los gaps de `SIN STOCK`, `TOT STK` y `C/STK` del CSV del cliente son errores de fórmula Excel (`#NAME?`) que dependen de su propio sistema de stock. No son responsabilidad de Evalutia en esta fase.
+
+---
 
 ## Issues conocidos / TODOs en código
 

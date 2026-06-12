@@ -6,18 +6,22 @@ namespace WebApi.Controllers.Planilla.DTOs
   {
     public string Sku { get; init; } = string.Empty;
     public string? Descripcion { get; init; }
+    public string? CodigoBarras { get; init; }
     public string? MarcaNombre { get; init; }
     public string? GeneroDescripcion { get; init; }
     public int? StockMinimo { get; init; }
+    public string EstadoArticulo { get; init; } = "activo";
     public IReadOnlyList<PlanillaMesOutDto> Meses { get; init; } = [];
 
     public PlanillaVentasOutDto(PlanillaSkuDto dto)
     {
       Sku               = dto.Sku;
       Descripcion       = dto.Descripcion;
+      CodigoBarras      = dto.CodigoBarras;
       MarcaNombre       = dto.MarcaNombre;
       GeneroDescripcion = dto.GeneroDescripcion;
       StockMinimo       = dto.StockMinimo;
+      EstadoArticulo    = dto.EstadoArticulo;
       Meses             = dto.Meses.Select(m => new PlanillaMesOutDto(m)).ToList();
     }
   }
@@ -33,6 +37,8 @@ namespace WebApi.Controllers.Planilla.DTOs
     public decimal? RotacionDiariaBruta { get; init; }
     public decimal? RotacionDiariaDesestacionalizada { get; init; }
     public string EstadoMes { get; init; } = string.Empty;
+    public string? FrecuenciaNivel { get; init; }
+    public decimal? RotacionAjustada { get; init; }
 
     public PlanillaMesOutDto(PlanillaMesDto dto)
     {
@@ -45,6 +51,8 @@ namespace WebApi.Controllers.Planilla.DTOs
       RotacionDiariaBruta            = dto.RotacionDiariaBruta;
       RotacionDiariaDesestacionalizada = dto.RotacionDiariaDesestacionalizada;
       EstadoMes                      = dto.EstadoMes;
+      FrecuenciaNivel                = dto.FrecuenciaNivel;
+      RotacionAjustada               = dto.RotacionAjustada;
     }
   }
 
@@ -83,6 +91,22 @@ namespace WebApi.Controllers.Planilla.DTOs
       Marcas               = dto.Marcas.Select(m => new PlanillaFiltroItemOutDto(m)).ToList();
       Generos              = dto.Generos.Select(g => new PlanillaFiltroItemOutDto(g)).ToList();
       ArticulosIncompletos = new PlanillaArticulosIncompletosOutDto(dto.ArticulosIncompletos);
+    }
+  }
+
+  public sealed class PlanillaSugerenciaOutDto
+  {
+    public string Sku { get; init; } = string.Empty;
+    public decimal? RotacionSugerida { get; init; }
+    public decimal? FiabilidadPorcentaje { get; init; }
+    public decimal? DiasHastaQuiebre { get; init; }
+
+    public PlanillaSugerenciaOutDto(PlanillaSugerenciaDto dto)
+    {
+      Sku                  = dto.Sku;
+      RotacionSugerida     = dto.RotacionSugerida;
+      FiabilidadPorcentaje = dto.FiabilidadPorcentaje;
+      DiasHastaQuiebre     = dto.DiasHastaQuiebre;
     }
   }
 

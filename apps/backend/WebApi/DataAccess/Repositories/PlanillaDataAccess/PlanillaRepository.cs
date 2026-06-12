@@ -12,7 +12,7 @@ namespace DataAccess.Repositories.PlanillaDataAccess
       _db = db;
     }
 
-    public (IReadOnlyList<(PlanillaVentasCalculada Fila, string? Descripcion, string? MarcaNombre, string? GeneroDescripcion, int? StockMinimo)> Items, int TotalSkus) GetVentas(
+    public (IReadOnlyList<(PlanillaVentasCalculada Fila, string? Descripcion, string? MarcaNombre, string? GeneroDescripcion, int? StockMinimo, string EstadoArticulo, string? CodigoBarras)> Items, int TotalSkus) GetVentas(
         int page,
         int pageSize,
         uint? marcaId,
@@ -44,7 +44,7 @@ namespace DataAccess.Repositories.PlanillaDataAccess
       var skusPaginados = skuQuery.OrderBy(s => s).Skip((page - 1) * pageSize).Take(pageSize).ToList();
 
       if (!skusPaginados.Any())
-        return (new List<(PlanillaVentasCalculada, string?, string?, string?, int?)>(), totalSkus);
+        return (new List<(PlanillaVentasCalculada, string?, string?, string?, int?, string, string?)>(), totalSkus);
 
       // Filas de planilla para los SKUs del page
       var filas = (from p in _db.PlanillasVentasCalculadas
@@ -63,10 +63,14 @@ namespace DataAccess.Repositories.PlanillaDataAccess
                      p.RotacionDiariaBruta,
                      p.RotacionDiariaDesestacionalizada,
                      p.EstadoMes,
+                     p.FrecuenciaNivel,
+                     p.RotacionAjustada,
                      Descripcion = a != null ? a.Descripcion : null,
                      MarcaNombre = a != null ? a.MarcaNombre : null,
                      GeneroDescripcion = a != null ? a.GeneroDescripcion : null,
-                     StockMinimo = a != null ? (int?)a.StockMinimo : null
+                     StockMinimo = a != null ? (int?)a.StockMinimo : null,
+                     EstadoArticulo = a != null ? a.Estado : "activo",
+                     CodigoBarras = a != null ? a.Barcode : null
                    })
                   .ToList();
 
@@ -82,12 +86,16 @@ namespace DataAccess.Repositories.PlanillaDataAccess
             RotacionDiariaReal = f.RotacionDiariaReal,
             RotacionDiariaBruta = f.RotacionDiariaBruta,
             RotacionDiariaDesestacionalizada = f.RotacionDiariaDesestacionalizada,
-            EstadoMes = f.EstadoMes
+            EstadoMes = f.EstadoMes,
+            FrecuenciaNivel = f.FrecuenciaNivel,
+            RotacionAjustada = f.RotacionAjustada
           },
           Descripcion: f.Descripcion,
           MarcaNombre: f.MarcaNombre,
           GeneroDescripcion: f.GeneroDescripcion,
-          StockMinimo: f.StockMinimo
+          StockMinimo: f.StockMinimo,
+          EstadoArticulo: f.EstadoArticulo,
+          CodigoBarras: f.CodigoBarras
       )).ToList();
 
       return (result, totalSkus);
@@ -119,6 +127,11 @@ namespace DataAccess.Repositories.PlanillaDataAccess
       var sinGenero = _db.Articulos.Count(a => skusEnPlanilla.Contains(a.Sku) && a.GeneroId == null);
 
       return (marcas, generos, sinMarca, sinGenero);
+    }
+
+    public IReadOnlyList<PlanillaSugerencias> GetSugerencias()
+    {
+      return _db.PlanillasSugerencias.OrderBy(s => s.Sku).ToList();
     }
   }
 }

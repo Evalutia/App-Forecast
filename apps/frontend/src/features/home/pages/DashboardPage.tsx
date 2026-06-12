@@ -66,11 +66,12 @@ export default function DashboardPage() {
   const { user } = useAuthUser();
   const isAdmin = user?.role === 'administrador';
 
-  // último job ETL exitoso
+  // último job ETL exitoso — solo para admins (/api/jobs es admin-only)
   const { data: jobData, isLoading: jobLoading } = useQuery({
     queryKey: ['dashboard', 'last-etl'],
     queryFn:  () => searchJobs({ pageSize: 1, tipo: 'etl', estado: 'exitoso' }),
     staleTime: 5 * 60_000,
+    enabled:  isAdmin,
   });
 
   // último job ETL (cualquier estado) para detectar fallo
@@ -78,6 +79,7 @@ export default function DashboardPage() {
     queryKey: ['dashboard', 'last-etl-any'],
     queryFn:  () => searchJobs({ pageSize: 1, tipo: 'etl' }),
     staleTime: 5 * 60_000,
+    enabled:  isAdmin,
   });
 
   const lastOk   = jobData?.items?.[0];
@@ -130,27 +132,31 @@ export default function DashboardPage() {
 
       {/* ── Stats bar ── */}
       <div className="home-stats">
-        {/* Estado ETL */}
-        <div className="home-stat-item">
-          {jobLoading ? (
-            <span className="home-stat-dot home-stat-dot--loading" />
-          ) : etlFallo ? (
-            <span className="home-stat-dot home-stat-dot--err" />
-          ) : (
-            <span className="home-stat-dot home-stat-dot--ok" />
-          )}
-          <span>
-            {jobLoading
-              ? 'Verificando datos…'
-              : etlFallo
-              ? `ETL con error · ${lastAny?.fechaInicio ? tiempoDesde(lastAny.fechaInicio) : ''}`
-              : lastOk
-              ? `Datos actualizados · ${tiempoDesde(lastOk.fechaFin ?? lastOk.fechaInicio)}`
-              : 'Sin datos de ETL aún'}
-          </span>
-        </div>
+        {/* Estado ETL — solo visible para administradores */}
+        {isAdmin && (
+          <>
+            <div className="home-stat-item">
+              {jobLoading ? (
+                <span className="home-stat-dot home-stat-dot--loading" />
+              ) : etlFallo ? (
+                <span className="home-stat-dot home-stat-dot--err" />
+              ) : (
+                <span className="home-stat-dot home-stat-dot--ok" />
+              )}
+              <span>
+                {jobLoading
+                  ? 'Verificando datos…'
+                  : etlFallo
+                  ? `ETL con error · ${lastAny?.fechaInicio ? tiempoDesde(lastAny.fechaInicio) : ''}`
+                  : lastOk
+                  ? `Datos actualizados · ${tiempoDesde(lastOk.fechaFin ?? lastOk.fechaInicio)}`
+                  : 'Sin datos de ETL aún'}
+              </span>
+            </div>
 
-        <span className="home-stat-sep" />
+            <span className="home-stat-sep" />
+          </>
+        )}
 
         {/* Módulos disponibles */}
         <div className="home-stat-item">

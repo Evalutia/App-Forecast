@@ -30,6 +30,8 @@ namespace WebApi.Models
         public string? FactDescMax { get; set; }
         public string? DescValida { get; set; }
         public uint StockMinimo { get; set; }
+        public decimal? FactorEstacional { get; set; }
+        public string Estado { get; set; } = "activo";
         public byte? FrecuenciaMensual { get; set; }
         public string? Fuente { get; set; }
         public DateTime TsCarga { get; set; }

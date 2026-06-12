@@ -6,6 +6,15 @@ namespace Services.Planilla
   {
     (IReadOnlyList<PlanillaSkuDto> Items, int TotalSkus) GetVentas(int page, int pageSize, uint? marcaId = null, uint? generoId = null, string? estadoMes = null);
     PlanillaFiltrosDto GetFiltros();
+    IReadOnlyList<PlanillaSugerenciaDto> GetSugerencias();
+  }
+
+  public sealed class PlanillaSugerenciaDto
+  {
+    public string Sku { get; init; } = string.Empty;
+    public decimal? RotacionSugerida { get; init; }
+    public decimal? FiabilidadPorcentaje { get; init; }
+    public decimal? DiasHastaQuiebre { get; init; }
   }
 
   public sealed class PlanillaFiltroItemDto
@@ -31,9 +40,11 @@ namespace Services.Planilla
   {
     public string Sku { get; init; } = string.Empty;
     public string? Descripcion { get; init; }
+    public string? CodigoBarras { get; init; }
     public string? MarcaNombre { get; init; }
     public string? GeneroDescripcion { get; init; }
     public int? StockMinimo { get; init; }
+    public string EstadoArticulo { get; init; } = "activo";
     public IReadOnlyList<PlanillaMesDto> Meses { get; init; } = [];
   }
 
@@ -48,5 +59,7 @@ namespace Services.Planilla
     public decimal? RotacionDiariaBruta { get; init; }
     public decimal? RotacionDiariaDesestacionalizada { get; init; }
     public string EstadoMes { get; init; } = string.Empty;
+    public string? FrecuenciaNivel { get; init; }
+    public decimal? RotacionAjustada { get; init; }
   }
 }
