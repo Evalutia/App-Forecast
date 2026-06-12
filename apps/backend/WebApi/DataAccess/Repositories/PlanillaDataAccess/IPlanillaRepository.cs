@@ -4,7 +4,7 @@ namespace DataAccess.Repositories.PlanillaDataAccess
 {
   public interface IPlanillaRepository
   {
-    (IReadOnlyList<(PlanillaVentasCalculada Fila, string? Descripcion, string? MarcaNombre, string? GeneroDescripcion, int? StockMinimo, string EstadoArticulo)> Items, int TotalSkus) GetVentas(
+    (IReadOnlyList<(PlanillaVentasCalculada Fila, string? Descripcion, string? MarcaNombre, string? GeneroDescripcion, int? StockMinimo, string EstadoArticulo, string? CodigoBarras)> Items, int TotalSkus) GetVentas(
         int page,
         int pageSize,
         uint? marcaId,

@@ -44,6 +44,7 @@ namespace Services.Planilla
             {
               Sku             = g.Key,
               Descripcion     = primera.Descripcion,
+              CodigoBarras    = primera.CodigoBarras,
               MarcaNombre     = primera.MarcaNombre,
               GeneroDescripcion = primera.GeneroDescripcion,
               StockMinimo     = primera.StockMinimo,

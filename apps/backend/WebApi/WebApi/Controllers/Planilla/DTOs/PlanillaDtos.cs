@@ -6,6 +6,7 @@ namespace WebApi.Controllers.Planilla.DTOs
   {
     public string Sku { get; init; } = string.Empty;
     public string? Descripcion { get; init; }
+    public string? CodigoBarras { get; init; }
     public string? MarcaNombre { get; init; }
     public string? GeneroDescripcion { get; init; }
     public int? StockMinimo { get; init; }
@@ -16,6 +17,7 @@ namespace WebApi.Controllers.Planilla.DTOs
     {
       Sku               = dto.Sku;
       Descripcion       = dto.Descripcion;
+      CodigoBarras      = dto.CodigoBarras;
       MarcaNombre       = dto.MarcaNombre;
       GeneroDescripcion = dto.GeneroDescripcion;
       StockMinimo       = dto.StockMinimo;

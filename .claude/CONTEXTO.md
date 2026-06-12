@@ -588,6 +588,20 @@ PREDICT_PERIODS, PREDICT_MODEL_SET, PREDICT_VERSION, PREDICT_SCHEDULE_HOUR
 
 ---
 
+### `Codigos Barras` en planilla — Issue #33 (sesión 2026-06-12)
+
+| Decisión | Definición |
+|----------|-----------|
+| **Scope** | Solo `Codigos Barras`. `Rot. Manual` descartada permanentemente (no se implementará). |
+| **Posición en tabla** | Columna scrollable, inmediatamente después de la sticky SKU/Desc, antes de Género. |
+| **Valor vacío** | Muestra `—` igual que el resto de campos opcionales. No se oculta la columna si está vacía. |
+| **Export Excel** | Incluida entre Descripción y Género. Campo vacío exporta como string vacío `""`. |
+| **Fuente del dato** | Campo `Barcode` de `articulos` en DB, ya existente. Sin migración requerida. |
+
+> **Nota:** Los gaps de `SIN STOCK`, `TOT STK` y `C/STK` del CSV del cliente son errores de fórmula Excel (`#NAME?`) que dependen de su propio sistema de stock. No son responsabilidad de Evalutia en esta fase.
+
+---
+
 ## Issues conocidos / TODOs en código
 
 | Issue | Ubicación | Descripción |

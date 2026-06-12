@@ -167,7 +167,7 @@ export default function PlanillaTable({ params, onPageChange, sugerencias, suger
   const totalPages = Math.max(1, Math.ceil(total / params.pageSize));
   const mesHeaders: { year: number; month: number }[] = items[0]?.meses ?? [];
   const lastMesIdx = mesHeaders.length - 1;
-  const totalCols  = 4 + mesHeaders.length * 2 + 4; // SKU+Desc, Género, Estado, VTA, Vta months, rot months, Rot.DesEstac., DDSTK, AE, QBK
+  const totalCols  = 3 + mesHeaders.length * 2 + 6; // SKU+Desc, Cód.Barras, Género, [Vta months], [Rot months], Rot.DesEstac., Estado, VTA, DDSTK, ROT.S, QBK
 
   const handleExport = async () => {
     setExporting(true);
@@ -205,23 +205,10 @@ export default function PlanillaTable({ params, onPageChange, sugerencias, suger
                 />
               </th>
               <th>
-                <Tip label="Género" tip="Género del artículo según el catálogo." />
+                <Tip label="Cód. Barras" tip="Código de barras del artículo." />
               </th>
               <th>
-                <Tip
-                  label="Estado"
-                  tip={'Estado del artículo en el catálogo.\n  · Activo — en venta normal\n  · Inact. — temporalmente inactivo\n  · Desc. — discontinuado, sin reposición'}
-                />
-              </th>
-              <th className="planilla-col-summary">
-                <Tip
-                  label="VTA"
-                  tip={
-                    'Ventas Totales del período\n' +
-                    'Suma de unidades vendidas en los 12 meses cerrados.\n' +
-                    'Excluye el mes de referencia más reciente.'
-                  }
-                />
+                <Tip label="Género" tip="Género del artículo según el catálogo." />
               </th>
 
               {isLoading
@@ -281,6 +268,22 @@ export default function PlanillaTable({ params, onPageChange, sugerencias, suger
                   }
                 />
               </th>
+              <th>
+                <Tip
+                  label="Estado"
+                  tip={'Estado del artículo en el catálogo.\n  · Activo — en venta normal\n  · Inact. — temporalmente inactivo\n  · Desc. — discontinuado, sin reposición'}
+                />
+              </th>
+              <th className="planilla-col-summary">
+                <Tip
+                  label="VTA"
+                  tip={
+                    'Ventas Totales del período\n' +
+                    'Suma de unidades vendidas en los 12 meses cerrados.\n' +
+                    'Excluye el mes de referencia más reciente.'
+                  }
+                />
+              </th>
               <th className="planilla-col-summary">
                 <Tip
                   label="DDSTK"
@@ -329,10 +332,11 @@ export default function PlanillaTable({ params, onPageChange, sugerencias, suger
               Array.from({ length: 8 }).map((_, i) => (
                 <tr key={i}>
                   <td className="planilla-sticky-col"><span className="skeleton skel-120" /></td>
+                  <td><span className="skeleton skel-100" /></td>
                   <td><span className="skeleton skel-80" /></td>
-                  <td><span className="skeleton skel-40" /></td>
-                  <td><span className="skeleton skel-60" /></td>
                   {Array.from({ length: 26 }).map((__, j) => <td key={j}><span className="skeleton skel-40" /></td>)}
+                  <td><span className="skeleton skel-60" /></td>
+                  <td><span className="skeleton skel-40" /></td>
                   <td><span className="skeleton skel-60" /></td>
                   <td><span className="skeleton skel-60" /></td>
                   <td><span className="skeleton skel-60" /></td>
@@ -362,9 +366,8 @@ export default function PlanillaTable({ params, onPageChange, sugerencias, suger
                       <span className="planilla-sku">{row.sku}</span>
                       <span className="planilla-desc">{row.descripcion ?? '—'}</span>
                     </td>
+                    <td className="planilla-col-barras">{row.codigoBarras ?? '—'}</td>
                     <td>{row.generoDescripcion ?? '—'}</td>
-                    <td><EstadoCell estado={row.estadoArticulo} /></td>
-                    <td className="planilla-col-summary">{vta.toLocaleString('es-UY')}</td>
 
                     {row.meses.map((mes, idx) => (
                       <td
@@ -393,6 +396,8 @@ export default function PlanillaTable({ params, onPageChange, sugerencias, suger
                     ))}
 
                     <td className={`planilla-col-summary${rd === '—' ? ' sin-datos' : ''}`}>{rd}</td>
+                    <td><EstadoCell estado={row.estadoArticulo} /></td>
+                    <td className="planilla-col-summary">{vta.toLocaleString('es-UY')}</td>
                     <td className={`planilla-col-summary${dd === '—' ? ' sin-datos' : ''}`}>{dd}</td>
                     <td className="planilla-col-summary">
                       {sugerenciasLoading

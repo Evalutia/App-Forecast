@@ -40,6 +40,7 @@ namespace Services.Planilla
   {
     public string Sku { get; init; } = string.Empty;
     public string? Descripcion { get; init; }
+    public string? CodigoBarras { get; init; }
     public string? MarcaNombre { get; init; }
     public string? GeneroDescripcion { get; init; }
     public int? StockMinimo { get; init; }

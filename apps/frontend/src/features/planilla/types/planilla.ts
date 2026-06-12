@@ -15,6 +15,7 @@ export interface PlanillaMesDto {
 export interface PlanillaVentasDto {
   sku: string;
   descripcion: string | null;
+  codigoBarras: string | null;
   marcaNombre: string | null;
   generoDescripcion: string | null;
   stockMinimo: number | null;

@@ -106,10 +106,10 @@ export async function exportPlanillaExcel(
   });
 
   // ── Column layout ──────────────────────────────────────────────────────────
-  // Fixed (4): SKU, Descripción, Género, Estado
+  // Fixed (4): SKU, Descripción, Cód.Barras, Género
   // Monthly Vta (n): Vta.Mes/Año × 13
   // Monthly Rot (n): Rot.Mes/Año × 13
-  // Summary (6): VTA, Rot.DesEstac., DDSTK, ROT.S, Fiabilidad%, QBK
+  // Summary (7): Rot.DesEstac., Estado, VTA, DDSTK, ROT.S, Fiabilidad%, QBK
   const mesesRef   = items[0].meses;
   const n          = mesesRef.length;
   const lastMesIdx = n - 1;
@@ -118,22 +118,23 @@ export async function exportPlanillaExcel(
   // Column index helpers (1-based)
   const COL_VTA_MES  = (i: number) => 5 + i;          // i = 0..n-1
   const COL_ROT_MES  = (i: number) => 5 + n + i;      // i = 0..n-1
-  const COL_VTA      = 5 + 2 * n;
-  const COL_RD       = 6 + 2 * n;
-  const COL_DD       = 7 + 2 * n;
-  const COL_ROTS     = 8 + 2 * n;
-  const COL_FIAB     = 9 + 2 * n;
-  const COL_QBK      = 10 + 2 * n;
+  const COL_RD       = 5 + 2 * n;
+  const COL_VTA      = 7 + 2 * n;
+  const COL_DD       = 8 + 2 * n;
+  const COL_ROTS     = 9 + 2 * n;
+  const COL_FIAB     = 10 + 2 * n;
+  const COL_QBK      = 11 + 2 * n;
 
   const headers = [
     'SKU',
     'Descripción',
+    'Cód. Barras',
     'Género',
-    'Estado',
     ...mesLabels.map(l => `Vta.${l}`),
     ...mesLabels.map(l => `Rot.${l}`),
-    'VTA',
     'Rot. DesEstac.',
+    'Estado',
+    'VTA',
     'DDSTK',
     'ROT.S',
     'Fiabilidad %',
@@ -143,12 +144,13 @@ export async function exportPlanillaExcel(
   ws.columns = [
     { width: 13 },                                          // SKU
     { width: 34 },                                          // Descripción
+    { width: 18 },                                          // Cód. Barras
     { width: 18 },                                          // Género
-    { width: 13 },                                          // Estado
     ...mesesRef.map((_, i) => ({ width: i === lastMesIdx ? 10 : 9 })),  // Vta months
     ...mesesRef.map((_, i) => ({ width: i === lastMesIdx ? 10 : 9 })),  // Rot months
-    { width: 10 },                                          // VTA
     { width: 15 },                                          // Rot. DesEstac.
+    { width: 13 },                                          // Estado
+    { width: 10 },                                          // VTA
     { width: 12 },                                          // DDSTK
     { width: 10 },                                          // ROT.S
     { width: 13 },                                          // Fiabilidad %
@@ -159,7 +161,7 @@ export async function exportPlanillaExcel(
   const headerRow = ws.addRow(headers);
   headerRow.height = 22;
   headerRow.eachCell((cell: Cell, colNum: number) => {
-    const isSummary = colNum >= COL_VTA;
+    const isSummary = colNum >= COL_RD;
     cell.fill      = { type: 'pattern', pattern: 'solid', fgColor: { argb: `FF${isSummary ? COLOR_SUMMARY : COLOR_HEADER}` } };
     cell.font      = { bold: true, color: { argb: 'FFFFFFFF' }, size: 10 };
     cell.alignment = { vertical: 'middle', horizontal: colNum <= 2 ? 'left' : 'center', wrapText: false };
@@ -176,12 +178,13 @@ export async function exportPlanillaExcel(
     const rowValues = [
       item.sku,
       item.descripcion ?? '',
+      item.codigoBarras ?? '',
       item.generoDescripcion ?? '',
-      item.estadoArticulo ?? 'activo',
       ...item.meses.map(m => Number(m.ventasCantidad)),
       ...item.meses.map(m => m.rotacionDiariaReal ?? 0),
-      vta,
       rd,
+      item.estadoArticulo ?? 'activo',
+      vta,
       dd,
       sug?.rotacionSugerida ?? null,
       sug?.fiabilidadPorcentaje ?? null,

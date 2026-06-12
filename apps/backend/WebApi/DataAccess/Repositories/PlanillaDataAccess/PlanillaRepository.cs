@@ -12,7 +12,7 @@ namespace DataAccess.Repositories.PlanillaDataAccess
       _db = db;
     }
 
-    public (IReadOnlyList<(PlanillaVentasCalculada Fila, string? Descripcion, string? MarcaNombre, string? GeneroDescripcion, int? StockMinimo, string EstadoArticulo)> Items, int TotalSkus) GetVentas(
+    public (IReadOnlyList<(PlanillaVentasCalculada Fila, string? Descripcion, string? MarcaNombre, string? GeneroDescripcion, int? StockMinimo, string EstadoArticulo, string? CodigoBarras)> Items, int TotalSkus) GetVentas(
         int page,
         int pageSize,
         uint? marcaId,
@@ -44,7 +44,7 @@ namespace DataAccess.Repositories.PlanillaDataAccess
       var skusPaginados = skuQuery.OrderBy(s => s).Skip((page - 1) * pageSize).Take(pageSize).ToList();
 
       if (!skusPaginados.Any())
-        return (new List<(PlanillaVentasCalculada, string?, string?, string?, int?, string)>(), totalSkus);
+        return (new List<(PlanillaVentasCalculada, string?, string?, string?, int?, string, string?)>(), totalSkus);
 
       // Filas de planilla para los SKUs del page
       var filas = (from p in _db.PlanillasVentasCalculadas
@@ -69,7 +69,8 @@ namespace DataAccess.Repositories.PlanillaDataAccess
                      MarcaNombre = a != null ? a.MarcaNombre : null,
                      GeneroDescripcion = a != null ? a.GeneroDescripcion : null,
                      StockMinimo = a != null ? (int?)a.StockMinimo : null,
-                     EstadoArticulo = a != null ? a.Estado : "activo"
+                     EstadoArticulo = a != null ? a.Estado : "activo",
+                     CodigoBarras = a != null ? a.Barcode : null
                    })
                   .ToList();
 
@@ -93,7 +94,8 @@ namespace DataAccess.Repositories.PlanillaDataAccess
           MarcaNombre: f.MarcaNombre,
           GeneroDescripcion: f.GeneroDescripcion,
           StockMinimo: f.StockMinimo,
-          EstadoArticulo: f.EstadoArticulo
+          EstadoArticulo: f.EstadoArticulo,
+          CodigoBarras: f.CodigoBarras
       )).ToList();
 
       return (result, totalSkus);
