@@ -61,7 +61,7 @@ function qbkClass(dias: number): string {
 }
 
 function EstadoCell({ estado }: { estado?: string }) {
-  if (!estado || estado === 'activo') return null;
+  if (!estado || estado === 'activo') return <span className="planilla-badge planilla-badge--verde">Activo</span>;
   if (estado === 'inactivo')    return <span className="planilla-badge planilla-badge--gris">Inact.</span>;
   if (estado === 'discontinuo') return <span className="planilla-badge planilla-badge--naranja">Desc.</span>;
   return null;
