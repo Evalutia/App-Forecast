@@ -65,6 +65,39 @@
       background: rgba(52,196,143,0.2) !important;
       border-color: rgba(52,196,143,0.5) !important; color: var(--green) !important;
     }
+    .nav-burger {
+      display: none; margin-left: 8px;
+      width: 36px; height: 36px; border-radius: 8px;
+      border: 1px solid var(--border); background: transparent;
+      align-items: center; justify-content: center;
+      cursor: pointer; flex-shrink: 0;
+    }
+    .nav-burger span {
+      display: block; width: 16px; height: 1.5px; background: var(--text);
+      position: relative; transition: transform .25s ease, opacity .25s ease;
+    }
+    .nav-burger span::before, .nav-burger span::after {
+      content: ''; position: absolute; left: 0; width: 16px; height: 1.5px; background: var(--text);
+      transition: transform .25s ease, top .25s ease;
+    }
+    .nav-burger span::before { top: -5px; }
+    .nav-burger span::after { top: 5px; }
+    .nav-burger.open span { background: transparent; }
+    .nav-burger.open span::before { top: 0; transform: rotate(45deg); }
+    .nav-burger.open span::after { top: 0; transform: rotate(-45deg); }
+    .nav-mobile-menu {
+      display: none; position: fixed; top: 64px; left: 0; right: 0; z-index: 99;
+      flex-direction: column; padding: 8px 20px 16px;
+      background: rgba(5,14,9,0.97); backdrop-filter: blur(20px);
+      border-bottom: 1px solid var(--border);
+    }
+    .nav-mobile-menu.open { display: flex; }
+    .nav-mobile-menu a {
+      color: var(--muted); text-decoration: none;
+      font-size: 15px; font-weight: 500; padding: 12px 4px;
+      border-bottom: 1px solid var(--border);
+    }
+    .nav-mobile-menu a:last-child { border-bottom: none; }
 
     /* ── NEURAL CANVAS ── */
     #neural-canvas {
@@ -355,6 +388,9 @@
       border: 1px solid rgba(52,196,143,0.2);
       border-radius: 20px; padding: 48px;
       width: 100%; max-width: 500px;
+      max-height: calc(100svh - 48px);
+      overflow-y: auto;
+      -webkit-overflow-scrolling: touch;
       position: relative;
       /* cinematic entrance */
       animation: modal-in 0.5s cubic-bezier(0.34,1.56,0.64,1) forwards;
@@ -433,6 +469,7 @@
     @media (max-width: 768px) {
       nav { padding: 0 20px; }
       .nav-links a:not(.nav-cta) { display: none; }
+      .nav-burger { display: flex; }
       .stats-inner { grid-template-columns: 1fr; }
       .stat { padding: 24px; }
       .problem-solution { grid-template-columns: 1fr; }
@@ -457,7 +494,7 @@
 <!-- NAV -->
 <nav>
   <a href="#" class="nav-logo">
-    <img src="assets/logo.png" alt="Evalutia" onerror="this.style.display='none'">
+    <img src="logo.png" alt="Evalutia" onerror="this.style.display='none'">
     Evalutia
   </a>
   <div class="nav-links">
@@ -465,7 +502,12 @@
     <a href="#caracteristicas">Características</a>
     <a href="https://app.evalutia.net" class="nav-cta">Abrir app →</a>
   </div>
+  <button class="nav-burger" id="nav-burger" aria-label="Abrir menú" aria-expanded="false"><span></span></button>
 </nav>
+<div class="nav-mobile-menu" id="nav-mobile-menu">
+  <a href="#como-funciona">Cómo funciona</a>
+  <a href="#caracteristicas">Características</a>
+</div>
 
 <!-- HERO -->
 <div class="hero">
@@ -840,13 +882,34 @@ const revealIO=new IntersectionObserver(entries=>{
 reveals.forEach(el=>revealIO.observe(el));
 
 /* ────────────────────────────────────────────
-   FLIP CARDS — also keyboard accessible
+   FLIP CARDS — tap/click + keyboard accessible
+   (hover-only doesn't work on touch devices)
 ──────────────────────────────────────────── */
 document.querySelectorAll('.flip-card').forEach(card=>{
+  card.addEventListener('click',()=>card.classList.toggle('flipped'));
   card.addEventListener('keydown',e=>{
     if(e.key==='Enter'||e.key===' '){e.preventDefault();card.classList.toggle('flipped');}
   });
 });
+
+/* ────────────────────────────────────────────
+   MOBILE NAV — burger toggle
+──────────────────────────────────────────── */
+(function(){
+  const burger = document.getElementById('nav-burger');
+  const menu = document.getElementById('nav-mobile-menu');
+  if(!burger||!menu) return;
+  burger.addEventListener('click',()=>{
+    const open = menu.classList.toggle('open');
+    burger.classList.toggle('open', open);
+    burger.setAttribute('aria-expanded', open ? 'true' : 'false');
+  });
+  menu.querySelectorAll('a').forEach(a=>a.addEventListener('click',()=>{
+    menu.classList.remove('open');
+    burger.classList.remove('open');
+    burger.setAttribute('aria-expanded','false');
+  }));
+})();
 
 /* ────────────────────────────────────────────
    STEPS — animated progress line on scroll

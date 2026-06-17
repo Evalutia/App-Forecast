@@ -602,6 +602,23 @@ PREDICT_PERIODS, PREDICT_MODEL_SET, PREDICT_VERSION, PREDICT_SCHEDULE_HOUR
 
 ---
 
+### `webpage/index.html` — Auditoría responsive (sesión 2026-06-17)
+
+| Decisión | Definición |
+|----------|-----------|
+| **Alcance** | Landing estática de presentación (`evalutia.net`), single-file HTML/CSS/JS sin framework. No confundir con el frontend React de la app (`app.evalutia.net`). |
+| **Metodología** | Auditoría real con Playwright contra el sitio en vivo en 9 viewports (320px a 3840px/4K), no solo lectura de CSS. Script reusable en `playwright-verify/audit-responsive-evalutia.js`. |
+| **Layout fluido** | Confirmado: cero overflow horizontal en los 9 tamaños probados gracias a grid fluido + `clamp()` tipográfico. Los dos breakpoints existentes (768px, 480px) son suficientes. |
+| **Bug: flip-cards ilegibles en touch** | Las 6 tarjetas de "Características" dependían 100% de `:hover`, sin handler de `click`/`tap`. En cualquier celular/tablet el reverso (la explicación de cada feature) era inalcanzable. Fix: agregado `click` listener que togglea `.flipped`, conviviendo con el `:hover` de desktop y el `keydown` existente. |
+| **Bug: modal de contacto sin scroll interno** | En viewports bajos (ej. 320×568) el modal medía más que el alto de pantalla y no tenía `overflow-y`, dejando el botón de cerrar fuera de la vista (`top:-33px`) y el submit parcialmente cortado. Fix: `.modal { max-height: calc(100svh - 48px); overflow-y:auto }`. |
+| **Bug: logo roto en todos los dispositivos** | `<img src="assets/logo.png">` apuntaba a una carpeta `assets/` que no existe; el archivo real está en `webpage/logo.png` junto al HTML. 404 silencioso (oculto por `onerror`). Fix: corregida la ruta a `logo.png`. |
+| **Mejora: sin navegación en mobile** | Por debajo de 768px los links de nav se ocultaban sin alternativa. Se agregó botón hamburguesa (`#nav-burger`) + dropdown (`#nav-mobile-menu`), visible solo `<=768px`. |
+| **Verificación de regresión** | Re-corrida la auditoría completa post-fix: 0 overflow, 0 errores de consola, hover de desktop intacto, accesibilidad por teclado (`tabindex`/`aria-label`) intacta, breakpoint 767/768/769 sin solapamiento, sin overlap de nav en 320px. |
+
+> **Nota:** Nada de esto requirió cambios en el backend, ETL ni en el frontend React de la app — es exclusivamente la landing estática. El script de auditoría queda versionado en `playwright-verify/audit-responsive-evalutia.js` para volver a correrlo cuando se quiera; las capturas de pantalla generadas son evidencia local, no se versionan.
+
+---
+
 ## Issues conocidos / TODOs en código
 
 | Issue | Ubicación | Descripción |
