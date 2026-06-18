@@ -4,9 +4,14 @@ run_calc_sugerencias.py — Calcula rotacion_sugerida, fiabilidad_porcentaje
 y dias_hasta_quiebre por SKU y persiste en planilla_sugerencias.
 
 Algoritmo rotacion_sugerida:
-  - Toma los meses con estado_mes='normal' de planilla_ventas_calculada
-    (hasta MAX_MESES meses, los más recientes).
-  - Si un SKU tiene < MIN_MESES_NORMAL meses normal → rotacion_sugerida = NULL.
+  - Toma los meses con estado_mes IN ('normal', 'quiebre_parcial') de
+    planilla_ventas_calculada (hasta MAX_MESES meses, los más recientes),
+    excluyendo el mes de referencia. Usa rotacion_diaria_real en meses normales
+    y rotacion_ajustada (ya corregida por nivel de frecuencia) en quiebre_parcial.
+    Desde Issue #36/#37 el umbral de estado_mes es 100% (cualquier día de
+    quiebre cuenta) — restringir esto a solo 'normal' dejaría sin sugerencia a
+    muchos más SKUs de los que quedaban afuera con el umbral del 90% anterior.
+  - Si un SKU tiene < MIN_MESES_CON_DATOS meses con datos → rotacion_sugerida = NULL.
   - Promedio ponderado con pesos lineales (más reciente = mayor peso).
 
 Algoritmo fiabilidad_porcentaje:
@@ -32,9 +37,9 @@ from collections import defaultdict
 
 import pymysql
 
-MODELO           = "weighted_avg_13m"
-MIN_MESES_NORMAL = 3
-MAX_MESES        = 13
+MODELO              = "weighted_avg_13m"
+MIN_MESES_CON_DATOS = 3
+MAX_MESES           = 13
 
 # ── Conexión ───────────────────────────────────────────────────────────────────
 
@@ -120,20 +125,31 @@ def calcular_sugerencias(
     """
     Retorna (filas, skus_con_sugerencia, skus_sin_datos, skus_con_quiebre).
 
-    skus_sin_datos: SKUs con < MIN_MESES_NORMAL meses normal — se insertan con NULL
-    para que el ON DUPLICATE KEY UPDATE limpie valores stale de ciclos anteriores.
+    skus_sin_datos: SKUs con < MIN_MESES_CON_DATOS meses utilizables — se insertan
+    con NULL para que el ON DUPLICATE KEY UPDATE limpie valores stale de ciclos anteriores.
 
     mes_referencia: (year, month) a excluir del cálculo. Desde Issue #34, el mes en
     curso puede llegar con estado_mes='normal' (antes solo pasaba en meses cerrados),
     pero su rotacion_diaria_real es parcial — incluirlo sesgaría la sugerencia hacia
     abajo cada vez que el job corra a mitad de mes.
+
+    Incluye meses 'quiebre_parcial' además de 'normal' (Issue #36/#37): con el umbral
+    de estado_mes en 100%, cualquier día de quiebre saca a un mes de 'normal', así que
+    restringirse solo a 'normal' dejaría a muchos SKUs sin suficientes meses para
+    calcular sugerencia. Para 'quiebre_parcial' se usa rotacion_ajustada (ya corregida
+    por nivel de frecuencia en run_calc_planilla.py), no rotacion_diaria_real.
     """
     sql = """
-        SELECT sku, year, month, rotacion_diaria_real
+        SELECT
+            sku, year, month, estado_mes,
+            CASE WHEN estado_mes = 'normal' THEN rotacion_diaria_real
+                 ELSE rotacion_ajustada
+            END AS rotacion_valor
         FROM planilla_ventas_calculada
-        WHERE estado_mes = 'normal'
-          AND rotacion_diaria_real IS NOT NULL
-          AND rotacion_diaria_real > 0
+        WHERE (
+                (estado_mes = 'normal' AND rotacion_diaria_real IS NOT NULL AND rotacion_diaria_real > 0)
+             OR (estado_mes = 'quiebre_parcial' AND rotacion_ajustada IS NOT NULL AND rotacion_ajustada > 0)
+        )
     """
     params: tuple = ()
     if mes_referencia is not None:
@@ -147,7 +163,7 @@ def calcular_sugerencias(
 
     # Agrupar por SKU, retener solo los MAX_MESES más recientes (ya vienen DESC)
     por_sku: dict[str, list[float]] = defaultdict(list)
-    for sku, _year, _month, rot in rows:
+    for sku, _year, _month, _estado, rot in rows:
         vals = por_sku[sku]
         if len(vals) < MAX_MESES:
             vals.append(float(rot))
@@ -160,7 +176,7 @@ def calcular_sugerencias(
     for sku, valores in por_sku.items():
         n = len(valores)
 
-        if n < MIN_MESES_NORMAL:
+        if n < MIN_MESES_CON_DATOS:
             skus_sin_datos += 1
             filas.append({
                 "sku":                   sku,
@@ -256,7 +272,7 @@ def main() -> None:
             "skus_sin_datos":       skus_sin_datos,
             "filas_upserted":       len(filas),
             "duracion_seg":         duracion,
-            "min_meses_normal":     MIN_MESES_NORMAL,
+            "min_meses_con_datos":  MIN_MESES_CON_DATOS,
             "max_meses":            MAX_MESES,
             "mes_referencia_excluido": mes_referencia,
         }

@@ -668,6 +668,34 @@ PREDICT_PERIODS, PREDICT_MODEL_SET, PREDICT_VERSION, PREDICT_SCHEDULE_HOUR
 
 > **Nota:** Único caller de `calcular_sugerencias()` es `main()`, ya actualizado. Sin otros consumidores en el repo.
 
+### Umbral del 90% (`ESTADO_UMBRAL_NORMAL`) — Issue #36 (sesión 2026-06-17)
+
+| Decisión | Definición |
+|----------|-----------|
+| **Se mantiene en 90%** | Sin cambios de código. `ESTADO_UMBRAL_NORMAL = 0.90` en `run_calc_planilla.py` queda igual. |
+| **Naturaleza de la decisión** | **Provisoria, criterio interno/del consultor — no confirmada por el cliente.** Distinto de una validación real con el cliente. Si el cliente la cuestiona en el futuro, reabrir o crear issue nuevo puntual. |
+| **Tooltip/leyenda en frontend** | Ya existe, no requirió trabajo nuevo. `PlanillaTable.tsx:143`, componente `Leyenda()`: `"Normal (≥90% días con stock)"`. Implementado como parte del Issue #11 (cerrado), antes de esta sesión — verificado en código, no asumido. |
+
+> **Nota:** No confundir la numeración interna de `CONTEXTO.md` (issues #2–#33, anteriores a usar `gh issue create`) con los números reales de GitHub (#34 en adelante) — son el mismo proyecto pero "Issue #11" en este archivo y "issue #11" en GitHub coinciden numéricamente por coincidencia histórica, conviene verificar siempre contra `gh issue list` antes de asumir que algo sigue pendiente.
+
+### Umbral del 90% → 100% — Issues #36/#37 reabiertos (sesión 2026-06-17, segunda parte)
+
+| Decisión | Definición |
+|----------|-----------|
+| **Reabre y reemplaza la decisión anterior de #36** | "Mantener 90%" se cerró ese mismo día como decisión provisoria sin validar con cliente. Horas después, comparando el Excel real del cliente (`.xlsm`, vía `openpyxl`), se encontró evidencia dura que la contradice — ver siguiente fila. |
+| **Metodología de verificación** | Se inspeccionó el `.xlsm` original del cliente (no el CSV exportado — pierde color de celda y comentarios) con `openpyxl`: 232 celdas con comentario "Dias de Quiebre N" en la hoja "Ventas", generadas automáticamente (comentario "SpreadsheetLight... a partir del documento importado", no es un Excel manual). |
+| **Hallazgo: los números coinciden, el umbral no** | I01088 jul/25: 17 ventas ÷ 29 días con stock = 0.5862, idéntico a nuestra fórmula. La discrepancia original reportada (Excel cliente vs. sistema) **no era de cálculo** — nadie había comparado el color/clasificación, solo el valor de rotación. |
+| **Criterio real del cliente: sin piso mínimo** | De las 232 celdas coloreadas como quiebre, el mínimo observado es **1 día de quiebre sobre 31** (96.8% de días con stock) — y se colorea igual. **0 casos** de "días de quiebre > 0" sin colorear. El cliente no usa 90%, usa: cualquier día sin stock = quiebre. |
+| **Decisión: replicar el criterio del cliente** | `ESTADO_UMBRAL_NORMAL` cambia de `0.90` a `1.00` en `run_calc_planilla.py`. Con la fracción `dias_stock/dias_naturales >= 1.00`, equivale a `dias_stock == dias_naturales` — ningún cambio de lógica en `clasificar_estado()`, solo la constante. |
+| **El sistema de 3 colores (alta/media/baja frecuencia) se mantiene** | El cliente solo usa amarillo para todo quiebre; nuestro sistema de Issues #27/#28 (amarillo/naranja/rojo según `frecuenciaNivel`) ya es una mejora sobre el de ellos. No se toca — coexiste con el nuevo umbral. |
+| **`clasificar_estado_mes()` (fix de #34) no necesitó cambios** | Su rama para el mes de referencia (`"normal" if dias_stock > 0 else "sin_stock"`) nunca dependió de `ESTADO_UMBRAL_NORMAL` ni de `dias_naturales` — es agnóstica al valor del umbral por diseño. Verificado, no es casualidad. |
+| **Efecto en cadena: `run_calc_sugerencias.py`** | Con el umbral más estricto, muchos menos meses califican como `'normal'`. Se amplió la query para incluir también `'quiebre_parcial'` (usando `rotacion_ajustada` en vez de `rotacion_diaria_real`), evitando que SKUs con algún quiebre puntual pierdan su `rotacion_sugerida` por debajo de `MIN_MESES_CON_DATOS` (renombrada de `MIN_MESES_NORMAL`). Verificado contra DB local: 82→83 SKUs elegibles (impacto chico en esta muestra por las limitaciones de #38; en producción con 13 meses reales el impacto esperado es mayor). |
+| **Verificación en vivo del problema de #38** | Al correr contra datos locales reales, Feb/2026 (último mes con datos, por el hueco de sync de #38) pasó a mostrar `quiebre_parcial` en el 100% de los SKUs — porque el ETL local se cortó a mitad de mes y el sistema lo trata como "mes cerrado" (ya que el mes de referencia real, jun/2026, no tiene ningún dato). No es un bug del fix — es el síntoma exacto que #38 ya documentaba, ahora visible. |
+| **Frontend** | Solo cambia el texto de la leyenda: `PlanillaTable.tsx:143`, de "Normal (≥90% días con stock)" a "Normal (100% días con stock)". Sin cambios de lógica de color — `estadoMesBg()`/`mesBgColor()` ya manejaban `'quiebre_parcial'`/`'sin_stock'` correctamente. |
+| **Tests** | Casos actualizados a umbral 100%, incluyendo el caso real verificado (I01089 May/25: 1 día de quiebre sobre 31 → `quiebre_parcial`). 14/14 pasan. |
+
+> **Nota para #37:** la conversación con el cliente cambia de enfoque — ya no es "avisarle de una discrepancia que tenemos que corregir", es "confirmarle que adoptamos su mismo criterio de quiebre (cualquier día sin stock cuenta) en vez del 90% que usábamos antes". Mostrarle el caso I01088 como demostración de que los números ya coincidían, y que el único cambio fue alinear el umbral visual.
+
 ---
 
 ## Issues conocidos / TODOs en código

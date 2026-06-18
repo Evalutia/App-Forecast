@@ -6,9 +6,11 @@ Lee ventas_historicas + stock_diario, calcula rotaciones y estado_mes
 por SKU×mes para una ventana de 13 meses (mes actual + 12 anteriores completos).
 Regenera la tabla completa en una única transacción atómica (DELETE + INSERT).
 
-Umbrales estado_mes (documentar también en frontend — el cliente puede pedir ajustarlos):
-  normal          : dias_con_stock >= 90% de dias_naturales_mes
-  quiebre_parcial : dias_con_stock >  0  y  < 90% de dias_naturales_mes
+Umbrales estado_mes (replica el criterio del cliente — Issue #36/#37, verificado contra
+su Excel de referencia vía openpyxl: colorea como quiebre el 100% de los meses con al
+menos 1 día sin stock, sin piso mínimo — no usan un umbral del 90%):
+  normal          : dias_con_stock == dias_naturales_mes (todos los días con stock)
+  quiebre_parcial : dias_con_stock >  0  y  < dias_naturales_mes (al menos 1 día sin stock)
   sin_stock       : dias_con_stock == 0
 
 Uso:
@@ -28,7 +30,10 @@ import pymysql
 # ── Parámetros ─────────────────────────────────────────────────────────────────
 
 VENTANA_MESES        = 13     # mes actual + 12 anteriores completos
-ESTADO_UMBRAL_NORMAL = 0.90   # fracción de días naturales necesaria para "normal"
+
+# Fracción de días naturales necesaria para "normal". 100% = replica el criterio del
+# cliente: cualquier día de quiebre cuenta, sin piso. Issue #36/#37, sesión 2026-06-17.
+ESTADO_UMBRAL_NORMAL = 1.00
 
 # Umbrales de frecuencia de quiebre (Issue #27)
 # Medida: cantidad de meses cerrados (de 12) con ventas_cantidad > 0
@@ -76,7 +81,8 @@ def dias_naturales_mes(year: int, month: int) -> int:
 def clasificar_estado(dias_stock: int, dias_naturales: int) -> str:
     """
     Clasifica el estado del mes según disponibilidad de stock.
-    Umbral configurable: ESTADO_UMBRAL_NORMAL (default 90%).
+    Umbral configurable: ESTADO_UMBRAL_NORMAL (default 100% — cualquier día de
+    quiebre cuenta, replica el criterio observado en la planilla del cliente).
     """
     if dias_stock == 0:
         return "sin_stock"
@@ -88,9 +94,11 @@ def clasificar_estado(dias_stock: int, dias_naturales: int) -> str:
 def clasificar_estado_mes(dias_stock: int, dias_naturales: int, es_mes_referencia: bool) -> str:
     """
     Clasifica estado_mes, exceptuando el mes de referencia (en curso) del umbral
-    del 90%: dias_naturales_mes ahí siempre es el total del mes calendario, no
-    los días que de verdad transcurrieron, así que el umbral da falso positivo
-    de quiebre casi todo el mes sin importar si el stock estuvo perfecto.
+    de ESTADO_UMBRAL_NORMAL: dias_naturales_mes ahí siempre es el total del mes
+    calendario, no los días que de verdad transcurrieron, así que el umbral da
+    falso positivo de quiebre casi todo el mes sin importar si el stock estuvo
+    perfecto (más aún con el umbral en 100%, donde un solo día de diferencia ya
+    alcanza para disparar el falso positivo).
 
     dias_stock == 0 sí es una señal confiable a mitad de mes (cuenta días reales
     ya observados en stock_diario), por eso sin_stock se preserva.

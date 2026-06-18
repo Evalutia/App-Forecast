@@ -27,18 +27,21 @@ def test_ventana_meses_sin_fecha_inyectada_usa_hoy():
     assert meses[0] == (hoy.year, hoy.month)
 
 
-# ── clasificar_estado() — sin cambios, meses cerrados ────────────────────────
+# ── clasificar_estado() — umbral 100%, replica el criterio del cliente ──────
+# Issue #36/#37: verificado contra su Excel de referencia (openpyxl) — colorea
+# como quiebre el 100% de los meses con al menos 1 día sin stock, sin piso.
 
 @pytest.mark.parametrize(
     "dias_stock,dias_naturales,esperado",
     [
         (0,  30, "sin_stock"),
-        (27, 30, "normal"),         # 90% exacto
-        (26, 30, "quiebre_parcial"),  # 86.7%, debajo del umbral
+        (30, 30, "normal"),           # 100% exacto, único caso "normal"
+        (29, 30, "quiebre_parcial"),  # 96.7%, un solo día de quiebre — igual cuenta
+        (1,  31, "quiebre_parcial"),  # caso real I01089 May/25: 1 día de quiebre sobre 31
         (31, 31, "normal"),
     ],
 )
-def test_clasificar_estado_mes_cerrado_sin_cambios(dias_stock, dias_naturales, esperado):
+def test_clasificar_estado_mes_cerrado_umbral_100(dias_stock, dias_naturales, esperado):
     assert clasificar_estado(dias_stock, dias_naturales) == esperado
 
 
@@ -61,8 +64,8 @@ def test_mes_referencia_sin_ningun_dia_de_stock_sigue_sin_stock():
     "dias_stock,dias_naturales,esperado",
     [
         (0,  30, "sin_stock"),
-        (27, 30, "normal"),
-        (26, 30, "quiebre_parcial"),
+        (30, 30, "normal"),
+        (29, 30, "quiebre_parcial"),
     ],
 )
 def test_mes_cerrado_via_clasificar_estado_mes_delega_sin_cambios(dias_stock, dias_naturales, esperado):

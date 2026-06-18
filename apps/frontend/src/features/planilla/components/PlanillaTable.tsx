@@ -140,7 +140,7 @@ function Leyenda() {
   return (
     <div className="planilla-leyenda">
       <span className="planilla-leyenda-titulo">Estado mensual:</span>
-      <span className="planilla-leyenda-item planilla-leyenda-normal">Normal (≥90% días con stock)</span>
+      <span className="planilla-leyenda-item planilla-leyenda-normal">Normal (100% días con stock)</span>
       <span className="planilla-leyenda-item planilla-leyenda-quiebre-alta">Quiebre alta freq</span>
       <span className="planilla-leyenda-item planilla-leyenda-quiebre-media">Quiebre media freq</span>
       <span className="planilla-leyenda-item planilla-leyenda-quiebre-baja">Quiebre baja freq</span>
