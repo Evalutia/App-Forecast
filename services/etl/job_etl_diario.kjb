@@ -130,17 +130,20 @@ SELECT 1;
       <type>SQL</type>
       <connection>MYSQL_EVALUTIA</connection>
       <sql><![CDATA[
--- MERGE corregido: solo columnas presentes en la tabla ventas_historicas
+-- MERGE corregido: suma cantidad por SKU+fecha a traves de todos los depositos
+-- (ventas_historicas no tiene deposito_id en su clave unica; sin el SUM/GROUP BY,
+-- cada deposito pisaba el valor del anterior en vez de acumularse - issue #39 ampliado).
 INSERT INTO ventas_historicas
   (fecha, sku, cantidad, ts_carga, fuente)
 SELECT
   DATE(s.fecha) AS fecha,
   TRIM(s.sku) AS sku,
-  CAST(s.cantidad AS DECIMAL(12,3)) AS cantidad,
+  SUM(CAST(s.cantidad AS DECIMAL(12,3))) AS cantidad,
   NOW(6) AS ts_carga,
-  COALESCE(s.fuente,'ws_consstockventa') AS fuente
+  COALESCE(MIN(s.fuente),'ws_consstockventa') AS fuente
 FROM ventas_historicas_stage s
 WHERE s.sku IS NOT NULL
+GROUP BY DATE(s.fecha), TRIM(s.sku)
 ON DUPLICATE KEY UPDATE
   cantidad = VALUES(cantidad),
   ts_carga = VALUES(ts_carga),
