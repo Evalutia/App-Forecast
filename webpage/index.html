@@ -4,9 +4,14 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <title>Evalutia — Predicción de ventas para PYMEs</title>
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600&family=Syne:wght@700;800&display=swap" rel="stylesheet">
   <style>
+    @font-face {
+      font-family: 'Satoshi';
+      src: url('fonts/Satoshi-Variable.woff2') format('woff2');
+      font-weight: 300 900;
+      font-display: swap;
+      font-style: normal;
+    }
     :root {
       --green: #34c48f;
       --green-dim: rgba(52,196,143,0.12);
@@ -23,7 +28,7 @@
     body {
       background: var(--bg);
       color: var(--text);
-      font-family: 'DM Sans', system-ui, sans-serif;
+      font-family: 'Satoshi', system-ui, sans-serif;
       -webkit-font-smoothing: antialiased;
       overflow-x: hidden;
       line-height: 1.6;
@@ -41,7 +46,7 @@
     }
     .nav-logo {
       display: flex; align-items: center; gap: 10px;
-      font-family: 'Syne', sans-serif; font-weight: 800; font-size: 18px;
+      font-family: 'Satoshi', sans-serif; font-weight: 800; font-size: 18px;
       color: var(--text); text-decoration: none;
     }
     .nav-logo img {
@@ -148,7 +153,7 @@
     }
     @keyframes blink { 0%,100%{opacity:1} 50%{opacity:0.3} }
     h1 {
-      font-family: 'Syne', sans-serif;
+      font-family: 'Satoshi', sans-serif;
       font-size: clamp(40px, 7vw, 76px); font-weight: 800;
       line-height: 1.05; letter-spacing: -0.03em; color: var(--text); margin-bottom: 24px;
       overflow-wrap: break-word;
@@ -193,7 +198,7 @@
     }
     .stat { background: var(--bg); padding: 32px 40px; text-align: center; }
     .stat-num {
-      font-family: 'Syne', sans-serif; font-size: 44px; font-weight: 800;
+      font-family: 'Satoshi', sans-serif; font-size: 44px; font-weight: 800;
       color: var(--green); line-height: 1; margin-bottom: 8px;
     }
     .stat-label { font-size: 14px; color: var(--muted); line-height: 1.4; }
@@ -208,7 +213,7 @@
       text-transform: uppercase; color: var(--green); margin-bottom: 16px;
     }
     h2 {
-      font-family: 'Syne', sans-serif;
+      font-family: 'Satoshi', sans-serif;
       font-size: clamp(28px, 4vw, 42px); font-weight: 800;
       letter-spacing: -0.02em; line-height: 1.1; margin-bottom: 16px;
       overflow-wrap: break-word;
@@ -224,7 +229,7 @@
     .ps-block { padding: 48px 40px; background: var(--bg-card); }
     .ps-block:first-child { border-right: 1px solid var(--border); }
     .ps-block h3 {
-      font-family: 'Syne', sans-serif; font-size: 20px;
+      font-family: 'Satoshi', sans-serif; font-size: 20px;
       font-weight: 700; margin-bottom: 16px;
     }
     .ps-block.problem h3 { color: rgba(255,100,80,0.9); }
@@ -278,7 +283,7 @@
       fill: none; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round;
     }
     .flip-front h3 {
-      font-family: 'Syne', sans-serif; font-size: 15px;
+      font-family: 'Satoshi', sans-serif; font-size: 15px;
       font-weight: 700; color: var(--text); margin: 0;
     }
     .flip-front .flip-hint {
@@ -286,7 +291,7 @@
       text-transform: uppercase; margin-top: auto;
     }
     .flip-back h3 {
-      font-family: 'Syne', sans-serif; font-size: 15px;
+      font-family: 'Satoshi', sans-serif; font-size: 15px;
       font-weight: 700; color: var(--green); margin: 0;
     }
     .flip-back p { font-size: 13px; color: var(--muted); line-height: 1.6; margin: 0; }
@@ -343,7 +348,7 @@
       text-transform: uppercase; color: var(--green); margin-bottom: 6px; opacity: 0.7;
     }
     .step-body-wrap h3 {
-      font-family: 'Syne', sans-serif; font-size: 19px;
+      font-family: 'Satoshi', sans-serif; font-size: 19px;
       font-weight: 700; margin-bottom: 8px; color: var(--text);
     }
     .step-body-wrap p { font-size: 15px; color: var(--muted); line-height: 1.65; max-width: 580px; }
@@ -405,7 +410,7 @@
     }
     /* Fields animate in cascade */
     .modal h2 {
-      font-family: 'Syne', sans-serif; font-size: 26px;
+      font-family: 'Satoshi', sans-serif; font-size: 26px;
       margin-bottom: 6px;
       animation: field-in 0.5s 0.1s ease both;
     }
@@ -459,7 +464,7 @@
       max-width: var(--max); margin: 0 auto;
       gap: 16px; flex-wrap: wrap; position: relative; z-index: 1;
     }
-    .footer-brand { font-family: 'Syne', sans-serif; font-weight: 700; font-size: 16px; }
+    .footer-brand { font-family: 'Satoshi', sans-serif; font-weight: 700; font-size: 16px; }
     footer a { color: var(--muted); text-decoration: none; font-size: 13px; transition: color .2s; }
     footer a:hover { color: var(--text); }
     footer p { color: var(--muted); font-size: 13px; }
