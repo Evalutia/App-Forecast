@@ -76,8 +76,22 @@ else:
 placeholders = ",".join(["%s"]*len(insert_cols))
 sql = f"INSERT INTO ventas_historicas_stage({','.join(insert_cols)}) VALUES({placeholders})"
 
+# Stock real por fecha (viene en la misma respuesta de ConsStockVenta) -> stock_diario.
+# Reemplaza la dependencia de ConsStockXml (snapshot sin fecha real) como fuente de
+# dias_con_stock. Ver Issue stock-historico, sesion 2026-06-18.
+deposito_forzado = os.environ.get("__FORCED_DEPOSITO") or None
+sql_stock_diario = """
+    INSERT INTO stock_diario (sku, fecha, cantidad, deposito_id, fuente, ts_carga)
+    VALUES (%s, %s, %s, %s, %s, NOW(6))
+    ON DUPLICATE KEY UPDATE
+      cantidad = VALUES(cantidad),
+      fuente   = VALUES(fuente),
+      ts_carga = VALUES(ts_carga)
+"""
+
 rows_ins = 0
 rows_skip = 0
+rows_stock_ins = 0
 with conn.cursor() as cur:
     cur.execute("SET time_zone = '+00:00'")
     for it in payload:
@@ -117,6 +131,14 @@ with conn.cursor() as cur:
         except Exception:
             rows_skip += 1
             continue
+
+        if stock is not None and deposito_forzado:
+            try:
+                cur.execute(sql_stock_diario, (sku, fecha, clamp_nonneg_int(stock), deposito_forzado, fuente))
+                rows_stock_ins += 1
+            except Exception:
+                pass
     conn.commit()
 
 print(f"[INFO] Inserted {rows_ins} rows into ventas_historicas_stage (skipped {rows_skip})")
+print(f"[INFO] Upserted {rows_stock_ins} rows into stock_diario (fuente={('ws_consstockventa' if rows_stock_ins else '-')})")

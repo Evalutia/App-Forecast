@@ -113,7 +113,9 @@ XML
   [[ -s "$TMP_JSON" ]] && cp -f "$TMP_JSON" /tmp/last_ws_json_sales.json 2>/dev/null || true
 
   export TMP_JSON_PATH="$TMP_JSON"
+  export __FORCED_DEPOSITO="${dep}"
   python3 /app/services/etl/run_extract_sales_chunk.py
+  unset __FORCED_DEPOSITO
 
   rm -f "$TMP_REQ" "$TMP_HDR" "$TMP_XML" "$TMP_JSON"
 }
