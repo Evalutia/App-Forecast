@@ -36,6 +36,7 @@
       padding: 0 32px; height: 64px;
       border-bottom: 1px solid var(--border);
       background: rgba(5,14,9,0.85);
+      -webkit-backdrop-filter: blur(20px);
       backdrop-filter: blur(20px);
     }
     .nav-logo {
@@ -88,7 +89,7 @@
     .nav-mobile-menu {
       display: none; position: fixed; top: 64px; left: 0; right: 0; z-index: 99;
       flex-direction: column; padding: 8px 20px 16px;
-      background: rgba(5,14,9,0.97); backdrop-filter: blur(20px);
+      background: rgba(5,14,9,0.97); -webkit-backdrop-filter: blur(20px); backdrop-filter: blur(20px);
       border-bottom: 1px solid var(--border);
     }
     .nav-mobile-menu.open { display: flex; }
@@ -133,7 +134,7 @@
       -webkit-mask-image: radial-gradient(ellipse 80% 60% at 50% 0%, black 0%, transparent 100%);
       z-index: 0;
     }
-    .hero-content { position: relative; z-index: 1; max-width: 780px; }
+    .hero-content { position: relative; z-index: 1; max-width: 780px; width: 100%; }
     .hero-badge {
       display: inline-flex; align-items: center; gap: 8px;
       padding: 6px 14px; border-radius: 999px;
@@ -150,6 +151,7 @@
       font-family: 'Syne', sans-serif;
       font-size: clamp(40px, 7vw, 76px); font-weight: 800;
       line-height: 1.05; letter-spacing: -0.03em; color: var(--text); margin-bottom: 24px;
+      overflow-wrap: break-word;
     }
     h1 em { font-style: normal; color: var(--green); }
     .hero-sub {
@@ -182,7 +184,7 @@
     .stats {
       border-top: 1px solid var(--border); border-bottom: 1px solid var(--border);
       padding: 48px 24px; position: relative; z-index: 1;
-      background: rgba(5,14,9,0.82); backdrop-filter: blur(2px);
+      background: rgba(5,14,9,0.82); -webkit-backdrop-filter: blur(2px); backdrop-filter: blur(2px);
     }
     .stats-inner {
       max-width: var(--max); margin: 0 auto;
@@ -209,6 +211,7 @@
       font-family: 'Syne', sans-serif;
       font-size: clamp(28px, 4vw, 42px); font-weight: 800;
       letter-spacing: -0.02em; line-height: 1.1; margin-bottom: 16px;
+      overflow-wrap: break-word;
     }
     .section-lead { font-size: 17px; color: var(--muted); max-width: 500px; line-height: 1.65; }
 
