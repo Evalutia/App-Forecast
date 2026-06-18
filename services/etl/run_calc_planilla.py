@@ -51,10 +51,13 @@ def db_connect() -> pymysql.Connection:
 
 # ── Helpers de fecha ───────────────────────────────────────────────────────────
 
-def ventana_meses(n: int) -> list[tuple[int, int]]:
+def ventana_meses(n: int, hoy: dt.date | None = None) -> list[tuple[int, int]]:
     """Retorna lista de (year, month) de los últimos n meses inclusive el actual.
-    Orden: más reciente primero."""
-    hoy = dt.date.today()
+    Orden: más reciente primero.
+
+    `hoy` es inyectable para poder testear cualquier día del mes sin esperar
+    a que llegue; en producción se usa la fecha real (default)."""
+    hoy = hoy or dt.date.today()
     y, m = hoy.year, hoy.month
     resultado = []
     for _ in range(n):
@@ -80,6 +83,21 @@ def clasificar_estado(dias_stock: int, dias_naturales: int) -> str:
     if dias_stock / dias_naturales >= ESTADO_UMBRAL_NORMAL:
         return "normal"
     return "quiebre_parcial"
+
+
+def clasificar_estado_mes(dias_stock: int, dias_naturales: int, es_mes_referencia: bool) -> str:
+    """
+    Clasifica estado_mes, exceptuando el mes de referencia (en curso) del umbral
+    del 90%: dias_naturales_mes ahí siempre es el total del mes calendario, no
+    los días que de verdad transcurrieron, así que el umbral da falso positivo
+    de quiebre casi todo el mes sin importar si el stock estuvo perfecto.
+
+    dias_stock == 0 sí es una señal confiable a mitad de mes (cuenta días reales
+    ya observados en stock_diario), por eso sin_stock se preserva.
+    """
+    if es_mes_referencia:
+        return "normal" if dias_stock > 0 else "sin_stock"
+    return clasificar_estado(dias_stock, dias_naturales)
 
 # ── jobs_historial ─────────────────────────────────────────────────────────────
 
@@ -123,10 +141,12 @@ def cargar_factores(conn: pymysql.Connection) -> dict[str, dict[int, float | Non
     }
 
 
-def calcular_filas(conn: pymysql.Connection) -> tuple[list[dict], int]:
+def calcular_filas(conn: pymysql.Connection) -> tuple[list[dict], int, int, int]:
     """
-    Retorna (filas_para_insert, skus_omitidos).
+    Retorna (filas_para_insert, skus_omitidos, mes_referencia_normal, mes_referencia_sin_stock).
     skus_omitidos: SKUs que tienen ventas pero no existe en articulos (FK violation evitada).
+    mes_referencia_normal/sin_stock: conteo de filas del mes de referencia en cada rama
+    del override de clasificar_estado_mes (observabilidad en jobs_historial).
     """
     factors = cargar_factores(conn)
     meses = ventana_meses(VENTANA_MESES)
@@ -234,7 +254,7 @@ def calcular_filas(conn: pymysql.Connection) -> tuple[list[dict], int]:
             "rotacion_diaria_real":              rot_real,
             "rotacion_diaria_bruta":             rot_bruta,
             "rotacion_diaria_desestacionalizada": rot_desest,
-            "estado_mes":                        clasificar_estado(ds, dn),
+            "estado_mes":                        clasificar_estado_mes(ds, dn, (yr, mo) == ultimo_mes),
             "frecuencia_nivel":                  None,  # se rellena en paso 2
             "rotacion_ajustada":                 None,  # se rellena en paso 2
         })
@@ -287,7 +307,13 @@ def calcular_filas(conn: pymysql.Connection) -> tuple[list[dict], int]:
     skus_procesados = len({f["sku"] for f in filas})
     dist = {lvl: sum(1 for f in filas if f["frecuencia_nivel"] == lvl and f["month"] == meses[0][1] and f["year"] == meses[0][0]) for lvl in ("alta","media","baja")}
     print(f"[PLANILLA] {skus_procesados} SKUs · {len(filas)} filas · frecuencia: alta={dist['alta']} media={dist['media']} baja={dist['baja']}")
-    return filas, skus_omitidos
+
+    filas_mes_ref = [f for f in filas if (f["year"], f["month"]) == ultimo_mes]
+    mes_referencia_normal    = sum(1 for f in filas_mes_ref if f["estado_mes"] == "normal")
+    mes_referencia_sin_stock = sum(1 for f in filas_mes_ref if f["estado_mes"] == "sin_stock")
+    print(f"[PLANILLA] Mes de referencia {ultimo_mes}: normal={mes_referencia_normal} sin_stock={mes_referencia_sin_stock}")
+
+    return filas, skus_omitidos, mes_referencia_normal, mes_referencia_sin_stock
 
 # ── Escritura atómica ──────────────────────────────────────────────────────────
 
@@ -327,18 +353,20 @@ def main() -> None:
     print(f"[PLANILLA] Job id={job_id} iniciado")
 
     try:
-        filas, skus_omitidos = calcular_filas(conn)
+        filas, skus_omitidos, mes_ref_normal, mes_ref_sin_stock = calcular_filas(conn)
         escribir_planilla(conn, filas)
 
         duracion = round(time.time() - t0, 2)
         detalle = {
-            "subtipo":           "calc_planilla",
-            "skus_procesados":   len({f["sku"] for f in filas}),
-            "meses_calculados":  VENTANA_MESES,
-            "filas_insertadas":  len(filas),
-            "skus_omitidos":     skus_omitidos,
-            "duracion_seg":      duracion,
-            "umbral_normal_pct": int(ESTADO_UMBRAL_NORMAL * 100),
+            "subtipo":                  "calc_planilla",
+            "skus_procesados":          len({f["sku"] for f in filas}),
+            "meses_calculados":         VENTANA_MESES,
+            "filas_insertadas":         len(filas),
+            "skus_omitidos":            skus_omitidos,
+            "duracion_seg":             duracion,
+            "umbral_normal_pct":        int(ESTADO_UMBRAL_NORMAL * 100),
+            "mes_referencia_normal":    mes_ref_normal,
+            "mes_referencia_sin_stock": mes_ref_sin_stock,
         }
         job_end(conn, job_id, "exitoso", detalle)
         print(f"[PLANILLA] Completado OK en {duracion}s")

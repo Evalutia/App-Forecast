@@ -72,6 +72,22 @@ def job_end(conn: pymysql.Connection, job_id: int, estado: str, detalle: dict) -
         )
     conn.commit()
 
+# ── Mes de referencia ──────────────────────────────────────────────────────────
+
+def cargar_mes_referencia(conn: pymysql.Connection) -> tuple[int, int] | None:
+    """
+    Mes de referencia = el más reciente en planilla_ventas_calculada (no dt.date.today(),
+    para no desincronizarse de run_calc_planilla.py si el job corre a caballo de medianoche).
+    None si la tabla está vacía (ej. antes de la primera corrida de run_calc_planilla.py).
+    """
+    with conn.cursor() as cur:
+        cur.execute(
+            "SELECT year, month FROM planilla_ventas_calculada "
+            "ORDER BY year DESC, month DESC LIMIT 1"
+        )
+        row = cur.fetchone()
+    return (row[0], row[1]) if row else None
+
 # ── Stock actual ───────────────────────────────────────────────────────────────
 
 def cargar_stock_actual(conn: pymysql.Connection) -> dict[str, float]:
@@ -96,12 +112,21 @@ def cargar_stock_actual(conn: pymysql.Connection) -> dict[str, float]:
 
 # ── Cálculo ────────────────────────────────────────────────────────────────────
 
-def calcular_sugerencias(conn: pymysql.Connection, stock_por_sku: dict[str, float]) -> tuple[list[dict], int, int, int]:
+def calcular_sugerencias(
+    conn: pymysql.Connection,
+    stock_por_sku: dict[str, float],
+    mes_referencia: tuple[int, int] | None,
+) -> tuple[list[dict], int, int, int]:
     """
     Retorna (filas, skus_con_sugerencia, skus_sin_datos, skus_con_quiebre).
 
     skus_sin_datos: SKUs con < MIN_MESES_NORMAL meses normal — se insertan con NULL
     para que el ON DUPLICATE KEY UPDATE limpie valores stale de ciclos anteriores.
+
+    mes_referencia: (year, month) a excluir del cálculo. Desde Issue #34, el mes en
+    curso puede llegar con estado_mes='normal' (antes solo pasaba en meses cerrados),
+    pero su rotacion_diaria_real es parcial — incluirlo sesgaría la sugerencia hacia
+    abajo cada vez que el job corra a mitad de mes.
     """
     sql = """
         SELECT sku, year, month, rotacion_diaria_real
@@ -109,10 +134,15 @@ def calcular_sugerencias(conn: pymysql.Connection, stock_por_sku: dict[str, floa
         WHERE estado_mes = 'normal'
           AND rotacion_diaria_real IS NOT NULL
           AND rotacion_diaria_real > 0
-        ORDER BY sku, year DESC, month DESC
     """
+    params: tuple = ()
+    if mes_referencia is not None:
+        sql += " AND (year, month) != (%s, %s)"
+        params = mes_referencia
+    sql += " ORDER BY sku, year DESC, month DESC"
+
     with conn.cursor() as cur:
-        cur.execute(sql)
+        cur.execute(sql, params)
         rows = cur.fetchall()
 
     # Agrupar por SKU, retener solo los MAX_MESES más recientes (ya vienen DESC)
@@ -210,8 +240,11 @@ def main() -> None:
     print(f"[SUGERENCIAS] Job id={job_id} iniciado")
 
     try:
-        stock_por_sku = cargar_stock_actual(conn)
-        filas, skus_con_sugerencia, skus_sin_datos, skus_con_quiebre = calcular_sugerencias(conn, stock_por_sku)
+        stock_por_sku  = cargar_stock_actual(conn)
+        mes_referencia = cargar_mes_referencia(conn)
+        filas, skus_con_sugerencia, skus_sin_datos, skus_con_quiebre = calcular_sugerencias(
+            conn, stock_por_sku, mes_referencia
+        )
         escribir_sugerencias(conn, filas)
 
         duracion = round(time.time() - t0, 2)
@@ -225,6 +258,7 @@ def main() -> None:
             "duracion_seg":         duracion,
             "min_meses_normal":     MIN_MESES_NORMAL,
             "max_meses":            MAX_MESES,
+            "mes_referencia_excluido": mes_referencia,
         }
         job_end(conn, job_id, "exitoso", detalle)
         print(

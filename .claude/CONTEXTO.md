@@ -619,6 +619,57 @@ PREDICT_PERIODS, PREDICT_MODEL_SET, PREDICT_VERSION, PREDICT_SCHEDULE_HOUR
 
 ---
 
+### `run_calc_planilla.py` + `run_calc_sugerencias.py` — Issues #34, #35 (sesión 2026-06-17)
+
+| Decisión | Definición |
+|----------|-----------|
+| **Causa raíz confirmada** | `clasificar_estado()` (línea 73-82) compara `dias_con_stock` contra `dias_naturales_mes` = total de días del mes calendario completo, incluso para el mes de referencia (en curso). A mitad de mes, `N/30` está casi siempre por debajo del 90% sin importar si el stock estuvo perfecto. Los meses cerrados no tienen el bug — validado contra producción (SKU I01088, jul-2025). |
+| **Diseño elegido: NO agregar 4to valor a `estado_mes`** | `estado_mes` es `ENUM('normal','quiebre_parcial','sin_stock')` en `infra/sql/05-planilla.sql:24`, validado también por un `HashSet` hardcodeado en `PlanillaService.cs:9-10` y por el union type de `planilla.ts:10`. Agregar `'en_curso'` requeriría migración de schema + tocar 3 capas. Se descarta a favor de reusar `'normal'`. |
+| **Regla para el mes de referencia** | En el loop de `calcular_filas()` (línea 216-240), call site único de `clasificar_estado()` (línea 237): si `(yr, mo) == mes_referencia` → `estado_mes = "normal"` si `dias_stock > 0`, sino `"sin_stock"`. Para todos los demás meses (cerrados), sin cambios — sigue llamando `clasificar_estado(ds, dn)` tal cual. |
+| **Por qué se conserva `sin_stock` para el mes en curso** | Verificado: `dias_con_stock` se calcula con `COUNT(DISTINCT fecha)` sobre filas reales de `stock_diario` (líneas 169-190), acotado naturalmente por las fechas que de verdad existen en la tabla (no hay filas futuras). `dias_stock == 0` es un hecho ya consumado a cualquier día del mes, a diferencia del umbral del 90% que sí depende de cuántos días faltan transcurrir. Por eso se distingue: el 90% se bypasea, pero `sin_stock` se preserva. |
+| **Impacto en frontend/export: ninguno** | `estadoMesBg()` (`PlanillaTable.tsx:12-20`) y `mesBgColor()` (`exportPlanilla.ts:18-26`) ya devuelven "sin color" para `'normal'` — no como fallback de un valor desconocido, sino como su rama explícita documentada. Al reusar `'normal'` en vez de inventar `'en_curso'`, cero cambios de código requeridos en frontend/export. |
+| **Segundo consumidor afectado (mismo bug, no documentado en el pedido original)** | `run_calc_sugerencias.py:106-112` filtra `WHERE estado_mes = 'normal'` sin excluir el mes de referencia por `year`/`month`. Hoy funciona "por accidente" porque el mes en curso nunca es `'normal'` (el bug que se arregla). Una vez corregido el bug, este query empezaría a meter la rotación parcial del mes en curso al promedio de sugerencias de reposición — hay que excluirlo explícitamente ahí también. |
+| **Cómo deriva cada script "cuál es el mes de referencia"** | `run_calc_planilla.py` y `run_calc_sugerencias.py` son procesos Python separados (invocados secuencialmente desde `job_etl_diario.kjb` vía wrappers `.sh` independientes, sin estado compartido en memoria). `run_calc_sugerencias.py` deriva el mes de referencia con `SELECT MAX(year), MAX(month) FROM planilla_ventas_calculada` en vez de recalcular con `dt.date.today()` — evita desincronización si el job corre a caballo de medianoche, y es consistente con el principio de anclar a datos reales en vez de la fecha del sistema. |
+| **`ventana_meses()` parametrizable** | Se agrega un parámetro de fecha de referencia inyectable (default `dt.date.today()`) para poder testear cualquier día del mes (ej. día 1, día 17, día 28/30/31) sin esperar a que llegue. Va dentro del mismo issue del fix (#34) porque es lo mínimo necesario para escribir un test automatizado que lo verifique — separarlo dejaría el fix sin test reproducible. |
+| **Backfill histórico: no se necesita** | `escribir_planilla()` (líneas 308-319) hace `DELETE FROM planilla_ventas_calculada` + `INSERT` completo de los 13 meses en una sola transacción cada corrida — no es upsert incremental. La próxima corrida normal del job (cron 3 AM o manual) recalcula todo desde cero con la lógica corregida. No hay estado histórico que sobreviva entre corridas. |
+| **Umbral del 90% (`ESTADO_UMBRAL_NORMAL`)** | Se mantiene sin tocar en este fix. Ya estaba documentado como "arbitrario" en Issue #6 (`CONTEXTO.md` línea 266). La duda de si sigue siendo el correcto se separa en un issue de conversación con el cliente, sin código asociado. |
+| **Caso I01088 jul-2025 (Excel cliente vs. sistema)** | Producción y entorno local coinciden entre sí, pero ambos difieren del Excel del cliente. No es un bug del sistema — se separa en un issue de comunicación con el cliente, sin cambios de código. |
+| **Entorno local desincronizado** | Catálogo local incompleto (104 SKUs vs. cientos en producción) y datos topados en feb-2026. No es causado por este bug ni se corrige como parte de él, pero bloquea poder verificar el fix con datos completos — se separa en issue de infraestructura/sincronización. |
+
+> **Nota:** El fix completo queda contenido a un único call site en `run_calc_planilla.py:237` (dentro del loop de `calcular_filas()`) más la exclusión equivalente en `run_calc_sugerencias.py`. Ningún archivo de frontend (`PlanillaTable.tsx`, `exportPlanilla.ts`) requiere cambios para este bug — confirmado, no asumido.
+
+> **Gap detectado y cerrado:** la única validación contra producción hecha (SKU I01088, jul-2025) confirmó un caso **sin quiebre** — valida la clasificación `'normal'`, pero no prueba que un mes cerrado con `quiebre_parcial` real se pinte con el color correcto según `frecuenciaNivel`. Se agregó como criterio de aceptación a Issue #38: identificar al menos un SKU con `quiebre_parcial` real en un mes cerrado (post-sync) y confirmar visualmente el color correcto, antes de considerar el fix verificado end-to-end.
+
+### `run_calc_planilla.py` — Implementación Issue #34 (sesión 2026-06-17)
+
+| Decisión | Definición |
+|----------|-----------|
+| **Testing framework** | `pytest`, pero **solo como dependencia de desarrollo local** — no se agrega a `services/python-worker/requirements.txt` (el que instala el `Dockerfile` de `etl`) ni se corre en producción. Primer test real del repo; sienta el patrón para futuros scripts del ETL. |
+| **Alcance del test** | Solo funciones puras en aislamiento: `ventana_meses(n, hoy=...)` y `clasificar_estado_mes(...)`. Sin mockear `pymysql` ni la conexión a MySQL — `calcular_filas()` no cambia de firma. |
+| **`ventana_meses()`** | Gana parámetro opcional `hoy: dt.date \| None = None` (default `dt.date.today()` si no se pasa). Resto de la función sin cambios. |
+| **Nueva función `clasificar_estado_mes()`** | Separada de `clasificar_estado()` (que queda intacta, sigue siendo "puro umbral"). Orquesta la excepción del mes de referencia: `"normal"` si `dias_stock > 0`, `"sin_stock"` si `dias_stock == 0`; para cualquier otro mes delega en `clasificar_estado()`. |
+| **Call site del fix** | `calcular_filas()` línea 237: cambia `clasificar_estado(ds, dn)` por `clasificar_estado_mes(ds, dn, (yr, mo) == ultimo_mes)`, reusando la variable `ultimo_mes` ya existente (línea 137, = `meses[0]` = mes de referencia). |
+| **Observabilidad** | `job_end()` detalle (jobs_historial) gana dos campos nuevos: `mes_referencia_normal` y `mes_referencia_sin_stock` — conteo de SKUs que cayeron en cada rama del override, para poder confirmar en producción que el fix se aplicó sin tener que consultar la tabla directamente. |
+| **Ubicación de tests** | `services/etl/tests/test_run_calc_planilla.py` + `services/etl/tests/conftest.py` (3 líneas, agrega `services/etl/` a `sys.path` ya que `run_calc_planilla.py` es un script suelto, no un paquete). Sigue la convención de carpeta `tests/` ya esbozada (pero nunca usada) en `services/python-worker/tests/`. Deja lugar para los tests de #35 (`run_calc_sugerencias.py`) después. |
+| **`run_calc_sugerencias.py` (Issue #35)** | No se toca en esta sesión — queda para su propio issue, con su propia exclusión del mes de referencia vía `SELECT MAX(year), MAX(month)` (ya decidido en la sesión anterior). |
+
+> **Nota:** Ningún cambio de este issue toca `services/python-worker/requirements.txt`, el `Dockerfile` de `etl`, ni el `docker-compose.yml`. El test se corre localmente con `pip install pytest` + `pytest services/etl/tests/` desde el host, sin necesidad de Docker ni variables de entorno de MySQL (las funciones testeadas son puras, sin I/O).
+
+### `run_calc_sugerencias.py` — Implementación Issue #35 (sesión 2026-06-17)
+
+| Decisión | Definición |
+|----------|-----------|
+| **Implementado junto con #34** | Detectado un riesgo de ventana de deploy: `job_etl_diario.kjb` corre `CALC_PLANILLA` → `CALC_SUGERENCIAS` en la misma corrida nocturna. Si #34 se desplegaba solo, la primera noche ya contaminaba `rotacion_sugerida` con el mes en curso. Se implementó #35 en el mismo commit para no abrir esa ventana. |
+| **Corrección sobre el diseño original** | La sesión anterior había propuesto `SELECT MAX(year), MAX(month)` para derivar el mes de referencia. Es **incorrecto**: si hubiera filas de dos años con distinto mes más alto, combina year y month de filas distintas. Se implementó con `SELECT year, month FROM planilla_ventas_calculada ORDER BY year DESC, month DESC LIMIT 1` — la combinación real más reciente. Con la ventana contigua de 13 meses no se manifestaría hoy, pero es la forma correcta. |
+| **Nueva función `cargar_mes_referencia()`** | Devuelve `tuple[int,int] \| None` — `None` si la tabla está vacía (ej. antes de la primera corrida de `run_calc_planilla.py`), caso en el que `calcular_sugerencias()` no aplica ninguna exclusión. |
+| **`calcular_sugerencias()`** | Gana parámetro `mes_referencia: tuple[int,int] \| None`. La query agrega `AND (year, month) != (%s, %s)` solo si `mes_referencia` no es `None`. |
+| **Observabilidad** | `jobs_historial.detalle` gana `mes_referencia_excluido` (la tupla o `null`). |
+| **Sin tests pytest para este issue** | A diferencia de #34, el cambio es casi enteramente construcción de query SQL — no hay lógica pura nueva que valga la pena aislar sin mockear `pymysql` (decisión ya tomada de no mockear DB en esta ronda). Se verifica con el checklist de integración/SQL manual, no con test unitario. |
+
+> **Nota:** Único caller de `calcular_sugerencias()` es `main()`, ya actualizado. Sin otros consumidores en el repo.
+
+---
+
 ## Issues conocidos / TODOs en código
 
 | Issue | Ubicación | Descripción |
