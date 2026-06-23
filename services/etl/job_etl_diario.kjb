@@ -8,9 +8,11 @@
     <parameter><name>DATE_FMT</name><default_value>dmy</default_value></parameter>
     <parameter><name>ID_EMPRESA</name><default_value>1</default_value></parameter>
     <parameter><name>S_DEPOSITOS</name><default_value>1,5</default_value></parameter>
-    <parameter><name>GROUPS</name><default_value>201</default_value></parameter>
-    <!-- Añadimos GRUPOS para compatibilidad con scripts que esperan la variable en español -->
-    <parameter><name>GRUPOS</name><default_value>${GROUPS}</default_value></parameter>
+    <!-- Vacios por default (Issue #42): run_extract_articulos.sh/run_extract_sales_chunk.sh
+         consultan la tabla `grupos` via get_grupos.py cuando no viene override.
+         Setear GROUPS/GRUPOS explicitos al invocar kitchen.sh fuerza un grupo puntual. -->
+    <parameter><name>GROUPS</name><default_value></default_value></parameter>
+    <parameter><name>GRUPOS</name><default_value></default_value></parameter>
     <parameter><name>CANTREG</name><default_value>20000</default_value></parameter>
 
     <parameter><name>MYSQL_HOST</name><default_value>${MYSQL_HOST}</default_value></parameter>

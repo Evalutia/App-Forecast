@@ -78,6 +78,15 @@ def get_factor_estacional(it: dict):
 def get_factores_mensuales(it: dict) -> list:
     return [_parse_factor(it.get(f"Mes{i:02d}")) for i in range(1, 13)]
 
+def get_grupo_id() -> int:
+    # El SOAP no confirma que devuelva el grupo por articulo (Issue #41) -- se
+    # taggea con el grupo pedido en el request de este batch (Issue #42), no con
+    # un campo de la respuesta.
+    raw = os.environ.get("__FORCED_GRUPO")
+    if not raw:
+        raise RuntimeError("__FORCED_GRUPO no seteado -- requerido para taggear grupo_id")
+    return int(raw)
+
 def normalize_sku_from_item(it: dict):
     raw = (
         it.get("IdArticulo")
@@ -238,6 +247,8 @@ def load_payload_raw():
     return ""
 
 def main():
+    grupo_id = get_grupo_id()
+
     payload_raw = load_payload_raw()
     if not payload_raw:
         print("[WARN] payload vacío. No hay artículos a procesar. Salida OK.")
@@ -298,13 +309,15 @@ def main():
     INSERT INTO articulos
       (sku, descripcion, familia_id, familia_nombre, genero_id, genero_descripcion,
        seccion_id, seccion_nombre, marca_id, marca_nombre, temporada_id, temporada_nombre,
+       grupo_id,
        fec_alta, fec_modif, comentario, fact_desc_min, fact_desc_max, desc_valida,
        stock_minimo, barcode, factor_estacional,
        factor_mes_01, factor_mes_02, factor_mes_03, factor_mes_04,
        factor_mes_05, factor_mes_06, factor_mes_07, factor_mes_08,
        factor_mes_09, factor_mes_10, factor_mes_11, factor_mes_12,
        estado, fuente, ts_carga)
-    VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,
+    VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,
+            %s,%s,%s,%s,%s,%s,%s,%s,%s,
             %s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,
             %s,%s,NOW(6))
     ON DUPLICATE KEY UPDATE
@@ -319,6 +332,7 @@ def main():
       marca_nombre = VALUES(marca_nombre),
       temporada_id = VALUES(temporada_id),
       temporada_nombre = VALUES(temporada_nombre),
+      grupo_id = VALUES(grupo_id),
       fec_alta = VALUES(fec_alta),
       fec_modif = VALUES(fec_modif),
       comentario = VALUES(comentario),
@@ -379,6 +393,7 @@ def main():
                             normalized["marca_nombre"],
                             normalized["temporada_id"],
                             normalized["temporada_nombre"],
+                            grupo_id,
                             normalized["fec_alta"],
                             normalized["fec_modif"],
                             normalized["comentario"],

@@ -16,9 +16,11 @@ ID_EMPRESA="${ID_EMPRESA:-}"
 ID_GRUPO="${ID_GRUPO:-}"
 S_DEPOSITOS="${S_DEPOSITOS:-}"
 
-GROUPS="${GROUPS:-${ID_GRUPO:-}}"
-if [ -z "${GROUPS}" ]; then
-  GROUPS="201"
+# Si vino ID_GRUPO explicito (compatibilidad), se empuja a GROUPS para que
+# get_grupos.py lo tome como override puntual (Issue #42) en vez de consultar
+# la tabla grupos.
+if [[ -n "${ID_GRUPO}" && -z "${GROUPS:-}" && -z "${GRUPOS:-}" ]]; then
+  export GROUPS="${ID_GRUPO}"
 fi
 
 # Derivar CHUNK_START / CHUNK_END si no están provistos
@@ -42,15 +44,18 @@ fi
 BASE="$(printf '%s' "${WS_URL}" | sed -E 's,/+$,,')"
 ENDPOINT="${BASE}/VsWebProduccion/SwNadWeb.asmx"
 
-# ── Una llamada SOAP por depósito + ingest Python ────────────────────────────
-# El WS no acepta lista de depósitos — se itera igual que run_extract_stockxml.sh
-call_for_deposito() {
-  local dep="$1"
+# ── Una llamada SOAP por grupo + depósito + ingest Python ───────────────────
+# El WS no acepta lista de depósitos — se itera igual que run_extract_stockxml.sh.
+# Tampoco se manda una lista combinada de grupos: una llamada por grupo es la
+# unica forma de saber a que grupo pertenece cada fila devuelta (Issue #42).
+call_for_grupo_deposito() {
+  local grupo="$1"
+  local dep="$2"
 
-  local TMP_REQ="/tmp/soap_request_sales.$$.${dep}.xml"
-  local TMP_HDR="/tmp/soap_headers_sales.$$.${dep}.txt"
-  local TMP_XML="/tmp/soap_response_sales.$$.${dep}.xml"
-  local TMP_JSON="/tmp/ws_json_sales.$$.${dep}.json"
+  local TMP_REQ="/tmp/soap_request_sales.$$.${grupo}.${dep}.xml"
+  local TMP_HDR="/tmp/soap_headers_sales.$$.${grupo}.${dep}.txt"
+  local TMP_XML="/tmp/soap_response_sales.$$.${grupo}.${dep}.xml"
+  local TMP_JSON="/tmp/ws_json_sales.$$.${grupo}.${dep}.json"
 
   {
     cat <<XML
@@ -64,11 +69,7 @@ XML
     [[ -n "$ID_EMPRESA" ]] && echo "      <IdEmpresa>${ID_EMPRESA}</IdEmpresa>"
     echo "      <DesdeFec>${CHUNK_START}</DesdeFec>"
     echo "      <HastaFec>${CHUNK_END}</HastaFec>"
-    if [[ "${GROUPS}" =~ ^[0-9]+(,[0-9]+)*$ ]]; then
-      echo "      <IdGrupo>${GROUPS}</IdGrupo>"
-    else
-      [[ -n "$ID_GRUPO" ]] && echo "      <IdGrupo>${ID_GRUPO}</IdGrupo>"
-    fi
+    echo "      <IdGrupo>${grupo}</IdGrupo>"
     [[ -n "$dep" ]] && echo "      <sDepositos>${dep}</sDepositos>"
     cat <<XML
     </${WS_METHOD}>
@@ -91,7 +92,7 @@ XML
   cp -f "$TMP_XML" /tmp/soap_response_sales.xml        2>/dev/null || true
 
   if [[ ! -s "$TMP_XML" ]]; then
-    echo "[ERROR] Respuesta vacía de ConsStockVenta (deposito ${dep})"
+    echo "[ERROR] Respuesta vacía de ConsStockVenta (grupo ${grupo}, deposito ${dep})"
     rm -f "$TMP_REQ" "$TMP_HDR" "$TMP_XML" "$TMP_JSON"
     return 10
   fi
@@ -102,7 +103,7 @@ XML
   [[ -z "$JSON" ]] && JSON="$(perl -0777 -ne 'print $1 if m{<!\[CDATA\[(.*?)\]\]>}is'                      "$TMP_XML" || true)"
 
   if [[ -z "$JSON" ]]; then
-    echo "[WARN] No se detectó JSON en ConsStockVenta (deposito ${dep})"
+    echo "[WARN] No se detectó JSON en ConsStockVenta (grupo ${grupo}, deposito ${dep})"
     echo "[DUMP] Inicio de body (1200 chars):"; head -c 1200 "$TMP_XML"; echo
     rm -f "$TMP_REQ" "$TMP_HDR" "$TMP_XML" "$TMP_JSON"
     return 11
@@ -120,17 +121,32 @@ XML
   rm -f "$TMP_REQ" "$TMP_HDR" "$TMP_XML" "$TMP_JSON"
 }
 
-# ── Main: iterar por depósito si viene lista separada por comas ──────────────
-if [[ "${S_DEPOSITOS}" == *","* ]]; then
-  OLD_IFS="$IFS"
-  IFS=","
-  for dep in ${S_DEPOSITOS}; do
-    dep="$(echo "$dep" | tr -d '[:space:]')"
-    [[ -z "$dep" ]] && continue
-    echo "[INFO] Ejecutando ConsStockVenta para deposito: ${dep}"
-    call_for_deposito "${dep}" || echo "[WARN] Fallo en deposito ${dep}, continuando con el siguiente..."
-  done
-  IFS="$OLD_IFS"
-else
-  call_for_deposito "${S_DEPOSITOS:-}"
+process_grupo() {
+  local grupo="$1"
+  if [[ "${S_DEPOSITOS}" == *","* ]]; then
+    local OLD_IFS="$IFS"
+    IFS=","
+    for dep in ${S_DEPOSITOS}; do
+      dep="$(echo "$dep" | tr -d '[:space:]')"
+      [[ -z "$dep" ]] && continue
+      echo "[INFO] Ejecutando ConsStockVenta para grupo ${grupo}, deposito: ${dep}"
+      call_for_grupo_deposito "${grupo}" "${dep}" || echo "[WARN] Fallo en grupo ${grupo} deposito ${dep}, continuando con el siguiente..."
+    done
+    IFS="$OLD_IFS"
+  else
+    call_for_grupo_deposito "${grupo}" "${S_DEPOSITOS:-}" || echo "[WARN] Fallo en grupo ${grupo}, continuando con el siguiente..."
+  fi
+}
+
+GROUPS_LIST="$(python3 /app/services/etl/get_grupos.py)"
+if [[ -z "${GROUPS_LIST}" ]]; then
+  echo "[ERROR] No se obtuvo lista de grupos (ni override ni tabla grupos)" >&2
+  exit 2
 fi
+
+echo "[INFO] Grupos a procesar: ${GROUPS_LIST}"
+
+for G in ${GROUPS_LIST}; do
+  echo "[INFO] === Grupo ${G} ==="
+  process_grupo "${G}"
+done

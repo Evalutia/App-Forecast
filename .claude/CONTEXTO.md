@@ -731,6 +731,26 @@ PREDICT_PERIODS, PREDICT_MODEL_SET, PREDICT_VERSION, PREDICT_SCHEDULE_HOUR
 
 ---
 
+### ETL ampliado a todos los grupos — Issue #42 (sesión 2026-06-23)
+
+| Decisión | Definición |
+|----------|-----------|
+| **Bug bloqueante encontrado** | `run_extract_articulos.py` no incluye `grupo_id` en su `INSERT INTO articulos`. Como #41 dejó esa columna `NOT NULL` sin `DEFAULT`, el cron de esta misma noche iba a fallar en el primer upsert (`ERROR 1364`, ya reproducido contra la base local). Es el primer fix de #42, independiente del resto del diseño. |
+| **`run_etl_daily.sh` es código muerto** | La cadena real de ejecución nocturna es `ofelia.ini` → `run_ofelia.sh` → `kitchen.sh job_etl_diario.kjb`, que llama **directo** a `run_extract_articulos.sh` / `run_extract_sales_chunk.sh` (sin loop por grupo). `run_etl_daily.sh` (el único script que sí loopea por grupo) no está conectado a nada — se **elimina** como parte de #42 en vez de resucitarlo. |
+| **Dónde vive el loop por grupo** | Dentro de cada script (`run_extract_articulos.sh`, `run_extract_sales_chunk.sh`), mismo patrón que ya usa `run_extract_stockxml.sh` para iterar `S_DEPOSITOS` (`call_for_deposito()` + loop bash). Se agrega `call_for_grupo()` análogo. Necesario porque la estrategia de #41 ("taggear `grupo_id` con el valor pedido en el request") exige una llamada SOAP por grupo — un valor combinado tipo `IdGrupo=5,6,10` no permite saber a qué grupo perteneció cada fila devuelta. |
+| **Fuente de la lista de grupos** | Se consulta `SELECT id FROM grupos` en runtime vía un helper nuevo `get_grupos.py` (pymysql, mismo patrón de conexión que los extractores existentes — el contenedor `etl` no tiene cliente `mysql` instalado). Evita una segunda fuente de verdad desincronizada de la tabla `grupos`. |
+| **Override manual** | `get_grupos.py` respeta `GROUPS`/`GRUPOS` si vienen seteados explícitos en el environment (permite forzar un grupo puntual para debug o reproceso); si no están seteados, consulta la tabla. |
+| **`run_ofelia.sh` y el kjb deben dejar de hardcodear el grupo** | `run_ofelia.sh` pasa hoy `-param:GRUPOS=201 -param:GROUPS=201` en cada corrida — si no se quita, el override siempre gana y la tabla `grupos` nunca se consulta en producción, dejando #42 sin efecto real. Se quita ese hardcode de `run_ofelia.sh` y se vacía el `default_value` de `GROUPS`/`GRUPOS` en `job_etl_diario.kjb`. |
+| **`ConsStockXml` no necesita loop por grupo** | El parámetro `ID_GRUPO` está declarado en `run_extract_stockxml.sh` pero nunca se usa en el armado del request SOAP — confirmado que el WS no filtra por grupo ahí, ya trae stock de todos los artículos del ERP. Coherente con que `stock_diario` no tiene `grupo_id` ni FK a `articulos`. Sin cambios en ese script. |
+| **Catálogo completo para grupos nuevos** | Los ~65 grupos nunca extraídos tienen artículos creados/modificados hace tiempo — una ventana incremental de "últimos 7 días" devolvería 0 filas para ellos, y sus SKUs nunca entrarían a `articulos`, rompiendo la FK de `ventas_historicas` cuando corra el backfill de ventas (#44). Se agrega como prerrequisito técnico de #42 (no es el backfill de ventas de 2 años, que sigue siendo #44). |
+| **Detección de grupo nuevo: automática** | Antes de cada llamada, por grupo: `SELECT COUNT(*) FROM articulos WHERE grupo_id = G`. Si es `0` → `FechaDesde` muy vieja (pull completo). Si ya tiene artículos → ventana incremental normal. Resumible solo, sin paso manual: si la corrida de esta noche falla a mitad, la de la noche siguiente retoma los grupos que sigan en `0`. |
+| **Manejo de fallos por grupo** | Continuar con el resto si un grupo falla (timeout, error del WS) — mismo patrón que el loop por depósito existente. Log por `stdout`/Pentaho, sin escritura nueva a `jobs_historial` (ningún script de extracción escribe ahí hoy; solo `calc_planilla`/`calc_sugerencias`). |
+| **Volumen de llamadas SOAP** | El loop por grupo anidado en el loop por depósito sube las llamadas nocturnas de ventas de ~6 a ~396 (66 grupos × 6 depósitos), más 66 de artículos. Aceptado sin throttling — cron de 3 AM con margen horario, el WS ya soportó corridas de 41 chunks consecutivos sin problema (incidente de #39). Se ajusta con datos reales si aparecen timeouts en producción, no de antemano. |
+
+> **Nota:** Este issue deja el sistema listo para que #43 (worker, filtra modelos econométricos a `grupos.aplica_modelo_econometrico=true`) y #44 (backfill histórico de ventas de 2 años) puedan ejecutarse sin romper la FK de `articulos`. El orden de despliegue sigue siendo: #41 → #42 → #43 (en prod) → #44.
+
+---
+
 ## Issues conocidos / TODOs en código
 
 | Issue | Ubicación | Descripción |
