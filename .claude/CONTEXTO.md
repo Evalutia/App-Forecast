@@ -751,6 +751,27 @@ PREDICT_PERIODS, PREDICT_MODEL_SET, PREDICT_VERSION, PREDICT_SCHEDULE_HOUR
 
 ---
 
+> **Corrección post-mortem (sesión 2026-06-23, antes de #43):** la nota original de "#43 antes de #44" subestimaba el riesgo. `RUN PREDICT.PY` corre **todas las noches sin filtro**, no solo durante el backfill — en cuanto el cron real corra con #42 desplegado (sin el override `GROUPS=201`), la extracción incremental ya va a empezar a meter ventas de los grupos nuevos en `ventas_historicas`, y `predict.py` las va a tomar esa misma noche. El riesgo arranca en el momento en que **#42 corre de verdad en producción**, no en el momento en que se dispare #44. Mientras #43 no esté en prod, mantener `GROUPS=201` explícito en la invocación real del cron de la VM.
+
+---
+
+### `run_predict.sh` + `get_skus_modelo.py` — Issue #43 (sesión 2026-06-23)
+
+| Decisión | Definición |
+|----------|-----------|
+| **Alcance** | 100% en `job_etl_diario.kjb` / scripts nuevos del lado del ETL. `predict.py` **no se toca** — ya soporta `--skus` (`parse_args` línea 49) y `load_series_by_sku_mysql` ya filtra por esa lista (mismo flag que usaba el notebook original). El bug está solo en que el kjb nunca lo pasaba. |
+| **Extracción a wrapper** | El step `RUN PREDICT.PY` (hoy bloque inline en el XML del kjb con 11 argumentos hardcodeados) se reemplaza por una sola línea: `/app/services/etl/run_predict.sh`. Mismo patrón que `run_calc_planilla.sh`/`run_calc_sugerencias.sh` — necesario para poder testear la lógica nueva (construir la lista, manejar el caso vacío) de forma aislada con `docker exec`, como ya se hizo con `run_extract_articulos.sh` en #42. |
+| **Helper de la query** | Nuevo `get_skus_modelo.py` (pymysql, mismo patrón que `get_grupos.py` de #42 — el contenedor `etl` ya tiene pymysql y de hecho ya tiene **todas** las dependencias de `predict.py` instaladas, porque hoy ya se invoca dentro del contenedor `etl`, no en `python-worker`). Query: `SELECT a.sku FROM articulos a JOIN grupos g ON g.id = a.grupo_id WHERE g.aplica_modelo_econometrico = TRUE`. Imprime SKUs separados por coma (formato que espera `--skus`, a diferencia del espacio que usa `get_grupos.py` para el loop bash). |
+| **Override manual** | `get_skus_modelo.py` respeta `SKUS` si viene seteado en el environment (debug/reproceso puntual sin esperar la query real), igual que `GROUPS`/`GRUPOS` en `get_grupos.py`. Si no, corre la query. |
+| **Lista vacía = abortar, no procesar todo** | `args.skus` es un string vacío `""` es *falsy* en Python — `only_skus = [...] if args.skus else None`, así que `--skus=""` equivale a no pasar nada, reintroduciendo silenciosamente el bug que #43 viene a cerrar. Si `get_skus_modelo.py` devuelve lista vacía, `run_predict.sh` aborta el step con `[ERROR]` visible en el log y **no invoca `predict.py`** esa noche. Preferible "no corrió nada" (se nota) a "corrió sobre todo el catálogo sin que nadie se entere". |
+| **Lectura completa de `ventas_historicas` sin `WHERE`** | Hallazgo durante la sesión: `load_series_by_sku_mysql` (`ioworker/data.py:99-108`) hace `SELECT fecha, sku, SUM(cantidad) FROM ventas_historicas GROUP BY fecha, sku` sin filtro SQL, y recién filtra por `only_skus` **en memoria** con pandas. `--skus` evita entrenar modelos sobre SKUs de otros grupos (lo que pide el issue), pero no evita la lectura completa de la tabla. **No se toca en #43** — sin datos de cuánto pesa hoy (104 artículos), optimizar antes de medir es prematuro. Nota de seguimiento: revisar si el tiempo del job nocturno crece de forma notoria después del backfill de #44 (tabla mucho más grande). |
+| **Verificación de no-regresión** | Hoy solo el grupo 201 tiene `aplica_modelo_econometrico=true` y es el único con artículos cargados (104). La lista que devuelva `get_skus_modelo.py` debe ser exactamente esos 104 SKUs — el comportamiento de `predict.py` no debería cambiar nada hoy, recién diverge cuando #42 traiga artículos de otros grupos. |
+| **Observabilidad** | Sin trabajo adicional: `predict.py` ya registra `skus_procesados` en `jobs_historial.detalle` (línea ~470) independientemente de cómo se armó la lista — al pasar `--skus`, ese número va a reflejar el conteo restringido automáticamente. |
+
+> **Nota:** Tras este issue, recién ahí queda seguro habilitar el cron real de la VM sin el override `GROUPS=201` (ver corrección de la nota de #42 arriba). Orden de despliegue: #41 → #42 (con `GROUPS=201` forzado en la VM) → #43 en prod y verificado → recién entonces sacar el override de #42 → #44.
+
+---
+
 ## Issues conocidos / TODOs en código
 
 | Issue | Ubicación | Descripción |
