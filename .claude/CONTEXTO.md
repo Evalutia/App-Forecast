@@ -716,6 +716,21 @@ PREDICT_PERIODS, PREDICT_MODEL_SET, PREDICT_VERSION, PREDICT_SCHEDULE_HOUR
 
 ---
 
+### `10-grupos.sql` — Issue #41 (sesión 2026-06-23)
+
+| Decisión | Definición |
+|----------|-----------|
+| **Seed real** | PDF del cliente adjuntado en la sesión (no estaba en el repo) — 66 grupos (códigos 5 a 92, más 199, 200, 201), texto preservado tal cual el PDF (sin normalizar mayúsculas/acentos), igual que el resto de columnas denormalizadas del esquema (`marca_nombre`, `genero_descripcion`, etc.). |
+| **`articulos.grupo_id` con FK real** | A diferencia de `familia_id`/`genero_id`/`marca_id`/`seccion_id`/`temporada_id` (enteros sueltos sin `FOREIGN KEY` ni navegación EF Core, confirmado en `Articulo.cs`/`EvalutiaDbContext.cs`), `grupos` es el primer catálogo real del proyecto con FK (`fk_articulos_grupo`, `ON UPDATE CASCADE ON DELETE RESTRICT`, mismo patrón que `fk_ventas_articulo`). Justificación: `grupo_id` controla lógica de negocio crítica (`aplica_modelo_econometrico`) — un código huérfano no debe pasar desapercibido. |
+| **Backfill de artículos existentes** | Incluido en el mismo script. `ADD COLUMN grupo_id INT UNSIGNED NOT NULL DEFAULT 201` aplica automáticamente 201 a los 104 artículos ya cargados (hoy el 100% son del único grupo procesado por el ETL hasta ahora). |
+| **`DEFAULT 201` transitorio** | Tras el backfill, `ALTER TABLE articulos ALTER COLUMN grupo_id DROP DEFAULT` — verificado: un `INSERT` sin `grupo_id` falla (`ERROR 1364`). Evita que un bug futuro etiquete silenciosamente un artículo de otro grupo como 201. |
+| **Mapeo EF Core** | Explícitamente **fuera de alcance** de este issue — solo el script SQL. `Grupo.cs`, `DbSet<Grupo>` y la propiedad `GrupoId` en `Articulo.cs` quedan para el primer issue que consuma la relación desde el backend (probablemente #45). |
+| **Verificación** | Script aplicado y probado contra la base local: seed (66 filas), backfill (104/104 artículos en `grupo_id=201`), rechazo de FK inválida (`ERROR 1452`) y rechazo de insert sin `grupo_id` tras el `DROP DEFAULT`. |
+
+> **Nota:** El archivo sigue el patrón de scripts de una sola ejecución (`07-articulos-factor-estacional-estado.sql`, `09-articulos-factores-mensuales.sql`) — se aplica manualmente en prod vía `docker exec evalutia-mysql mysql ...`. No requiere `IF NOT EXISTS` adicional porque `CREATE TABLE IF NOT EXISTS` ya cubre reintentos seguros para la tabla; los `ALTER TABLE` fallarían en una segunda corrida (limitación conocida de MySQL 8, ya documentada en el script 07).
+
+---
+
 ## Issues conocidos / TODOs en código
 
 | Issue | Ubicación | Descripción |
