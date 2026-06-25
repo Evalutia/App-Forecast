@@ -716,6 +716,99 @@ PREDICT_PERIODS, PREDICT_MODEL_SET, PREDICT_VERSION, PREDICT_SCHEDULE_HOUR
 
 ---
 
+### `run_extract_sales_chunk.py/.sh` + backfill en producción — Issue #39 (sesión 2026-06-18)
+
+| Decisión | Definición |
+|----------|-----------|
+| **Causa raíz (distinta de #34-#38)** | `stock_diario` se poblaba exclusivamente vía `ConsStockXml` — un endpoint de **snapshot** (stock actual, sin fecha real por registro) que `run_extract_stockxml.sh` estampa con `CHUNK_END` (la fecha de la ventana del loop) como si fuera la fecha real. `ConsStockVenta` (el endpoint que ya se usa para ventas) **también devuelve un campo `Stock` real por fecha**, pero se descartaba al hacer el merge — solo se copiaban `fecha, sku, cantidad, ts_carga, fuente`. Confirmado empíricamente comparando el Excel exportado de producción (174 celdas grises, 0 quiebre_parcial) contra el `.xlsm` del cliente (colores de quiebre parcial reales para SKUs con ventas). |
+| **Fix: doble escritura en el script de ventas** | `run_extract_sales_chunk.py` agrega un segundo `INSERT ... ON DUPLICATE KEY UPDATE` hacia `stock_diario` usando el campo `Stock` ya presente en la respuesta de `ConsStockVenta`, condicionado a que `__FORCED_DEPOSITO` esté seteado (mismo patrón de loop por depósito que ya usa `run_extract_stockxml.sh`). `run_extract_sales_chunk.sh` exporta `__FORCED_DEPOSITO="${dep}"` antes de invocar el Python, igual que el script de stock. |
+| **`ConsStockXml` no se elimina del job (Opción B, conservadora)** | Se mantiene como fallback en `job_etl_diario.kjb`. Como `RUN EXTRACT STOCKXML` corre **antes** de `RUN EXTRACT VENTAS` en el mismo hop sequence, y ambos upsertean a la misma clave única `(sku, fecha, deposito_id)`, el valor real de `ConsStockVenta` siempre sobreescribe al snapshot de `ConsStockXml` dentro de la misma corrida — sin necesidad de tocar/quitar el step viejo. |
+| **Despliegue a VM — gotchas encontrados** | (1) Branch case-sensitive: `Develop` no `develop` — `git checkout develop` fallaba. (2) Tras `docker compose build etl`, el contenedor corriendo seguía con la imagen vieja (`grep` del código nuevo vacío) — `docker compose images` mostró `No such image` (referencia rota). Fix: `docker compose up -d --force-recreate etl`. |
+| **Backfill histórico — por qué NO con `STEP_DAYS` simple** | `run_extract_stockxml.sh` sí soporta chunking por día vía `STEP_DAYS` (default 1) — sin overridearlo, recorre ~3650 días × 6 depósitos llamando a un endpoint que devuelve siempre la misma respuesta (snapshot), siendo pura pérdida de tiempo para un backfill histórico. `run_extract_sales_chunk.sh`, en cambio, **no tiene ningún chunking interno** — pasarle `FORCE_START=2016/FORCE_END=hoy` directo intentaría traer ~10 años en una sola llamada SOAP por depósito, con riesgo real de timeout/respuesta gigante. La receta documentada en el README (`STEP_DAYS=365`) solo resuelve el primer problema, no el segundo. |
+| **Solución: chunking manual de 90 días por fuera del kjb** | Loop en bash (en el host, fuera de Pentaho) que invoca `run_extract_sales_chunk.sh` standalone (no el kjb completo) en ventanas de 90 días desde `03/10/2016` hasta hoy (~41 chunks). Validado primero con una ventana de prueba de 90 días (Ene-Mar/2020): 9.373 filas/depósito, 54 segundos, sin errores — extrapolado a ~35-40 min para el rango completo. Cada chunk escribe directo a `stock_diario` (vía el fix) y acumula en `ventas_historicas_stage`. |
+| **Merge final manual** | Tras el loop, un único `INSERT ... ON DUPLICATE KEY UPDATE` de `ventas_historicas_stage` → `ventas_historicas` (la misma query que hace el step `MERGE STAGING -> VENTAS` del kjb, ejecutada a mano una sola vez al final en vez de repetirla 41 veces). |
+| **Disparo de predict.py/calc_planilla/calc_sugerencias** | Se corrió el kjb completo una sola vez más, pero con `FORCE_START=FORCE_END=hoy` (ventana de 1 día) — la extracción se repite trivialmente rápido para hoy, y el job sigue su flujo normal hacia predict.py/calc_planilla/calc_sugerencias, que operan sobre **todo** el histórico ya cargado por el loop manual. Evita re-disparar la extracción de 10 años una segunda vez solo para llegar a los steps de cálculo. |
+| **Backup previo (red de seguridad)** | `mysqldump --no-tablespaces` (el flag plano falla con "Access denied... PROCESS privilege" en MySQL 8 sin ese flag) de `stock_diario`, `ventas_historicas`, `planilla_ventas_calculada`, `ventas_mensuales` antes de tocar nada, guardado en `/opt/evalutia/backup_pre_fix_stock_<timestamp>.sql`. |
+| **Gotcha de shell en la VM** | La sesión interactiva de AWS Session Manager corre como `sh`/`dash`, no `bash` — `[[ "$a" < "$b" ]]` con fechas ISO se interpretó como **redirección de archivo** (`<`/`>` siempre son redirección fuera de una `[[ ]]` real de bash), tirando `cannot open 2026-06-18: No such file`. Solución: comparar fechas convertidas a epoch (`date -d ... +%s`) con `[ ]` y `-le`/`-gt`, sin `<`/`>` ni `[[ ]]` — portable a cualquier shell POSIX. |
+| **Validación post-fix** | `SELECT estado_mes, COUNT(*) FROM planilla_ventas_calculada GROUP BY estado_mes` → `normal=948, quiebre_parcial=89, sin_stock=302`. Antes del fix, `quiebre_parcial` era 0 en toda la tabla. Cierra el gap dejado abierto por la sesión de #34-#38 (que solo había validado un caso sin quiebre). |
+
+> **Nota:** Este issue es independiente de #36/#37 (umbral 90%→100%) y de #38 (sync de entorno local) — aquellos asumían que `stock_diario` tenía datos históricos correctos y solo discutían el umbral de clasificación o la sincronización del entorno local; #39 corrige que los datos de base de `stock_diario` mismos eran incorrectos para fechas pasadas, independientemente del umbral usado. Con #39 resuelto en producción, vale la pena revisar si el caso I01088 jul/25 (la discrepancia de datos cliente-vs-sistema documentada en #37) se explica por este bug — ahora que `stock_diario` tiene datos reales por fecha, no snapshot.
+
+---
+
+### Incidente: `ventas_historicas` en cero en producción — Issue #39 ampliado (sesión 2026-06-18/19)
+
+| Decisión | Definición |
+|----------|-----------|
+| **Qué pasó** | Al ejecutar el backfill histórico de #39 en producción, el merge `MERGE STAGING -> VENTAS (con snapshot)` del kjb (preexistente, sin relación con el fix de stock) dejó **toda la tabla `ventas_historicas` en `cantidad=0`** (365.238 filas, suma total 0). Se detectó porque el usuario comparó el export de producción contra el Excel del cliente y vio I01088 con `Vta=0` en los 12 meses, cuando el cliente reporta ventas reales todos los meses. |
+| **Causa raíz** | `ventas_historicas` tiene clave única `(fecha, sku, fuente)` — **sin `deposito_id`**. El merge hace `INSERT...ON DUPLICATE KEY UPDATE cantidad=VALUES(cantidad)` fila por fila desde `ventas_historicas_stage`, que tiene **una fila por depósito** (6 depósitos × cada fecha+sku). Sin `GROUP BY`/`SUM`, cada depósito pisa el valor del anterior — el último depósito procesado en el loop (`S_DEPOSITOS=1,5,8,9,10,11`, el 11 al final) determina el valor final. Confirmado empíricamente: depósito 5 reportó `Venta=1` real para C00184/03-06-2025 mientras depósitos 1,8,9,10,11 reportaron `Venta=0` para el mismo SKU/fecha — el merge sin agregar dejaba 0. |
+| **Por qué nunca se notó antes** | Con el cron incremental nocturno (ventana de ~7 días), el resultado dependía de qué depósito quedara "último" cada noche — a veces coincidía con el depósito de venta real por azar, dejando datos parcialmente correctos (de ahí los valores reales pero posiblemente ya incompletos en el backup). El backfill de #39, al procesar los 10 años con el mismo orden determinístico de depósitos en cada chunk, pisó sistemáticamente el 100% de la tabla con 0. |
+| **Depósitos: confirmado con el usuario** | 1, 8, 9, 10, 11 son depósitos de logística/stock sin venta directa al público (reportan `Venta=0` consistentemente). Depósito 5 es el de venta real. Sumar `cantidad` across todos los depósitos es seguro — sumar ceros no infla nada. |
+| **Fix aplicado** | `MERGE STAGING -> VENTAS (con snapshot)` en `job_etl_diario.kjb` (línea ~129): se agrega `GROUP BY DATE(s.fecha), TRIM(s.sku)` con `SUM(CAST(s.cantidad AS DECIMAL(12,3)))` en vez de seleccionar filas individuales sin agregar. `fuente` usa `MIN(s.fuente)` (todas las filas tienen la misma fuente en la práctica, MIN es solo para colapsar el grupo). Commit `af376b8`. |
+| **Recuperación de datos** | Se restauró `ventas_historicas` desde el backup tomado *antes* del backfill (`mysqldump --no-tablespaces`, ver entrada anterior de #39) extrayendo solo esa tabla con `sed -n '/DROP TABLE.../,/UNLOCK TABLES/p'` del dump completo, para no perder el progreso de `stock_diario` (que no tenía este problema, al usar upsert real con `deposito_id` en su clave). |
+| **Contaminación accidental del staging** | Las pruebas de diagnóstico (llamadas individuales por depósito, tests de ventana de un mes) insertaron filas extra en `ventas_historicas_stage` para fechas ya cubiertas (ene-mar 2020, primera semana y resto de jun/2025) — como el staging no dedupea (INSERT simple, no upsert), el merge con `SUM` las habría contado de más. Se resolvió truncando el staging y re-corriendo el backfill completo limpio, sin pruebas intercaladas. |
+| **Interrupción por el cron nocturno** | El cron de Ofelia (3 AM, `TRUNCATE VENTAS_STAGE` como primer paso del job estándar) borró el staging de una corrida completa del backfill que quedó corriendo durante la noche, antes de poder mergearla manualmente. Lección: cuando se deja un backfill largo corriendo sin supervisión, conviene encadenar el merge en el mismo script (mismo proceso `nohup`) en vez de dejar un paso manual pendiente para "cuando vuelva", ya que el cron puede intervenir en el medio. |
+| **Mecanismo para sobrevivir el cierre de sesión** | La sesión interactiva de AWS Session Manager mata los procesos hijos al desconectarse. Se usó `nohup bash -c '...' > log 2>&1 &` (sin `disown`, que no existe en `sh`/dash pero no es necesario — `nohup` ya alcanza) para que el backfill sobreviva el cierre de la terminal. |
+| **Validación final** | I01088 jul/2025 post-fix: `ventas_cantidad=16, dias_con_stock=29, estado_mes=quiebre_parcial`. Cliente reporta 17 ventas / 29 días con stock — `dias_con_stock` coincide exactamente, `ventas_cantidad` a 1 unidad de diferencia (probable borde de fecha/zona horaria, no sistémico). Antes del fix completo, este mismo mes se calculaba `normal` con 30-31 días de stock. Distribución global sin cambios respecto al fix de stock (`normal=948, quiebre_parcial=89, sin_stock=302`, ya que esa clasificación depende de `stock_diario`, no de `ventas_historicas` — lo que cambió fue que las ventas dejaron de estar en cero). |
+
+> **Nota:** Este merge sin agregación es un bug que pudo haber afectado la calidad de `ventas_historicas` desde que el sistema soporta múltiples depósitos, no algo introducido en esta sesión — el backfill de #39 simplemente lo expuso al 100% en vez de parcialmente. Vale la pena revisar si `ventas_mensuales` u otras tablas derivadas tienen agregaciones similares sin `GROUP BY` por las dudas, aunque no se encontró otro caso en esta sesión.
+
+---
+
+### Cierre de issues — sesión `/grill-me` (2026-06-19)
+
+| Decisión | Definición |
+|----------|-----------|
+| **Issue #37 cerrado** | "[Cliente] Comunicar discrepancia SKU I01088" — la parte técnica se resolvió validando directo contra producción (no se esperó a #38): `dias_con_stock` coincide exacto (29=29), ventas a 1 unidad de diferencia (16 vs 17, aceptado como ruido no sistémico). La conversación real con el cliente queda fuera de GitHub, a cargo del usuario. |
+| **Issue #39 cerrado** | "[QA] Verificar en producción el coloreado de quiebre" — es el issue que esta sesión completa resolvió: diagnóstico, fix de `stock_diario`, fix del merge sin agregación, backfill completo, validación SKU-por-SKU contra el Excel del cliente. |
+| **Issue #40 creado** | Auditoría separada (no se hace en esta sesión) de si otras tablas/merges del ETL tienen el mismo patrón de falta de `GROUP BY` al colapsar datos multi-depósito hacia una tabla sin esa dimensión en su clave única. |
+| **Issue #38 — baja de prioridad, no se cierra** | Ya no bloquea nada (su único bloqueo, #37, está resuelto). Se le quitó la label `blocker`. Sigue siendo útil para development futuro (testear sin tocar producción — justo el tipo de riesgo que se vivió hoy), pero sin urgencia. |
+| **Issue #30 — sin tocar alcance, solo nota** | Se agregó comentario advirtiendo que cualquier RMSE/R² de modelos calculado *antes* de esta sesión no es comparable post-fix, porque el dataset de entrenamiento (`ventas_historicas`) cambió sustancialmente (de mayoría-cero a valores reales agregados). |
+
+> **Nota:** Estado final de issues abiertos del proyecto tras esta sesión: solo #40, #38, #30 — ninguno bloqueante. #37 y #39 resueltos y cerrados con comentario de evidencia (queries SQL, comparación de Excel, logs de job) antes de cerrarse.
+
+---
+
+### `docs/Planilla_Reposicion_Guia_Cliente.docx` — Documentación para cliente (sesión 2026-06-20)
+
+| Decisión | Definición |
+|----------|-----------|
+| **Audiencia** | Dueño de empresa, no técnico, pero con conocimiento de negocio retail (rotación, stock, lead time). Sin jerga estadística sin metáfora de negocio al lado. |
+| **Flujo de revisión** | El documento primero lo revisa el padre del usuario (economista) antes de llegar al cliente. El padre sí entiende cálculos técnicos y quiere ver la lógica completa para poder auditarla. |
+| **Estructura elegida** | Un solo documento (no documento + apéndice separado): cada concepto se explica primero en prosa simple y debajo se muestra la fórmula exacta, en el mismo flujo de lectura. |
+| **Canal de referencia** | El cliente entra por la web app; el Excel exportado se menciona como opción pero no es el foco de las capturas/ejemplos. |
+| **Fórmulas de rotación por frecuencia — confirmado** | Alta usa `ventas/días_con_stock` porque hay suficiente muestra real; baja usa `ventas/días_naturales_mes` para diluir el ruido de pocos días de venta real; media promedia ambas. Confirmado explícitamente con el usuario, no es solo inferencia del código. |
+| **Umbrales de frecuencia (9 / 4–8 / 3 meses)** | Confirmado como **provisorios** — no validados aún con el economista del cliente (Daniel). Documentados como parámetro de negocio ajustable, no como regla fija, para no generar falsa precisión. |
+| **Concepto "día con stock"** | Se incluye una nota breve explicando `stock_total_día > stock_mínimo` — es la base de todo el cálculo de quiebre y el cliente lo necesita para no confundirse con celdas de bajo stock que no cuentan como quiebre. |
+| **Mes en curso** | Se explica proactivamente por qué nunca se pinta de quiebre a mitad de mes (el umbral del 100% se mediría contra el mes calendario completo, no los días ya transcurridos — daría falso positivo). |
+| **Formato de salida** | Word (.docx), generado programáticamente con `python-docx` vía `docs/generar_doc_planilla.py` (no había `pandoc` ni LibreOffice disponibles en el entorno). Output: `docs/Planilla_Reposicion_Guia_Cliente.docx`. |
+
+> **Nota:** El script `docs/generar_doc_planilla.py` regenera el `.docx` desde cero — no editar el `.docx` a mano si se va a volver a correr el script. Las decisiones de contenido (qué explicar, qué omitir, nivel de detalle) están en el script mismo como prosa; este registro es solo el resumen de las decisiones de diseño del documento, no su contenido completo.
+
+---
+
+### Ampliación a todos los grupos de productos — Issues #41-#47 (sesión 2026-06-23)
+
+| Decisión | Definición |
+|----------|-----------|
+| **Terminología género vs grupo** | "Género" (campo ya existente, `genero_descripcion`) y "grupo" (PDF del cliente, ~70 categorías comerciales) son taxonomías distintas del ERP. Las planillas se separan por **grupo**; `genero_descripcion` queda como filtro secundario dentro de cada planilla, sin cambios — ya funciona. |
+| **Catálogo `grupos` (tabla nueva)** | `id` (código del PDF), `descripcion`, `visible_planilla` (bool), `aplica_modelo_econometrico` (bool, `true` solo para 201). Seed único desde el PDF que mandó el cliente. |
+| **Grupos 199 y 200** | Se cargan en la base igual que el resto (sin excepción en el ETL), pero con `visible_planilla = false` — no aparecen como filtro de planilla en la web. Decisión reversible con un `UPDATE`, sin redeploy. |
+| **Cómo se taggea `grupo_id` por artículo** | No se confirmó que el SOAP de artículos devuelva el grupo en la respuesta (no se pudo verificar contra un payload real). En vez de depender de eso: se extrae un grupo a la vez (loop sobre los ~70 códigos del PDF) y se taggea cada inserción con el grupo pedido en el request — mismo patrón que ya usa `GROUPS="75 201"` en `run_etl_daily.sh`. |
+| **Histórico de grupos nuevos** | Ventana fija: backfill único de "hoy − 2 años" hasta hoy, calculada una sola vez. Sin purga, sin rolling. De ahí en adelante el ETL incremental diario los trata igual que al grupo 201 (agrega desde `MAX(fecha)`, nunca borra). |
+| **Modelos econométricos** | Siguen aplicando SOLO a SKUs con `grupos.aplica_modelo_econometrico = true` (hoy solo 201). El step `RUN PREDICT.PY` de `job_etl_diario.kjb:204-215` hoy NO pasa `--skus` ni `--top-n` a `predict.py`, así que toma TODO `ventas_historicas` sin filtro — hay que armar la lista desde `grupos` y pasarla con `--skus=...`. |
+| **Orden de despliegue obligatorio** | El fix del worker (Issue #43) tiene que estar deployado y verificado **antes** de correr el backfill completo (Issue #44) en producción. Si se invierte el orden, el cron de las 3 AM de esa misma noche corre modelos econométricos sobre todos los SKUs nuevos de los 70 grupos. |
+| **Rollout del backfill** | Corrida única, no por fases (decisión explícita del cliente, no recomendación). Salvaguardas acordadas: loop resumible por grupo (si falla a mitad, se puede continuar sin re-extraer lo ya hecho), corrida separada del cron diario de 3 AM, logging de éxito/fallo por grupo en `jobs_historial` (no un solo estado global para los 70 grupos). |
+| **Filtro de planilla por grupo** | Se agrega como filtro nuevo en `PlanillaPage`, mismo patrón que `genero`/`marca` (ya existen y ya están probados en producción). El "~100 productos por planilla" mencionado por el cliente es una expectativa de tamaño, no un límite a forzar en código — no se implementa partición automática de grupos grandes. Si un grupo supera eso, el usuario combina filtros (grupo + género/marca) o pagina. |
+| **Administración de la tabla `grupos`** | Sin endpoint/CRUD. Seed único vía script SQL + `UPDATE` manual a la base cuando haga falta tocar `visible_planilla` o `aplica_modelo_econometrico`. Es un catálogo que cambia muy rara vez (cuando el ERP agrega una categoría nueva). |
+| **Deploy de esquema** | Script SQL nuevo numerado en `infra/sql/` (no hay migraciones EF Core en este repo — todo el esquema se mapea directo a SQL crudo), aplicado manualmente en prod igual que los cambios de esquema anteriores. |
+| **`GET /api/planilla/filtros` (Issue #9) — ampliación dentro de #45** | Hoy devuelve TODOS los valores de género/marca del catálogo, sin acotar por grupo. Con 70 grupos, el dropdown de género pasa de ~22 a varios cientos de valores y permite combinaciones grupo+género que no existen. Se amplía para aceptar `grupoId` opcional y acotar género/marca a lo que existe dentro de ese grupo. No es issue nuevo, es alcance agregado a #45. |
+| **Alcance explícito: solo planilla de reposición** | El cliente confirmó que este pedido es únicamente para la ventana de planilla de reposición. `/resultados` y el `DashboardPage` quedan **fuera de alcance** — van a seguir iterando sobre todos los artículos sin filtro de grupo, mezclando productos con y sin predicción econométrica. Es una decisión consciente, no un olvido; se revisita si el cliente lo pide o se nota como problema en producción. |
+
+> **Nota:** Issue #43 (worker) bloquea el *momento de ejecución* de Issue #44 (backfill en prod), no su desarrollo — ambos se pueden codear en paralelo, pero #43 debe estar mergeado y verificado en prod antes de disparar #44. Numeración de issues continúa desde #41 porque #40 es el último real en GitHub (`gh issue list`), confirmado antes de asumir el próximo número (criterio ya documentado en la nota de la línea ~679 de este archivo).
+
+---
+
 ### `10-grupos.sql` — Issue #41 (sesión 2026-06-23)
 
 | Decisión | Definición |
@@ -749,8 +842,6 @@ PREDICT_PERIODS, PREDICT_MODEL_SET, PREDICT_VERSION, PREDICT_SCHEDULE_HOUR
 
 > **Nota:** Este issue deja el sistema listo para que #43 (worker, filtra modelos econométricos a `grupos.aplica_modelo_econometrico=true`) y #44 (backfill histórico de ventas de 2 años) puedan ejecutarse sin romper la FK de `articulos`. El orden de despliegue sigue siendo: #41 → #42 → #43 (en prod) → #44.
 
----
-
 > **Corrección post-mortem (sesión 2026-06-23, antes de #43):** la nota original de "#43 antes de #44" subestimaba el riesgo. `RUN PREDICT.PY` corre **todas las noches sin filtro**, no solo durante el backfill — en cuanto el cron real corra con #42 desplegado (sin el override `GROUPS=201`), la extracción incremental ya va a empezar a meter ventas de los grupos nuevos en `ventas_historicas`, y `predict.py` las va a tomar esa misma noche. El riesgo arranca en el momento en que **#42 corre de verdad en producción**, no en el momento en que se dispare #44. Mientras #43 no esté en prod, mantener `GROUPS=201` explícito en la invocación real del cron de la VM.
 
 ---
@@ -769,6 +860,41 @@ PREDICT_PERIODS, PREDICT_MODEL_SET, PREDICT_VERSION, PREDICT_SCHEDULE_HOUR
 | **Observabilidad** | Sin trabajo adicional: `predict.py` ya registra `skus_procesados` en `jobs_historial.detalle` (línea ~470) independientemente de cómo se armó la lista — al pasar `--skus`, ese número va a reflejar el conteo restringido automáticamente. |
 
 > **Nota:** Tras este issue, recién ahí queda seguro habilitar el cron real de la VM sin el override `GROUPS=201` (ver corrección de la nota de #42 arriba). Orden de despliegue: #41 → #42 (con `GROUPS=201` forzado en la VM) → #43 en prod y verificado → recién entonces sacar el override de #42 → #44.
+
+---
+
+### Despliegue a producción + verificación cron 3 AM — Issues #41+#42+#43 (sesión 2026-06-23/25)
+
+| Verificación | Resultado |
+|--------------|-----------|
+| **Deploy VM** | `git merge --ff-only origin/Develop` (`c1260c1`), `10-grupos.sql` aplicado (66 grupos), `docker compose build etl` + `up -d --force-recreate etl`. Sin el override `GROUPS=201` quitado de antemano — el cron de esa misma noche ya corrió con el loop completo de #42 + filtro de #43 juntos (no hizo falta la ventana intermedia "solo #42 con override" descrita en la nota de #43, porque ambos llegaron a prod en el mismo deploy). |
+| **Cron 3 AM 2026-06-25** | `job_etl_diario` completo, `failed: false`, 12m11s. Confirmado vía `docker logs evalutia-ofelia` (el output de `job-exec` de Ofelia queda en los logs del propio contenedor `ofelia`, **no** en `docker logs evalutia-etl` — gotcha nuevo para el próximo que verifique un cron). |
+| **Extracción por grupo (#42)** | `grep -c "=== Grupo"` → 132 = 66 grupos × 2 scripts (`run_extract_articulos.sh` + `run_extract_sales_chunk.sh`). Cero líneas `FALLÓ`/`[ERROR]` reales (el único `ERROR` en el log es el `StdErr: Importing plotly failed` de Pentaho, ruido inofensivo ya visto en local). |
+| **Catálogo resultante** | `articulos` pasó de 103 filas (todas `grupo_id=201`) a ~5500+ repartidas en ~60 `grupo_id` reales (5, 6, 10, 15… 92, 199, 200, 201). `grupo_id=201` quedó en 101 filas (vs. 103 antes — diferencia mínima, no investigada, no bloqueante). |
+| **Filtro econométrico (#43)** | `SELECT a.grupo_id, COUNT(DISTINCT p.sku) FROM predicciones p JOIN articulos a ON a.sku=p.sku WHERE p.ts_generacion >= CURDATE() GROUP BY a.grupo_id` → **una sola fila, `grupo_id=201`, 76 SKUs**. Ningún SKU de los grupos nuevos recibió modelo econométrico — confirma que el fix de #43 funciona en producción, no solo en local. |
+| **Columna real de fecha en `predicciones`** | Es `ts_generacion` (`DATE`), no `fecha_calculo` — confundible porque el nombre no sigue el patrón `ts_carga`/`fecha_inicio` del resto del esquema. Anotado para no volver a perder tiempo la próxima verificación. |
+
+> **Nota:** Con esto, #41+#42+#43 quedan verificados de punta a punta en prod (no solo en local). El bloqueo de la nota de #43 para #44 (backfill histórico) está resuelto — #44 puede arrancar cuando se pida.
+
+---
+
+### `run_backfill_ventas.sh` — Issue #44 (sesión 2026-06-25)
+
+| Decisión | Definición |
+|----------|-----------|
+| **Script nuevo, no reusar `run_extract_sales_chunk.sh` tal cual** | `services/etl/run_backfill_ventas.sh`, invocado manualmente (`docker compose exec etl /bin/bash /app/services/etl/run_backfill_ventas.sh`). No se cuelga de `job_etl_diario.kjb` ni de Ofelia — es 100% on-demand. Reusa el parser `run_extract_sales_chunk.py` para el insert, pero la orquestación bash es nueva porque el script actual asume "rango chico, una sola llamada SOAP" (sin chunking interno por fecha), incompatible con 2 años de una sola vez. |
+| **Lista de grupos a procesar** | `SELECT id FROM grupos WHERE aplica_modelo_econometrico = FALSE` — excluye al 201 sin hardcodear el número, sin tocar `get_grupos.py` (que sigue usando el daily real intacto). |
+| **Chunking de fecha** | Ventana de **30 días** por grupo×depósito (valor de partida, no hay precedente probado para rangos tan largos — el único precedente real, `CHUNK_DAYS=7`, era para un solo grupo). **Validar primero con una corrida piloto sobre un solo grupo chico** (`SELECT grupo_id, COUNT(*) FROM articulos GROUP BY grupo_id ORDER BY COUNT(*) ASC`) antes de lanzar los 65 grupos completos, para medir tiempo/payload real del WS con esa ventana y ajustar si hace falta. |
+| **Rango de fechas fijo** | `FORCE_START`/`FORCE_END` ("hoy − 2 años" → "hoy") se calculan **una sola vez al arrancar el script**, no se recalculan por grupo — evita desalineamiento de ventana entre el primer y el último grupo procesado en una corrida de varias horas. `S_DEPOSITOS` reusa el mismo env var existente, sin cambios. |
+| **Merge por grupo, inmediato** | Extract grupo G → `INSERT...ON DUPLICATE KEY UPDATE` solo las filas de ese grupo → `TRUNCATE ventas_historicas_stage` → siguiente grupo. **Corrección post-implementación:** el truncate-por-grupo no es necesario para la *corrección* del dato — se probó empíricamente que `cantidad = VALUES(cantidad)` reemplaza (no suma) y que, como cada SKU tiene un único `grupo_id` (FK), el `GROUP BY sku,fecha` del merge ya aísla los datos de cada grupo aunque el stage acumule varios sin truncar entre medio. La razón real es **performance**: sin el truncate, cada merge de grupo siguiente vuelve a escanear y re-agregar TODO el stage acumulado de los grupos ya procesados (no solo el suyo), haciendo cada iteración más lenta que la anterior a medida que avanza la corrida de los ~65 grupos. Se mantiene el truncate por esa razón, no por riesgo de duplicación. |
+| **Resumibilidad** | Antes de procesar grupo G, chequear `jobs_historial` (`tipo_job='etl'`, `detalle.subtipo='backfill_ventas'`, `detalle.grupo_id=G`, `estado='exitoso'`) — si ya existe, saltear. Si la corrida falla a mitad, la siguiente retoma sin re-extraer los grupos ya completos. |
+| **Manejo de fallos dentro de un grupo** | Igual que el patrón ya existente en el resto del ETL (`process_grupo` en `run_extract_sales_chunk.sh`): si un chunk/depósito falla, loguea `[WARN]` y sigue con el resto — no aborta el grupo. Se marca `fallido` en `jobs_historial` solo si hubo al menos un error, con el detalle de qué chunk/depósito específico falló (no un `fallido` genérico) para que el reintento por grupo completo tenga contexto. |
+| **Exclusión mutua con el cron de las 3 AM** | Lock file (ej. `/app/data/backfill.lock`), creado al arrancar y borrado al terminar/fallar vía `trap`. `run_ofelia.sh` chequea el lock al inicio y aborta esa corrida del daily con mensaje claro en el log si existe, en vez de competir por `ventas_historicas_stage`. El mismo lock también previene dos corridas del propio backfill en simultáneo. |
+| **Sin `predict.py`** | El backfill es estrictamente extracción + merge de ventas históricas. No dispara predicciones — `predict.py` ya filtra a `grupos.aplica_modelo_econometrico=true` (solo 201 hoy), así que correrlo por cada grupo nuevo sería un no-op costoso repetido 65 veces. Predicciones para SKUs de grupos nuevos quedan para otro issue (#47). |
+| **`stock_diario` se backfillea como side-effect, a propósito** | `run_extract_sales_chunk.py` ya escribe `stock_diario` directo (sin stage) con cada respuesta de `ConsStockVenta`. El backfill de ventas automáticamente backfillea también el stock histórico de los grupos nuevos, sin código adicional — deseado: sin esto, `planilla_ventas_calculada` (#6) nacería con 2 años de `dias_con_stock=0` para esos grupos. |
+| **Corrida piloto** | Mismo mecanismo de override que ya respeta `get_grupos.py` (env var `GROUPS`/`GRUPOS`) — sin flag nuevo. Como el script ya filtra por `aplica_modelo_econometrico=false`, si el piloto apuntara por error al 201 simplemente no haría nada. |
+
+> **Nota:** Tras el backfill, `run_calc_planilla.py` (corre cada noche, TRUNCATE+INSERT completo) recalcula `planilla_ventas_calculada` automáticamente con el nuevo histórico en la corrida nocturna siguiente — no requiere disparo manual adicional. Predicciones para los grupos nuevos siguen bloqueadas hasta que se resuelva #47.
 
 ---
 

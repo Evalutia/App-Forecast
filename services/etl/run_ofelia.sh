@@ -1,6 +1,15 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# Issue #44: si hay un backfill historico corriendo (run_backfill_ventas.sh),
+# se saltea esta corrida del daily en vez de competir por ventas_historicas_stage
+# y por conexiones al WS. Se recupera sola la noche siguiente.
+BACKFILL_LOCK_FILE="${BACKFILL_LOCK_FILE:-/app/data/backfill.lock}"
+if [[ -e "${BACKFILL_LOCK_FILE}" ]]; then
+  echo "[OFELIA] Backfill en curso (${BACKFILL_LOCK_FILE}) — se saltea la corrida diaria de esta noche."
+  exit 0
+fi
+
 Y=$(date -d "yesterday" +%d/%m/%Y)
 
 exec /opt/pentaho/data-integration/kitchen.sh \
