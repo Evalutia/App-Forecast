@@ -966,6 +966,21 @@ PREDICT_PERIODS, PREDICT_MODEL_SET, PREDICT_VERSION, PREDICT_SCHEDULE_HOUR
 
 ---
 
+### Selector de grupo en `PlanillaPage` — Issue #46 (sesión 2026-06-26)
+
+| Decisión | Definición |
+|----------|-----------|
+| **Ya implementado por #45** | El alcance literal de #46 (dropdown de grupo, scoping de marca/género al elegir grupo, `exportPlanilla.ts` funcionando con el filtro aplicado) quedó cubierto en el mismo commit `d90e0ec` de #45 — no se agregó código nuevo en esta sesión. |
+| **Referencia a Issue #12 en la descripción original, errónea** | El texto de #46 cita "mismo patrón UX que género/marca (Issue #12)", pero #12 es el coloreado de celdas por `estado_mes` (Q–AC), no tiene relación con dropdowns de filtro. Probable error de tipeo al redactar el issue (se quiso citar #9/#13). No se corrige el issue en GitHub, solo queda anotado acá. |
+| **Coloreado de celdas (#12) para SKUs de grupos nuevos** | Confirmado en código que es génerico, sin gap: `estado_mes` y `frecuencia_nivel` se calculan en `run_calc_planilla.py` (líneas 270-317) por SKU individual, vía `INNER JOIN articulos` sin filtro de `grupo_id` — no dependen del modelo econométrico ni de ningún grupo en particular. El componente `estadoMesBg` (`PlanillaTable.tsx`) tampoco filtra por SKU/grupo. No se necesita código nuevo. |
+| **Verificación pendiente, no bloqueante** | No se pudo verificar visualmente contra una SKU de un grupo nuevo porque localmente solo hay datos del grupo 201 (104 artículos). Se dejó como paso de checklist a correr contra producción, no como condición para cerrar el issue. |
+| **Cierre del issue** | Se cierra #46 referenciando el commit `d90e0ec` de #45, sin esperar el resultado de la verificación en prod. |
+| **Resultado de la verificación en prod (2026-06-26)** | `SELECT a.grupo_id, COUNT(*), SUM(estado_mes IS NULL), SUM(frecuencia_nivel IS NULL) FROM planilla_ventas_calculada p JOIN articulos a ... WHERE grupo_id NOT IN (199,200,201) GROUP BY grupo_id` → **0 nulls en ambas columnas en los 60 grupos nuevos con datos**, cientos de filas por grupo. Confirma que `run_calc_planilla.py` corrió sin excepciones por grupo tras el backfill de #44. Verificación visual en `app.evalutia.net` quedó como confirmatoria/opcional, no ejecutada — la combinación de código genérico (sin filtro de grupo en `estadoMesBg`) + datos sin nulls ya cierra el loop. |
+
+> **Nota:** Acceso a producción es vía AWS Session Manager (sesión interactiva manual) — el asistente no tiene ese acceso, por lo que el paso de verificación en prod quedó con comandos exactos en el checklist para que lo corriera quien tiene acceso a la VM.
+
+---
+
 ## Issues conocidos / TODOs en código
 
 | Issue | Ubicación | Descripción |
