@@ -898,6 +898,55 @@ PREDICT_PERIODS, PREDICT_MODEL_SET, PREDICT_VERSION, PREDICT_SCHEDULE_HOUR
 
 ---
 
+### Ejecución en producción + verificación — Issue #44 (sesión 2026-06-25/26)
+
+| Verificación | Resultado |
+|--------------|-----------|
+| **Piloto previo** | Grupo 44 (1 SKU), 147s, sin errores — confirmó chunking/merge/lock/`jobs_historial` contra el WS real antes de lanzar los 65. |
+| **Corrida completa** | Lanzada sin `GROUPS` override (los 65 grupos vía `grupos WHERE aplica_modelo_econometrico=FALSE`), con `nohup` por la `AWS Session Manager` (mata procesos hijos al desconectar, mismo gotcha que #39). Duración real ≈ 16-17hs — muy por encima de la estimación inicial de 2-4hs basada solo en el piloto (caso más liviano posible, 1 SKU); el tiempo por grupo escala fuerte con el volumen de SKUs/ventas de cada grupo, no con la cantidad de años. Grupos chicos (ej. 44) tardan ~2-3min; grupos grandes (ej. 200, el más pesado) tardaron 13.677s (~3.8hs) solos. |
+| **Resultado primera pasada** | 63/65 `exitoso`, 2 `fallido` (grupos 15 y 24), cada uno con un único chunk/depósito puntual fallido por timeout del WS (`dep=5`, ventanas de fecha distintas) — no sistémico. |
+| **Decisión: no acortar la ventana para acelerar** | Se evaluó achicar a "desde 2025" para los grupos restantes ante la demora, pero se descartó: la ventana de 2 años es decisión explícita del cliente (no parámetro técnico libre), y hubiera generado profundidad histórica inconsistente entre los grupos ya completos (2 años) y el resto (~1.5 años). Se dejó correr completo. |
+| **Segunda pasada (retry)** | `GROUPS=15,24` — reprocesa el grupo completo desde cero (resumibilidad es por grupo, no por chunk, según diseño original). Ambos `exitoso` en el reintento (15: 2719s sin fallas; 24: 786s sin fallas) — confirma que los timeouts eran puntuales/transitorios, no reproducibles. |
+| **Estado final** | 65/65 grupos con al menos un `exitoso` en `jobs_historial` (`COUNT(DISTINCT detalle->>'$.grupo_id')=65`). Los 2 registros `fallido` del primer intento quedan en el historial (no se borran), es esperado. |
+| **Verificación de datos** | `ventas_historicas` total: 4.337.421 filas (incluye los 10 años de grupo 201 + los 2 años nuevos), rango global 2016-10-03 → 2026-06-26. Spot-check en grupos 15/24/200: 732 días distintos cada uno (731 esperados +1 por el desfasaje de un día entre la corrida original y el reintento al día siguiente — inofensivo, el merge es idempotente), rango 2024-06-25 → 2026-06-26, sin huecos. |
+| **`stock_diario`** | Backfillado como side-effect en la misma corrida, sin trabajo adicional — confirmado funcionando ya en el piloto y heredado a la corrida completa. |
+
+> **Nota:** Con esto, #44 queda resuelto en producción de punta a punta. Pendiente: #47 (predicciones para SKUs de grupos nuevos, hoy todavía sin modelo asignado) y la recalculación de `planilla_ventas_calculada` en el próximo cron nocturno (automática, sin disparo manual).
+
+---
+
+### Plan de trabajo — Migración a mTLS en Web Service SOAP (sesión 2026-06-25)
+
+| Issue | Título | Tipo | Depende de |
+|-------|--------|------|------------|
+| #49 | Infra — almacenamiento/montaje de `cotech-prod.p12` + `ca.crt` en host AWS, volumen en `docker-compose.yml` (servicio `etl`) + `.gitignore` | infra | — |
+| #50 | Config — variables de entorno mTLS en `.env` (rutas de cert + password), sin hardcodear el password en `run_ofelia.sh`; limpiar el `WS_URL` placeholder stale en `.env` | config | #49 |
+| #51 | Código — declarar `CERT_PATH`/`CACERT_PATH`/`CERT_PASSWORD` como parámetros en `job_etl_diario.kjb`, pasarlos vía `-param` en `run_ofelia.sh` (incluyendo el switch de `WS_URL` a `https://`), y agregar `--cert/--cert-type/--cacert` en los 4 scripts curl (`run_extract_articulos.sh`, `run_extract_sales_chunk.sh`, `run_extract_stockxml.sh`, `run_backfill_ventas.sh`) | código | #49, #50 |
+| #52 | Validación + corte — corrida manual coordinada con IT (Martín García, MG Soluciones IT) en horario de oficina, confirmar `200 OK`; recién ahí mergear/deployar a prod sin tocar el cron nocturno antes de pasar la prueba | proceso | #51 |
+| #53 | Runbook — acceso de prueba desde terminal (PC/Mac, `cotech-dev.p12`) para el usuario y su socio, fuera del ETL automatizado | documentación | — |
+| #54 | Plan de rollback operativo si el corte rompe el job nocturno | proceso | #52 |
+| #55 (backlog) | Vigencia/rotación del certificado — sin fecha de vencimiento conocida todavía, solo anotado | monitoreo | — |
+
+**Decisiones clave de esta sesión:**
+
+| Decisión | Definición |
+|----------|-----------|
+| **Orden de ejecución** | Este plan arranca **después** de cerrar los issues en curso de la planilla — instrucción explícita del usuario, no se prioriza sobre eso. |
+| **Wiring real de config (hallazgo)** | `WS_URL`/`MYSQL_*` no se leen de `.env` en runtime — llegan a los 4 scripts bash como parámetros declarados en `job_etl_diario.kjb`, inyectados por Pentaho al ejecutar cada entry `SHELL`, pasados explícitamente vía `-param` desde `run_ofelia.sh`. `CERT_PATH`/`CACERT_PATH`/`CERT_PASSWORD` deben seguir el mismo mecanismo de 3 puntos (kjb → run_ofelia.sh → script), no alcanza con solo `.env`. |
+| **Seguridad del password del `.p12`** | `run_ofelia.sh` está trackeado en git y hoy hardcodea valores literales (`MYSQL_PASSWORD=evalutia`, `WS_URL=http://200.125.29.194:81`) directo en el comando. El password del cert **no** sigue ese patrón — va como `-param:CERT_PASSWORD=${CERT_PASSWORD}` expandido desde `.env` (gitignored), para no commitear el secreto real que entregó IT al historial de git. |
+| **Scope Issue 2 — no se mezcla** | No se corrige el hardcodeo preexistente de `MYSQL_PASSWORD`/`WS_URL` en `run_ofelia.sh` como parte de este trabajo — es deuda técnica separada, decisión explícita del usuario para no inflar el diff de este cambio. |
+| **Arquitectura Issue 3 — sin helper compartido** | Los 3 flags nuevos de curl (`--cert`/`--cert-type`/`--cacert`) se duplican en los 4 scripts, siguiendo el patrón de duplicación que ya existe hoy en el repo (no hay `common.sh` entre los scripts ETL). Se descarta crear un helper compartido — decisión explícita del usuario, consistente con no introducir abstracciones nuevas para 3 líneas. |
+| **Issue "corte definitivo" no es código separado** | `ofelia.ini` confirma un solo job/contenedor (`evalutia-etl`), sin staging. El switch `http://` → `https://` **es** el mismo cambio del Issue 3 — no hay nada adicional que "cortar" en código. Se absorbe como gate de timing dentro del Issue 4: no mergear/deployar el cambio hasta que la corrida manual confirme `200 OK`. |
+| **No existe "rollback a HTTP"** | El instructivo de IT confirma que el corte es del lado del servidor: a partir de la fecha de corte, el WS deja de aceptar HTTP sin importar qué hace nuestro script. El rollback real (Issue 6) es operativo, no de protocolo: pausar el cron / correr manual con `FORCE_START` al día siguiente si el mTLS falla — no mantener un fallback a `CURL_INSECURE`/HTTP, porque el servidor lo rechazaría igual. |
+| **`.gitignore` con gap** | No excluye `*.p12`, `*.crt`, `*.pem` ni una carpeta de certs — se agrega en el Issue 1, para evitar commitear los certificados si se dejan en una carpeta del repo para montarlos como volumen. |
+| **IPs de oficina, fuera del alcance del ETL** | IT optó por no fijar en el firewall las IPs dinámicas de la oficina del usuario (`186.50.179.252`) ni de su socio (`179.24.239.134`) — el acceso desde esas máquinas (solo pruebas manuales por terminal, Issue 5) queda cubierto únicamente por `cotech-dev.p12`, sin relación con el ETL en AWS (IP fija `3.150.104.146`, ya habilitada del lado de IT). |
+| **Validación por IP, no por dominio** | El certificado del servidor de IT está emitido para `200.125.29.194` — usar esa IP exacta en la URL, no un nombre de dominio, en los 4 scripts y en cualquier prueba manual. |
+| **Contacto de coordinación** | Martín García, MG Soluciones IT (+598 94 961 242) — referencia para coordinar la ventana de prueba del Issue 4. |
+
+> **Nota de seguridad:** el mail con la contraseña real del `.p12` (compartida por IT) quedó en el historial de esta conversación de `/grill-me` — no se escribió en ningún archivo del repo ni se repite en este registro. Si este chat se exporta o se comparte, tratarlo como un secreto expuesto.
+
+---
+
 ## Issues conocidos / TODOs en código
 
 | Issue | Ubicación | Descripción |
