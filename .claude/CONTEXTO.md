@@ -1050,6 +1050,23 @@ Los 5 ítems del alcance quedan resueltos: ítem 1 limpio desde el 2026-06-25 en
 
 | **Ejecución del borrado (confirmado)** | `DELETE FROM predicciones WHERE sku IN ('I01497','I01512')` ejecutado en prod — `ROW_COUNT()=8`, verificación posterior `SELECT COUNT(*) ... = 0`. Las 2 SKUs ya no tienen ninguna predicción contaminada en `ResultadosService.GetResumenGlobal()` ni en `GetStockAnalysis()`. |
 | **Punto 3 del issue — fix defensivo, no solo limpieza de datos** | En vez de dejar el gap arquitectónico para que se repita silenciosamente la próxima vez que un SKU pierda elegibilidad, se agregó `GetSkusElegiblesModelo()` (helper privado, `apps/backend/WebApi/Services/Resultados/ResultadosService.cs`) — mismo criterio que `get_skus_modelo.py` de #43 (`articulos JOIN grupos WHERE aplica_modelo_econometrico=true`). Se aplica como filtro adicional en `GetResumenGlobal()` (R² promedio, línea ~75) y `GetStockAnalysis()` (`PronosticoProximoTrimestre`, línea ~145) — los dos puntos confirmados en código que leían `Predicciones` sin ningún filtro de elegibilidad. `UltimaPrediccion` (timestamp informativo de "cuándo corrió la última predicción del sistema") se deja sin filtrar a propósito — no es un valor analítico por SKU, es un indicador de salud del job. `PrediccionRepository.GetUltimasBySku()` no se tocó porque ya filtra por el último `job_id` exitoso, no necesitaba el fix. Build verificado (`dotnet build WebApi.sln`, 0 errores). |
+| **Deploy del fix** | Commit `50bdb24` pusheado a Develop, mergeado en prod (`git merge --ff-only`), `docker compose build webapi` + `up -d --force-recreate webapi`, recreado 2026-06-26 21:16. |
+
+### Hallazgo no relacionado durante el smoke test post-deploy — Issue [#59](https://github.com/Evalutia/App-Forecast/issues/59)
+
+Al verificar que el deploy no rompió nada (`GET /api/resultados/resumen`), la request **no respondió ni siquiera con 120s de margen** (`curl -m 120` → timeout, exit 28). El log de `evalutia-webapi` confirma que no es la query SQL (completó en 5021ms) sino, casi seguro, el código C# posterior en `GetResumenGlobal()` (`ResultadosService.cs` líneas ~43-51 y ~61-72): `foreach (var sku in skuSet) { stockRows.Where(r => r.Sku == sku) ... }` — patrón O(n²) trivial con 104 artículos (antes del rollout de #41-44) pero potencialmente catastrófico con ~5500. **No relacionado con el fix de #57** (que es una query chica y separada al final del método) — es un problema preexistente recién expuesto porque nadie había pegado contra este endpoint con el catálogo completo hasta este smoke test. Registrado como issue aparte, no se investiga el fix en esta sesión.
+
+---
+
+### Remediación — Issue #59 (sesión 2026-06-26, continuación)
+
+| Decisión | Definición |
+|----------|-----------|
+| **Confirmación de escala con datos reales** | `articulos.stock_minimo > 0` → **4874 SKUs**. `stock_diario` últimos 365 días → 12.1M filas crudas (multi-depósito), agrupadas en SQL a ~1.8M filas antes de llegar a C#. El loop original hacía `4874 × ~1.8M` comparaciones lineales, **dos veces** (stockout y ventas perdidas por separado) ≈ 17 mil millones de comparaciones — confirma la causa con números, no solo lectura de código. |
+| **Confirmado: solo `GetResumenGlobal()` tiene el antipatrón** | `GetStockAnalysis()`, `GetTopVentasPerdidas()` y `GetStockoutDistribution()` ya agrupan `stockRows` con `GroupBy().ToDictionary()` antes de iterar (mismo archivo) — el punto 3 del issue queda confirmado sin necesidad de cambios ahí. |
+| **Fix: agrupar + fusionar los 2 `foreach` en uno** | `stockRows` se agrupa una sola vez en `stockPorSku` (`Dictionary<string, List<...>>`, mismo patrón que los otros 3 métodos). Los dos loops separados (stockout y ventas perdidas, que recalculaban `diasConStock` cada uno) se fusionan en un solo `foreach` por SKU. Complejidad pasa de O(totalSkus × totalFilas) a O(totalFilas + totalSkus) — de ~17 mil millones a ~1.8 millones de operaciones. Build verificado (`dotnet build WebApi.sln`, 0 errores). |
+| **Deploy** | Commit pusheado a Develop, mergeado a prod (`git merge --ff-only`), `docker compose build webapi` + `up -d --force-recreate webapi`. |
+| **Pendiente, fuera de esta sesión** | Sin profiling formal del tiempo real de respuesta post-fix más allá de un smoke test — si vuelve a ser lento, hay que medir con detalle en vez de asumir que el fix alcanza. Tampoco se agregó health-check/alerta para detectar este tipo de degradación a futuro (quedó anotado en el issue original como punto 8, no resuelto en esta sesión). |
 
 ---
 

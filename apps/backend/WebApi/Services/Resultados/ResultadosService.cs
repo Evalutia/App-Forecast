@@ -48,19 +48,14 @@ namespace Services.Resultados
         .Select(g => new { g.Key.Sku, g.Key.Fecha, Total = (long)g.Sum(x => (long)x.Cantidad) })
         .ToList();
 
-      int totalSkus = skuSet.Count;
-      int skusConStockout = 0;
-      double sumStockoutRate = 0;
-
-      foreach (var sku in skuSet)
-      {
-        var dias = stockRows.Where(r => r.Sku == sku).ToList();
-        var diasConStock = dias.Count(d => d.Total > minimos[sku]);
-        var totalDias = Math.Max(dias.Count, 1);
-        var stockoutRate = (double)(totalDias - diasConStock) / totalDias * 100;
-        sumStockoutRate += stockoutRate;
-        if (diasConStock < totalDias) skusConStockout++;
-      }
+      // Agrupado por SKU una sola vez (issue #59) — antes cada SKU hacía stockRows.Where(...)
+      // sobre la lista completa dentro de un foreach, O(totalSkus × totalFilas). Con ~4900 SKUs
+      // y ~1.8M filas (post-rollout de grupos, #41-44) eso son ~10 mil millones de comparaciones
+      // y la causa real del timeout en producción. Mismo patrón ya usado en GetStockAnalysis/
+      // GetTopVentasPerdidas/GetStockoutDistribution.
+      var stockPorSku = stockRows
+        .GroupBy(r => r.Sku)
+        .ToDictionary(g => g.Key, g => g.ToList());
 
       // Ventas perdidas totales
       var ventas365 = _db.VentasHistoricas
@@ -70,15 +65,26 @@ namespace Services.Resultados
         .Select(g => new { Sku = g.Key, Total = g.Sum(x => (long)x.Cantidad) })
         .ToDictionary(x => x.Sku, x => x.Total);
 
+      int totalSkus = skuSet.Count;
+      int skusConStockout = 0;
+      double sumStockoutRate = 0;
       long ventasPerdidasTotal = 0;
+
+      // Un solo pase por SKU: antes el stockout y las ventas perdidas se calculaban en dos
+      // foreach separados, recalculando diasConStock cada vez.
       foreach (var sku in skuSet)
       {
-        var dias = stockRows.Where(r => r.Sku == sku).ToList();
+        var dias = stockPorSku.TryGetValue(sku, out var diasSku) ? diasSku : new();
         var diasConStock = dias.Count(d => d.Total > minimos[sku]);
+        var totalDias = Math.Max(dias.Count, 1);
+        var stockoutRate = (double)(totalDias - diasConStock) / totalDias * 100;
+        sumStockoutRate += stockoutRate;
+        if (diasConStock < totalDias) skusConStockout++;
+
         var diasSinStock = Math.Max(dias.Count - diasConStock, 0);
-        if (diasConStock > 0 && ventas365.ContainsKey(sku))
+        if (diasConStock > 0 && ventas365.TryGetValue(sku, out var ventaTotal))
         {
-          var ventasPorDia = (double)ventas365[sku] / diasConStock;
+          var ventasPorDia = (double)ventaTotal / diasConStock;
           ventasPerdidasTotal += (long)(ventasPorDia * diasSinStock);
         }
       }
