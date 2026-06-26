@@ -13,6 +13,18 @@ namespace Services.Resultados
       _db = db;
     }
 
+    // SKUs cuyo grupo tiene modelo econométrico habilitado (mismo criterio que get_skus_modelo.py de #43).
+    // Evita que predicciones generadas antes de que un SKU perdiera elegibilidad (issue #57) sigan
+    // filtrándose a los promedios/pronósticos de Resultados.
+    private HashSet<string> GetSkusElegiblesModelo()
+    {
+      return _db.Articulos
+        .AsNoTracking()
+        .Join(_db.Grupos.AsNoTracking().Where(g => g.AplicaModeloEconometrico),
+              a => a.GrupoId, g => g.Id, (a, g) => a.Sku)
+        .ToHashSet();
+    }
+
     public ResumenGlobalDto GetResumenGlobal()
     {
       var today = DateOnly.FromDateTime(DateTime.UtcNow.Date);
@@ -71,10 +83,11 @@ namespace Services.Resultados
         }
       }
 
-      // R² promedio de las últimas predicciones
+      // R² promedio de las últimas predicciones (solo SKUs actualmente elegibles — issue #57)
+      var skusElegiblesModelo = GetSkusElegiblesModelo();
       var predicciones = _db.Predicciones
         .AsNoTracking()
-        .Where(p => p.R2 != null)
+        .Where(p => p.R2 != null && skusElegiblesModelo.Contains(p.Sku))
         .GroupBy(p => new { p.Sku, p.Modelo })
         .Select(g => g.OrderByDescending(p => p.TsGeneracion).First())
         .ToList();
@@ -140,10 +153,11 @@ namespace Services.Resultados
         .Select(g => new { Sku = g.Key, Total = g.Sum(x => (long)x.Cantidad) })
         .ToDictionary(x => x.Sku, x => x.Total);
 
-      // Predicciones (próximo trimestre, modelo COMBINADA preferido)
+      // Predicciones (próximo trimestre, modelo COMBINADA preferido; solo SKUs elegibles — issue #57)
+      var skusElegiblesModelo = GetSkusElegiblesModelo();
       var predicciones = _db.Predicciones
         .AsNoTracking()
-        .Where(p => skuList.Contains(p.Sku) && p.FechaPredicha >= today)
+        .Where(p => skuList.Contains(p.Sku) && p.FechaPredicha >= today && skusElegiblesModelo.Contains(p.Sku))
         .ToList()
         .GroupBy(p => p.Sku)
         .ToDictionary(g => g.Key, g =>
