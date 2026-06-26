@@ -84,12 +84,14 @@ namespace WebApi.Controllers.Planilla.DTOs
   {
     public IReadOnlyList<PlanillaFiltroItemOutDto> Marcas { get; init; } = [];
     public IReadOnlyList<PlanillaFiltroItemOutDto> Generos { get; init; } = [];
+    public IReadOnlyList<PlanillaFiltroItemOutDto> Grupos { get; init; } = [];
     public PlanillaArticulosIncompletosOutDto ArticulosIncompletos { get; init; }
 
     public PlanillaFiltrosOutDto(PlanillaFiltrosDto dto)
     {
       Marcas               = dto.Marcas.Select(m => new PlanillaFiltroItemOutDto(m)).ToList();
       Generos              = dto.Generos.Select(g => new PlanillaFiltroItemOutDto(g)).ToList();
+      Grupos               = dto.Grupos.Select(g => new PlanillaFiltroItemOutDto(g)).ToList();
       ArticulosIncompletos = new PlanillaArticulosIncompletosOutDto(dto.ArticulosIncompletos);
     }
   }

@@ -947,6 +947,25 @@ PREDICT_PERIODS, PREDICT_MODEL_SET, PREDICT_VERSION, PREDICT_SCHEDULE_HOUR
 
 ---
 
+### Filtro de grupo en planilla de reposición + ampliación de `/api/planilla/filtros` — Issue #45 (sesión 2026-06-26)
+
+| Decisión | Definición |
+|----------|-----------|
+| **Mapeo EF de `Grupo`** | Sin navigation property. `Articulo.GrupoId` queda como `uint` plano (mismo patrón que `MarcaId`/`GeneroId`), sin `HasOne/WithMany`. `Grupo.cs` se crea como entidad simple (`Id`, `Descripcion`, `VisiblePlanilla`, `AplicaModeloEconometrico`, `TsCarga`, `ActualizadoEn`) + `DbSet<Grupo>` en `EvalutiaDbContext`. El único precedente de navegación real en el repo (`Prediccion.Job`/`JobHistorial.Predicciones`) no se replica acá porque ningún código necesita `.Include(a => a.Grupo)`. |
+| **Lista de grupos en el dropdown (`GetFiltros`)** | Mismo criterio que marca/género: cruzar contra SKUs presentes en `planilla_ventas_calculada`, más `WHERE g.visible_planilla = true`. Nunca se ofrece una opción que da resultado vacío. |
+| **Scoping de marca/género por `grupoId` en `GetFiltros`** | El parámetro `grupoId` (opcional) acota las subqueries de marca y género a `WHERE a.grupo_id = grupoId` cuando viene seteado. |
+| **Scoping de `articulosIncompletos` por `grupoId`** | El conteo de `sinMarca`/`sinGenero` también se acota a `grupo_id = grupoId` cuando viene seteado — si no, el aviso de datos incompletos pierde sentido al estar filtrando por grupo. |
+| **Estado por defecto de `grupoId` sin seleccionar** | Sin preselección — la planilla sigue mostrando todos los grupos mezclados por defecto (igual que hoy), igual que la decisión ya tomada para `/resultados`/Dashboard. "Limpiar filtros" resetea `grupoId` a `undefined`, no a un valor por defecto. |
+| **`visible_planilla = false` (grupos 199/200) no es un control de seguridad** | Es cosmético del dropdown, no se bloquea en el backend. `GET /api/planilla/ventas?grupoId=199` devuelve resultados igual si se pasa explícito — no hay dato sensible distinto entre grupos, y la nota original del issue ya describe `visible_planilla` como "reversible con un UPDATE, sin redeploy" (catálogo, no autorización). |
+| **Interacción frontend: cambio de grupo limpia marca/género** | `handleFilterChange` en `PlanillaPage.tsx` limpia `marcaId`/`generoId` cuando cambia `grupoId`, para evitar combinaciones grupo+marca/género inválidas que ya no aparecen en el dropdown pero quedarían seleccionadas de un grupo anterior. `estadoMes` no se toca (independiente del catálogo). |
+| **Orden del dropdown de grupo** | Alfabético por `descripcion`, igual que marca/género — no por `id` numérico del ERP. |
+| **Sin columna "Grupo" en la tabla** | Alcance literal del issue: solo filtrar, no mostrar. No se toca `PlanillaSkuDto`/`PlanillaVentasOutDto`/`PlanillaTable.tsx`/`exportPlanilla.ts` para agregar `grupoNombre` por fila. Se revisita como issue aparte si el cliente lo pide al ver ~65 grupos mezclados sin esa referencia visual. |
+| **`/api/planilla/sugerencias` no se toca** | Confirmado en código (`usePlanillaSugerencias()` sin params, `fetchPlanillaSugerencias()` sin query string) — devuelve todas las sugerencias sin filtro y el frontend las indexa en un `Map<sku, ...>` para lookup por fila ya renderizada. El filtro de grupo en `GetVentas` ya acota qué filas se muestran; las sugerencias de SKUs fuera de esa selección simplemente no se usan, sin necesidad de propagar `grupoId` a este endpoint. |
+
+> **Nota:** Ningún flujo de este issue requiere tocar `predict.py`, `job_etl_diario.kjb` ni los scripts de ETL — es 100% backend (`PlanillaRepository`/`PlanillaService`/`PlanillaController` + `Grupo.cs`/`EvalutiaDbContext`) y frontend (`PlanillaPage`/`FiltrosPlanilla`/hooks/tipos de `planilla`). El script SQL de `grupos` y la FK ya están aplicados en prod desde #41.
+
+---
+
 ## Issues conocidos / TODOs en código
 
 | Issue | Ubicación | Descripción |

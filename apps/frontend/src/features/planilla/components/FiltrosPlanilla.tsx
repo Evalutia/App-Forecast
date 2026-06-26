@@ -10,25 +10,40 @@ const ESTADOS_MES = [
 type Props = {
   marcaId:    number | undefined;
   generoId:   number | undefined;
+  grupoId:    number | undefined;
   estadoMes:  string | undefined;
-  onFilterChange: (updates: { marcaId?: number; generoId?: number; estadoMes?: string }) => void;
+  onFilterChange: (updates: { marcaId?: number; generoId?: number; grupoId?: number; estadoMes?: string }) => void;
   onReset: () => void;
 };
 
-export default function FiltrosPlanilla({ marcaId, generoId, estadoMes, onFilterChange, onReset }: Props) {
-  const { data: filtros, isLoading, isError } = usePlanillaFiltros();
+export default function FiltrosPlanilla({ marcaId, generoId, grupoId, estadoMes, onFilterChange, onReset }: Props) {
+  const { data: filtros, isLoading, isError } = usePlanillaFiltros(grupoId);
 
   const cargando  = isLoading;
   const marcas    = filtros?.marcas  ?? [];
   const generos   = filtros?.generos ?? [];
+  const grupos    = filtros?.grupos  ?? [];
   const sinMarca  = filtros?.articulosIncompletos.sinMarca  ?? 0;
   const sinGenero = filtros?.articulosIncompletos.sinGenero ?? 0;
   const hayIncompletos   = !isError && !isLoading && (sinMarca > 0 || sinGenero > 0);
-  const hayFiltrosActivos = marcaId != null || generoId != null || (estadoMes != null && estadoMes !== '');
+  const hayFiltrosActivos = marcaId != null || generoId != null || grupoId != null || (estadoMes != null && estadoMes !== '');
 
   return (
     <section className="pg-filter-card">
       <div className="pg-filters-grid">
+
+        <div className="pg-form-row">
+          <label className="pg-label">Grupo</label>
+          <select
+            className="pg-select"
+            disabled={cargando}
+            value={grupoId ?? ''}
+            onChange={e => onFilterChange({ grupoId: e.target.value ? Number(e.target.value) : undefined })}
+          >
+            <option value="">{cargando ? 'Cargando…' : 'Todos los grupos'}</option>
+            {grupos.map(g => <option key={g.id} value={g.id}>{g.nombre}</option>)}
+          </select>
+        </div>
 
         <div className="pg-form-row">
           <label className="pg-label">Marca</label>

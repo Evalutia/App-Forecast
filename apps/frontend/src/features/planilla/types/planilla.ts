@@ -38,6 +38,7 @@ export interface PlanillaFiltroItemDto {
 export interface PlanillaFiltrosDto {
   marcas: PlanillaFiltroItemDto[];
   generos: PlanillaFiltroItemDto[];
+  grupos: PlanillaFiltroItemDto[];
   articulosIncompletos: {
     sinMarca: number;
     sinGenero: number;
@@ -49,6 +50,7 @@ export interface PlanillaVentasParams {
   pageSize: number;
   marcaId?: number;
   generoId?: number;
+  grupoId?: number;
   estadoMes?: string;
 }
 

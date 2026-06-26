@@ -4,8 +4,8 @@ namespace Services.Planilla
 {
   public interface IPlanillaService
   {
-    (IReadOnlyList<PlanillaSkuDto> Items, int TotalSkus) GetVentas(int page, int pageSize, uint? marcaId = null, uint? generoId = null, string? estadoMes = null);
-    PlanillaFiltrosDto GetFiltros();
+    (IReadOnlyList<PlanillaSkuDto> Items, int TotalSkus) GetVentas(int page, int pageSize, uint? marcaId = null, uint? generoId = null, uint? grupoId = null, string? estadoMes = null);
+    PlanillaFiltrosDto GetFiltros(uint? grupoId = null);
     IReadOnlyList<PlanillaSugerenciaDto> GetSugerencias();
   }
 
@@ -33,6 +33,7 @@ namespace Services.Planilla
   {
     public IReadOnlyList<PlanillaFiltroItemDto> Marcas { get; init; } = [];
     public IReadOnlyList<PlanillaFiltroItemDto> Generos { get; init; } = [];
+    public IReadOnlyList<PlanillaFiltroItemDto> Grupos { get; init; } = [];
     public PlanillaArticulosIncompletosDto ArticulosIncompletos { get; init; } = new();
   }
 

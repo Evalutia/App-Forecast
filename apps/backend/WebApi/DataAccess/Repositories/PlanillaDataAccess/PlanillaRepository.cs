@@ -17,6 +17,7 @@ namespace DataAccess.Repositories.PlanillaDataAccess
         int pageSize,
         uint? marcaId,
         uint? generoId,
+        uint? grupoId,
         string? estadoMes)
     {
       // Query base sobre filas de planilla — el filtro estadoMes se aplica aquí,
@@ -28,14 +29,16 @@ namespace DataAccess.Repositories.PlanillaDataAccess
       // IQueryable<string> compartido para Count y Skip/Take
       var skuQuery = planillaQuery.Select(p => p.Sku).Distinct();
 
-      // Filtros de marca y género via subquery en articulos (→ IN SELECT sku FROM articulos WHERE ...)
-      if (marcaId.HasValue || generoId.HasValue)
+      // Filtros de marca, género y grupo via subquery en articulos (→ IN SELECT sku FROM articulos WHERE ...)
+      if (marcaId.HasValue || generoId.HasValue || grupoId.HasValue)
       {
         var articulosQuery = _db.Articulos.AsQueryable();
         if (marcaId.HasValue)
           articulosQuery = articulosQuery.Where(a => a.MarcaId == marcaId);
         if (generoId.HasValue)
           articulosQuery = articulosQuery.Where(a => a.GeneroId == generoId);
+        if (grupoId.HasValue)
+          articulosQuery = articulosQuery.Where(a => a.GrupoId == grupoId);
         var skusFiltrados = articulosQuery.Select(a => a.Sku);
         skuQuery = skuQuery.Where(s => skusFiltrados.Contains(s));
       }
@@ -101,12 +104,18 @@ namespace DataAccess.Repositories.PlanillaDataAccess
       return (result, totalSkus);
     }
 
-    public (List<(uint Id, string Nombre)> Marcas, List<(uint Id, string Nombre)> Generos, int SinMarca, int SinGenero) GetFiltros()
+    public (List<(uint Id, string Nombre)> Marcas, List<(uint Id, string Nombre)> Generos, List<(uint Id, string Nombre)> Grupos, int SinMarca, int SinGenero) GetFiltros(uint? grupoId)
     {
       var skusEnPlanilla = _db.PlanillasVentasCalculadas.Select(p => p.Sku).Distinct();
 
-      var marcas = _db.Articulos
-          .Where(a => skusEnPlanilla.Contains(a.Sku) && a.MarcaId != null)
+      // Marca/género/incompletos se acotan a grupoId cuando viene seteado, para no ofrecer
+      // ni contar combinaciones grupo+marca/género que no existen.
+      var articulosEnPlanilla = _db.Articulos.Where(a => skusEnPlanilla.Contains(a.Sku));
+      if (grupoId.HasValue)
+        articulosEnPlanilla = articulosEnPlanilla.Where(a => a.GrupoId == grupoId);
+
+      var marcas = articulosEnPlanilla
+          .Where(a => a.MarcaId != null)
           .GroupBy(a => a.MarcaId)
           .Select(g => new { Id = g.Key!.Value, Nombre = g.Max(a => a.MarcaNombre) })
           .OrderBy(m => m.Nombre)
@@ -114,8 +123,8 @@ namespace DataAccess.Repositories.PlanillaDataAccess
           .Select(m => (m.Id, m.Nombre ?? ""))
           .ToList();
 
-      var generos = _db.Articulos
-          .Where(a => skusEnPlanilla.Contains(a.Sku) && a.GeneroId != null)
+      var generos = articulosEnPlanilla
+          .Where(a => a.GeneroId != null)
           .GroupBy(a => a.GeneroId)
           .Select(g => new { Id = g.Key!.Value, Nombre = g.Max(a => a.GeneroDescripcion) })
           .OrderBy(g => g.Nombre)
@@ -123,10 +132,20 @@ namespace DataAccess.Repositories.PlanillaDataAccess
           .Select(g => (g.Id, g.Nombre ?? ""))
           .ToList();
 
-      var sinMarca = _db.Articulos.Count(a => skusEnPlanilla.Contains(a.Sku) && a.MarcaId == null);
-      var sinGenero = _db.Articulos.Count(a => skusEnPlanilla.Contains(a.Sku) && a.GeneroId == null);
+      var sinMarca = articulosEnPlanilla.Count(a => a.MarcaId == null);
+      var sinGenero = articulosEnPlanilla.Count(a => a.GeneroId == null);
 
-      return (marcas, generos, sinMarca, sinGenero);
+      // Grupos disponibles: cruzados contra planilla (igual que marca/género) + visible_planilla,
+      // independiente del grupoId pedido — es la lista de opciones del dropdown, no se acota a sí misma.
+      var grupos = _db.Grupos
+          .Where(g => g.VisiblePlanilla && _db.Articulos.Any(a => a.GrupoId == g.Id && skusEnPlanilla.Contains(a.Sku)))
+          .OrderBy(g => g.Descripcion)
+          .Select(g => new { g.Id, g.Descripcion })
+          .AsEnumerable()
+          .Select(g => (g.Id, g.Descripcion))
+          .ToList();
+
+      return (marcas, generos, grupos, sinMarca, sinGenero);
     }
 
     public IReadOnlyList<PlanillaSugerencias> GetSugerencias()

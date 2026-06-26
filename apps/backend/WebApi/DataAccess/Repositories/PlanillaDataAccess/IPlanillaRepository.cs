@@ -9,10 +9,11 @@ namespace DataAccess.Repositories.PlanillaDataAccess
         int pageSize,
         uint? marcaId,
         uint? generoId,
+        uint? grupoId,
         string? estadoMes
     );
 
-    (List<(uint Id, string Nombre)> Marcas, List<(uint Id, string Nombre)> Generos, int SinMarca, int SinGenero) GetFiltros();
+    (List<(uint Id, string Nombre)> Marcas, List<(uint Id, string Nombre)> Generos, List<(uint Id, string Nombre)> Grupos, int SinMarca, int SinGenero) GetFiltros(uint? grupoId);
 
     IReadOnlyList<PlanillaSugerencias> GetSugerencias();
   }

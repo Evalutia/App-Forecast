@@ -13,9 +13,10 @@ export default function PlanillaPage() {
   const [pageSize]            = useState(DEFAULT_PAGE_SIZE);
   const [marcaId, setMarcaId] = useState<number | undefined>();
   const [generoId, setGeneroId] = useState<number | undefined>();
+  const [grupoId, setGrupoId] = useState<number | undefined>();
   const [estadoMes, setEstadoMes] = useState<string | undefined>();
 
-  const params: PlanillaVentasParams = { page, pageSize, marcaId, generoId, estadoMes };
+  const params: PlanillaVentasParams = { page, pageSize, marcaId, generoId, grupoId, estadoMes };
 
   const { data: sugerenciasData, isLoading: sugerenciasLoading } = usePlanillaSugerencias();
   const sugerencias = useMemo<Map<string, PlanillaSugerenciaDto>>(
@@ -25,9 +26,15 @@ export default function PlanillaPage() {
 
   const handlePageChange = (nextPage: number) => setPage(nextPage);
 
-  const handleFilterChange = (updates: Partial<{ marcaId?: number; generoId?: number; estadoMes?: string }>) => {
+  const handleFilterChange = (updates: Partial<{ marcaId?: number; generoId?: number; grupoId?: number; estadoMes?: string }>) => {
     if ('marcaId'   in updates) setMarcaId(updates.marcaId);
     if ('generoId'  in updates) setGeneroId(updates.generoId);
+    if ('grupoId'   in updates) {
+      setGrupoId(updates.grupoId);
+      // Cambiar de grupo invalida la marca/género seleccionados: pueden no existir en el nuevo grupo
+      setMarcaId(undefined);
+      setGeneroId(undefined);
+    }
     if ('estadoMes' in updates) setEstadoMes(updates.estadoMes);
     setPage(1);
   };
@@ -35,6 +42,7 @@ export default function PlanillaPage() {
   const handleReset = () => {
     setMarcaId(undefined);
     setGeneroId(undefined);
+    setGrupoId(undefined);
     setEstadoMes(undefined);
     setPage(1);
   };
@@ -57,6 +65,7 @@ export default function PlanillaPage() {
         <FiltrosPlanilla
           marcaId={marcaId}
           generoId={generoId}
+          grupoId={grupoId}
           estadoMes={estadoMes}
           onFilterChange={handleFilterChange}
           onReset={handleReset}

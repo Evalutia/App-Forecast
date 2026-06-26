@@ -11,10 +11,10 @@ export function usePlanillaVentas(params: PlanillaVentasParams) {
   });
 }
 
-export function usePlanillaFiltros() {
+export function usePlanillaFiltros(grupoId?: number) {
   return useQuery<PlanillaFiltrosDto, Error>({
-    queryKey: ['planilla', 'filtros'],
-    queryFn: fetchPlanillaFiltros,
+    queryKey: ['planilla', 'filtros', grupoId],
+    queryFn: () => fetchPlanillaFiltros(grupoId),
     staleTime: 5 * 60_000,
     gcTime: 30 * 60_000,
   });

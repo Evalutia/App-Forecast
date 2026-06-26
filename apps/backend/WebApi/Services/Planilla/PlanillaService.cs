@@ -19,6 +19,7 @@ namespace Services.Planilla
         int pageSize,
         uint? marcaId = null,
         uint? generoId = null,
+        uint? grupoId = null,
         string? estadoMes = null)
     {
       if (page < 1)
@@ -32,7 +33,7 @@ namespace Services.Planilla
             $"Valor inválido '{estadoMes}'. Permitidos: {string.Join(", ", _estadosValidos)}",
             nameof(estadoMes));
 
-      var (filas, totalSkus) = _repo.GetVentas(page, pageSize, marcaId, generoId, estadoMes);
+      var (filas, totalSkus) = _repo.GetVentas(page, pageSize, marcaId, generoId, grupoId, estadoMes);
 
       // Pivot tall → wide: agrupar filas por SKU y construir array de meses
       var items = filas
@@ -88,14 +89,15 @@ namespace Services.Planilla
           .ToList();
     }
 
-    public PlanillaFiltrosDto GetFiltros()
+    public PlanillaFiltrosDto GetFiltros(uint? grupoId = null)
     {
-      var (marcas, generos, sinMarca, sinGenero) = _repo.GetFiltros();
+      var (marcas, generos, grupos, sinMarca, sinGenero) = _repo.GetFiltros(grupoId);
 
       return new PlanillaFiltrosDto
       {
         Marcas  = marcas.Select(m => new PlanillaFiltroItemDto { Id = m.Id, Nombre = m.Nombre }).ToList(),
         Generos = generos.Select(g => new PlanillaFiltroItemDto { Id = g.Id, Nombre = g.Nombre }).ToList(),
+        Grupos  = grupos.Select(g => new PlanillaFiltroItemDto { Id = g.Id, Nombre = g.Nombre }).ToList(),
         ArticulosIncompletos = new PlanillaArticulosIncompletosDto
         {
           SinMarca  = sinMarca,

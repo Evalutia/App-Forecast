@@ -37,6 +37,8 @@ public class EvalutiaDbContext : DbContext
 
   public virtual DbSet<PlanillaSugerencias> PlanillasSugerencias { get; set; }
 
+  public virtual DbSet<Grupo> Grupos { get; set; }
+
   protected override void OnModelCreating(ModelBuilder modelBuilder)
   {
     modelBuilder
@@ -77,6 +79,8 @@ public class EvalutiaDbContext : DbContext
       entity.Property(e => e.TemporadaNombre)
           .HasMaxLength(255)
           .HasColumnName("temporada_nombre");
+      entity.Property(e => e.GrupoId)
+          .HasColumnName("grupo_id");
       entity.Property(e => e.FecAlta)
           .HasColumnType("datetime")
           .HasColumnName("fec_alta");
@@ -383,6 +387,32 @@ public class EvalutiaDbContext : DbContext
       entity.Property(e => e.DiasHastaQuiebre)
           .HasPrecision(10, 2)
           .HasColumnName("dias_hasta_quiebre");
+    });
+
+    modelBuilder.Entity<Grupo>(entity =>
+    {
+      entity.HasKey(e => e.Id).HasName("PRIMARY");
+
+      entity.ToTable("grupos");
+
+      entity.Property(e => e.Id).HasColumnName("id");
+      entity.Property(e => e.Descripcion)
+          .HasMaxLength(255)
+          .HasColumnName("descripcion");
+      entity.Property(e => e.VisiblePlanilla)
+          .HasDefaultValue(true)
+          .HasColumnName("visible_planilla");
+      entity.Property(e => e.AplicaModeloEconometrico)
+          .HasDefaultValue(false)
+          .HasColumnName("aplica_modelo_econometrico");
+      entity.Property(e => e.TsCarga)
+          .HasDefaultValueSql("CURRENT_TIMESTAMP(6)")
+          .HasColumnType("timestamp(6)")
+          .HasColumnName("ts_carga");
+      entity.Property(e => e.ActualizadoEn)
+          .ValueGeneratedOnAddOrUpdate()
+          .HasColumnType("timestamp(6)")
+          .HasColumnName("actualizado_en");
     });
   }
 }

@@ -23,17 +23,18 @@ namespace WebApi.Controllers.Planilla
         [FromQuery] int pageSize = 50,
         [FromQuery] uint? marcaId = null,
         [FromQuery] uint? generoId = null,
+        [FromQuery] uint? grupoId = null,
         [FromQuery] string? estadoMes = null)
     {
-      var (items, totalSkus) = _planillaService.GetVentas(page, pageSize, marcaId, generoId, estadoMes);
+      var (items, totalSkus) = _planillaService.GetVentas(page, pageSize, marcaId, generoId, grupoId, estadoMes);
       var outItems = items.Select(i => new PlanillaVentasOutDto(i));
       return Ok(new PagedResultDto<PlanillaVentasOutDto>(outItems, page, pageSize, totalSkus));
     }
 
     [HttpGet("filtros")]
-    public ActionResult<PlanillaFiltrosOutDto> GetFiltros()
+    public ActionResult<PlanillaFiltrosOutDto> GetFiltros([FromQuery] uint? grupoId = null)
     {
-      var dto = _planillaService.GetFiltros();
+      var dto = _planillaService.GetFiltros(grupoId);
       return Ok(new PlanillaFiltrosOutDto(dto));
     }
 
