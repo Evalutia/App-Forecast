@@ -40,3 +40,9 @@ pycache/
 
 # PDI zip (no versionar)
 services/etl/pdi-ce-9.4.0.0-343.zip
+
+## Certificados mTLS (issue #49) — viven fuera del repo en /opt/certs-ws en la VM,
+## esto es una red de seguridad defensiva por si alguna vez se copian acá por error.
+*.p12
+*.crt
+*.pem

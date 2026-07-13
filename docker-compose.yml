@@ -120,6 +120,11 @@ services:
     networks:
       - evalutia_net
     restart: unless-stopped
+    volumes:
+      # Certificados mTLS del Web Service SOAP (issue #49). Viven fuera del repo
+      # en el host (/opt/certs-ws), montados solo lectura. Convencion de ruta
+      # del lado del contenedor (/certs) usada por CERT_PATH/CACERT_PATH en #51.
+      - /opt/certs-ws:/certs:ro
 
   ofelia:
     image: mcuadros/ofelia:latest

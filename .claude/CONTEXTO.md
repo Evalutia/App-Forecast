@@ -1355,6 +1355,50 @@ El fix de código (`stock_resumen_365`, commit `1adafb3`) ya está commiteado y 
 | **Radio de impacto reverificado** | Único consumidor confirmado de `grupos.descripcion`: `PlanillaRepository.GetFiltros()` (dropdown de filtro de grupo, #45) — que además hace `OrderBy(g => g.Descripcion)`, así que estas 4 filas también estaban mal ordenadas alfabéticamente hasta ahora (efecto secundario menor, se corrige solo con el fix). `ResultadosService.cs` también usa `_db.Grupos` pero solo filtra por `AplicaModeloEconometrico`, no lee `Descripcion` — confirma la afirmación del issue de que ningún otro lugar expone el campo. |
 | **Verificado localmente** | Aplicado contra la DB local: las 4 filas pasan de `HEX` con patrón `C383C2XX` (doble-encoding) a `C38D`/`C389`/`C381`/`C3A9` (encoding simple correcto). |
 | **Pendiente antes del deploy a producción** | Correr el mismo scan (`HEX(col) LIKE '%C383%'`) contra `articulos` en producción real (el scan local dio 0 filas afectadas, pero el local no está sincronizado con producción — no es representativo, ver #38) para cerrar la segunda parte del alcance del issue ("revisar otras columnas"). |
+| **Scan de `articulos` en producción: dos falsos positivos metodológicos descartados antes de confiar en el resultado** | **Intento 1** (`HEX(col) LIKE '%C383%'`, mismo método usado para `grupos`): dio 15 filas en `descripcion` y 9 en `comentario` — revisadas a mano, ninguna tenía mojibake visible. Causa: `LIKE` sobre una cadena hexadecimal puede matchear una subcadena que **cruza el límite entre dos bytes** (ej. `"L8410"` → hex `...4C 38 34...` contiene la subcadena `"C383"` sin que exista un byte real `0xC3` seguido de `0x83`). **Intento 2** (`descripcion LIKE '%Ã%'`, buscando el carácter literal): dio números absurdos (5025/5025 en `descripcion`, 54/66 en `grupos` cuando se sabía que eran 4). Causa: la collation default `utf8mb4_0900_ai_ci` es *accent-insensitive* — `LIKE '%Ã%'` matchea cualquier variante acentuada de "A" (á, à, â, ä...), no el carácter exacto. **Fix metodológico:** `LIKE '%Ã%' COLLATE utf8mb4_bin` (comparación binaria exacta sobre el string ya decodificado, sin el riesgo de alineación de bytes del HEX). Con este método: `grupos.descripcion` = **4** (coincide exactamente con el conteo ya verificado byte a byte) y **todas las columnas de `articulos` = 0**. Confirma que el problema está acotado a las 4 filas de `grupos`, no hay nada más que arreglar. |
+
+**Deploy ejecutado y verificado en producción (2026-07-13, mismo día):**
+
+| Paso | Resultado |
+|------|-----------|
+| Push + merge en `/opt/evalutia` | Fast-forward limpio, `41cc34b` en `HEAD`. Sin rebuild de contenedores — es un `UPDATE` puro, no toca código de `webapi`/`etl`. |
+| Snapshot pre-fix | Confirmado: producción tenía el mismo patrón `C383C2XX` que local antes del fix, en las 4 filas (28, 50, 67, 201). |
+| Aplicación | `12-fix-grupos-encoding.sql` corrido contra producción — sin error. |
+| Verificación post-fix | Las 4 filas con `HEX` limpio (`C38D`/`C389`/`C381`/`C3A9`) y texto legible correcto. |
+
+**Resultado: fix desplegado y verificado en producción, issue #56 completamente cerrado** (incluyendo la parte de "revisar otras columnas", con el scan corregido dando 0 en `articulos`).
+
+---
+
+### Plan de verificación — Issue #58 (sesión 2026-07-13)
+
+| Decisión | Definición |
+|----------|-----------|
+| **La fecha específica del issue (2026-06-27) ya no es lo relevante** | Pasaron ~17 corridas nocturnas desde entonces. La pregunta real hoy no es "¿corrió bien esa noche puntual?" sino "¿está sano `planilla_ventas_calculada` *ahora*". Se abandona la verificación por fecha específica de `jobs_historial` a favor de chequear el estado actual directamente. |
+| **Chequeo combinado, no dos pasadas separadas** | `MAX(ts_carga)` reciente por grupo ya implica que el job viene corriendo bien las últimas noches — solo si algo sigue viejo/en cero vale la pena bucear en `jobs_historial` noche por noche para encontrar cuándo volvió a fallar. |
+| **Query amplia sobre toda la tabla, no solo el grupo 50 de ejemplo** | El hallazgo original decía que el congelamiento afectaba "a toda la tabla, no solo a los grupos nuevos". Chequear solo el grupo 50 confirmaría ese caso puntual pero no descartaría que otro de los 65 grupos nuevos haya quedado atascado por una razón distinta. Query: `GROUP BY grupo_id HAVING MAX(ts_carga) vieja OR meses < 10` sobre todos los grupos. |
+| **Se corre contra producción, no contra local** | El catálogo local (~104 SKUs, solo grupo 201) no tiene los grupos nuevos (ej. grupo 50, 740 SKUs) — esta verificación no es posible localmente, confirmado por los hallazgos de #38. |
+
+**Resultado (verificado contra producción, 2026-07-13):**
+- Query amplia (todos los grupos, `HAVING ts_carga vieja OR meses < 10`): **0 filas** — ningún grupo rezagado.
+- Grupo 50 (el ejemplo del issue original): `ultima_carga = 2026-07-13 03:34:09` (anoche), **13 meses** completos, 744 SKUs.
+
+**Conclusión: #58 se resolvió solo con el paso del tiempo** — la hipótesis del propio issue ("debería autoresolverse sin intervención") era correcta. No hizo falta ningún cambio de código ni de datos.
+
+---
+
+### Almacenamiento y montaje de certificados mTLS — Issue #49 (sesión 2026-07-13)
+
+| Decisión | Definición |
+|----------|-----------|
+| **Excepción a la regla de secuencia acordada** | La sesión del 2026-06-25 había definido que el plan de mTLS arranca "después de cerrar los issues en curso de la planilla" — #61-67 (Parte A) siguen técnicamente abiertos (pausados esperando la respuesta de Rodrigo sobre "Ticket", sin fecha). Se decide hacer una excepción explícita: avanzar con #49 mientras Parte A está bloqueada externamente, en vez de quedar sin avanzar nada a la espera. |
+| **Archivos reales ya disponibles** | Encontrados en `Descargas/infra cliente/` del usuario: `ca.crt`, `cotech-dev.p12`, `cotech-prod.p12` + 2 PDFs de instructivo de IT. Verificado (`openssl x509`, solo el `.crt` público, no se tocaron los `.p12`): CA emitida por "MG Soluciones IT" (coincide con el contacto ya documentado, Martín García), válida 2026-06-16 a 2036-06-13. |
+| **Transferencia: base64 por terminal, no SSH/S3** | Los archivos son chicos (~2-4KB cada uno) — a diferencia del intento de sincronizar la DB completa en #38 (multi-GB, requería SSH+EC2 Instance Connect o S3), acá alcanza con codificar en base64 y pegar el texto por la sesión de Session Manager, decodificando del otro lado con `base64 -d`. Sin instalar herramientas nuevas ni tocar el security group. |
+| **Alcance: solo `cotech-prod.p12` + `ca.crt`, no `cotech-dev.p12`** | `cotech-dev.p12` es para pruebas manuales desde PC/Mac por terminal — alcance de #53 (runbook), ni siquiera necesita estar en la VM. Subirlo ahora mezclaría el alcance de dos issues sin necesidad; se sube con el mismo mecanismo cuando se aborde #53. |
+| **Ruta en el host: `/opt/certs-ws/`** | Hermano de `/opt/evalutia` (el repo desplegado), fuera del control de git. Permisos `700` en la carpeta, `600` en los archivos. Se prefiere sobre `~/certs-ws/` (home de `ssm-user`) porque los volúmenes de Docker Compose son más predecibles con rutas absolutas fuera de `$HOME`, y no depende de qué usuario esté logueado en la VM. |
+| **Mount en `docker-compose.yml`** | `volumes: - /opt/certs-ws:/certs:ro` en el servicio `etl`. Solo lectura — ni el ETL ni nada dentro del contenedor necesita escribir ahí. `/certs` del lado del contenedor es la convención de ruta que va a usar `#51` para `CERT_PATH=/certs/cotech-prod.p12` / `CACERT_PATH=/certs/ca.crt` — se deja definida ahora para que ese issue no tenga que redecidir nada. |
+| **`.gitignore`** | Se agregan `*.p12`, `*.crt`, `*.pem` — no porque los certs reales vivan en el repo (viven en `/opt/certs-ws`, fuera de git), sino como red de seguridad defensiva si alguna vez alguien copia certs dentro del directorio del repo por costumbre/error, tal como pedía el alcance original del issue. |
+| **Manejo de la contraseña del `.p12`** | No se lee el PDF de instructivo ni se extrae la contraseña en esta sesión — #49 es solo almacenamiento/montaje, no requiere la contraseña todavía (eso es uso en tiempo de ejecución, alcance de `#50`/`#51`). Mismo criterio de la sesión anterior: la contraseña no se escribe en ningún archivo del repo. |
 
 ---
 
