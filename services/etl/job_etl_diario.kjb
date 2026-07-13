@@ -180,12 +180,21 @@ LEFT JOIN (
   GROUP BY sku, YEAR(fecha), MONTH(fecha)
 ) v ON v.sku = u.sku AND v.year = u.year AND v.month = u.month
 LEFT JOIN (
-  SELECT sd.sku, YEAR(sd.fecha) AS year, MONTH(sd.fecha) AS month,
-         COUNT(DISTINCT sd.fecha) AS dias_con_stock
-  FROM stock_diario sd
-  JOIN articulos a ON a.sku = sd.sku
-  WHERE sd.cantidad > COALESCE(a.stock_minimo,0)
-  GROUP BY sd.sku, YEAR(sd.fecha), MONTH(sd.fecha)
+  -- Issue #40: sumar todos los depositos por (sku, fecha) ANTES de comparar
+  -- con stock_minimo -- stock_diario tiene una fila por deposito, y comparar
+  -- fila por fila subcuenta dias con stock cuando esta repartido entre
+  -- depositos sin que ninguno individual supere el minimo. Mismo patron que
+  -- run_calc_planilla.py.
+  SELECT agg.sku, YEAR(agg.fecha) AS year, MONTH(agg.fecha) AS month,
+         COUNT(DISTINCT agg.fecha) AS dias_con_stock
+  FROM (
+    SELECT sd.sku, sd.fecha, SUM(sd.cantidad) AS stock_total
+    FROM stock_diario sd
+    GROUP BY sd.sku, sd.fecha
+  ) agg
+  JOIN articulos a ON a.sku = agg.sku
+  WHERE agg.stock_total > COALESCE(a.stock_minimo,0)
+  GROUP BY agg.sku, YEAR(agg.fecha), MONTH(agg.fecha)
 ) d ON d.sku = u.sku AND d.year = u.year AND d.month = u.month
 ON DUPLICATE KEY UPDATE
   ventas_cantidad = VALUES(ventas_cantidad),
