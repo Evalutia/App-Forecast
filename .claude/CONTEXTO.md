@@ -1416,6 +1416,20 @@ El fix de código (`stock_resumen_365`, commit `1adafb3`) ya está commiteado y 
 
 ---
 
+### Variables de entorno mTLS sin hardcodear el password — Issue #50 (sesión 2026-07-13)
+
+| Decisión | Definición |
+|----------|-----------|
+| **No hace falta que el usuario repita la contraseña del `.p12`** | Se encontró ya cargada en el `.env` local (`CERT_PASSWORD`, de una sesión anterior) al revisar la estructura del archivo — no se le pidió repetirla. Para minimizar cuánto aparece en el historial del chat, el valor real de producción se escribe directo en la VM con un comando que usa un placeholder (`CERT_PASSWORD=<REEMPLAZAR>`), sin que el usuario lo pegue de vuelta en la conversación para confirmar. |
+| **`.env` local ya tenía `CERT_PATH`/`CACERT_PATH` apuntando a una ruta de Windows con `cotech-dev.p12`** | Es un experimento previo sin terminar (ruta de host de Windows, no tiene sentido para el contenedor Linux de producción) — no se toca como parte de este issue, fuera de alcance. |
+| **`CERT_PATH`/`CACERT_PATH` en producción apuntan a `/certs/...` (ruta del contenedor), no a `/opt/certs-ws/...` (ruta del host)** | `.env` es cargado como `env_file` para el servicio `etl` — sus valores los ve un proceso *dentro* del contenedor, donde el mount de #49 expone los certs en `/certs`. Poner la ruta del host sería un error silencioso (el archivo no existiría desde la perspectiva del contenedor). |
+| **Limpieza de `WS_URL` en ambos `.env` (local y producción)** | Confirmado que los 4 scripts `run_extract_*.sh`/`run_backfill_ventas.sh` sí requieren `WS_URL` (`: "${WS_URL:?missing}"`), pero **no la leen del `.env`** — llega como parámetro del `.kjb`, y `run_ofelia.sh` la hardcodea (`http://200.125.29.194:81`), ignorando el `.env` por completo. No se borra la variable (los scripts la necesitan si se corren manualmente) — se corrige el placeholder viejo (`https://cliente.com/...`, nunca real) por el valor real ya hardcodeado, con un comentario explicando que el cron nocturno no la usa. |
+| **`CERT_PATH`/`CACERT_PATH`/`CERT_PASSWORD` se agregan a `run_ofelia.sh` ahora, aunque queden inertes hasta `#51`** | Verificado en `job_etl_diario.kjb`: no declara ningún parámetro `CERT_*` todavía (es alcance de `#51`). Pentaho Kitchen tolera parámetros `-param` no declarados sin fallar — pasarlos ahora es inofensivo y deja `#51` con menos trabajo (solo declarar los parámetros en el `.kjb` y usarlos, sin tocar `run_ofelia.sh` de nuevo). Se usa `${CERT_PATH:-}` (con default vacío) para no romper `set -u` si la variable no está seteada en algún entorno. |
+
+**Deploy pendiente:** falta llevar el cambio de `run_ofelia.sh` y las variables nuevas al `.env` de producción en la VM.
+
+---
+
 ## Issues conocidos / TODOs en código
 
 | Issue | Ubicación | Descripción |

@@ -19,4 +19,5 @@ exec /opt/pentaho/data-integration/kitchen.sh \
   "-param:MYSQL_HOST=mysql" "-param:MYSQL_DB=evalutia" \
   "-param:MYSQL_USER=evalutia" "-param:MYSQL_PASSWORD=evalutia" "-param:MYSQL_PORT=3306" \
   "-param:PREDICT_PERIODS=2" "-param:PREDICT_MODEL_SET=classic" "-param:PREDICT_RESAMPLE_RULE=QS" "-param:PREDICT_VERSION=mvp-001" \
-  "-param:FORCE_START=$Y" "-param:FORCE_END=$Y"
+  "-param:FORCE_START=$Y" "-param:FORCE_END=$Y" \
+  "-param:CERT_PATH=${CERT_PATH:-}" "-param:CACERT_PATH=${CACERT_PATH:-}" "-param:CERT_PASSWORD=${CERT_PASSWORD:-}"
