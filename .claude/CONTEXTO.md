@@ -1209,6 +1209,66 @@ Origen: mail del cliente con dos pedidos independientes. **Parte A** (frecuencia
 
 ---
 
+### `ml/eval_models.py` + `ml/models.py` — Issue #69 (sesión 2026-07-12)
+
+| Decisión | Definición |
+|----------|-----------|
+| **Fuente de SKUs del grupo 201** | Se reusa `services/etl/get_skus_modelo.py` (ya existente, patrón del issue #43: `articulos JOIN grupos WHERE aplica_modelo_econometrico = TRUE`) para alimentar `EVAL_ONLY_SKUS`, en vez de hardcodear `grupo_id=201`. Si mañana se agrega un segundo grupo econométrico, el diagnóstico lo sigue automáticamente. |
+| **Reporte con distribución, no solo promedio** | `eval_models.py` solo imprimía la media del `gap` por modelo — insuficiente para "distribución" que pide el criterio de aceptación. Se agregan percentiles (min/p25/mediana/p75/max) del `gap` y `mae_rel` por modelo, y se vuelca el detalle completo por SKU a CSV vía env var opcional `EVAL_OUTPUT_CSV` (si no se setea, no escribe nada — comportamiento actual intacto). |
+| **Criterio de aceptación del gap (dos niveles, sobre `r2_test`, no sobre el gap crudo)** | **Aceptable:** mediana de `r2_test` ≥ 0.3 en el grupo **y** <25% de SKUs con `r2_test < 0`. **Rediseño necesario:** mediana de `r2_test` negativa/cercana a 0, o >40% de SKUs con `r2_test < 0`. **Zona gris:** entre esos rangos, se documenta y se decide con el cliente, no solo técnicamente. Se usa `r2_test` (no el gap `r2_train - r2_test`) porque un gap chico con `r2_train` bajo no es "generalización" — es que el modelo nunca ajustó nada. |
+| **Simulación de la selección real de producción** | Además del desglose por modelo (RF/XGB/PROPHET por separado), se agrega una vista por SKU que replica la selección de `predict.py` (menor RMSE in-sample entre los 3) y reporta el `r2_test` del modelo *elegido* — porque "modelo econométrico" (como quedó definido en #68) es el ensemble completo con selección por SKU, no el promedio de cada modelo aislado. Esto es lo que el cliente realmente ve. |
+| **Cambio de código requerido** | `HoldoutResult` (en `ml/models.py`) no propagaba `rmse_train` (solo `r2_train`/`r2_test`/`mae_train`/`mae_test`) — se le agrega el campo, poblado desde `base.rmse` de la `*_insample` correspondiente, para poder replicar el criterio de selección real (que es por RMSE, no por R²). |
+| **Hallazgo durante la corrida real — guardrail agregado a `fit_rf_with_holdout`/`fit_xgb_with_holdout`** | Al correr sobre las 104 SKUs reales, 10 crasheaban (`ValueError: Input contains NaN` / `Found array with 0 sample(s)`): tienen solo 5 trimestres de historia total, y al aplicarles el holdout de 4 trimestres el `train` queda con 1 solo punto — insuficiente para construir ni un lag. El logging de #77 los atrapaba y logueaba, pero de forma ruidosa. Se agregó `if len(train) < 2: return None` en ambas funciones (antes de llamar a `fit_rf_insample`/`fit_xgb_insample`), igual patrón que ya usa Prophet con su propio mínimo. Mismo resultado final (esos 10 SKUs quedan excluidos igual, cobertura sin cambios: 85/104), pero sin traceback. |
+
+**Resultado del diagnóstico (grupo 201, 104 SKUs, corrido contra DB local — no el servidor de producción real):**
+
+| Modelo | n_skus | mean_r2_test | mediana gap | p75 gap |
+|--------|--------|--------------|--------------|---------|
+| PROPHET | 53 | 0.379 | 0.360 | 0.635 |
+| RF | 85 | 0.098 | 0.773 | 1.000 |
+| XGB | 85 | 0.157 | 0.882 | 1.000 |
+
+**Simulación de selección real de producción (menor RMSE in-sample por SKU):** PROPHET gana en 40 SKUs, RF en 33, XGB en 12. Mediana de `r2_test` del modelo elegido: **0.0623**. % de SKUs con `r2_test < 0`: **0.0%**.
+
+**Veredicto: ZONA GRIS.** No cumple el criterio de "aceptable" (mediana r2_test 0.06, muy por debajo del umbral 0.3) pero tampoco el de "rediseño necesario" (0% de SKUs peor que la media, muy por debajo del umbral 40%). Lectura: el modelo econométrico casi nunca es *peor* que predecir el promedio, pero rara vez explica una porción sustancial de la varianza real fuera de muestra — generaliza "sin romperse" pero con poca capacidad predictiva real. Cobertura parcial: PROPHET solo cubrió 53/104 SKUs (su propio mínimo de 8 trimestres de historia), RF/XGB cubrieron 85/104.
+
+**Decisión tomada (sesión siguiente, mismo día):** rediseñar la metodología a walk-forward **antes** de #70-#75, no después. Razón técnica: con `years_test=1` en trimestral, el holdout usa solo 4 puntos de test por SKU — un `r2_test` calculado sobre 4 puntos es una estimación muy ruidosa (puede saltar de 0 a 1 con variaciones chicas). Gran parte del "zona gris" puede ser ruido de medición, no necesariamente mala calidad real del modelo. Construir #70-#72 (criterio de elegibilidad + extensión a ~5500 SKUs candidatos) sobre una métrica ruidosa arriesga decisiones de elegibilidad que son básicamente aleatorias, con el costo de #75 (backfill, 6-10h) para deshacerlas después. Ver plan de rediseño en la subsección siguiente.
+
+---
+
+### Plan de rediseño — walk-forward validation (sesión 2026-07-12)
+
+Ejecuta la parte "Estabilidad" de #30 (auditoría original: "correr el modelo con distintas ventanas temporales — ver si RMSE/R2 son consistentes o volátiles según el SKU"), que #68/#69 no cubrían (ellos solo hicieron el "overfitting check" train vs. holdout de #30).
+
+| Decisión | Definición |
+|----------|-----------|
+| **Ventana de entrenamiento: expanding, no rolling** | Crece con toda la historia disponible en cada fold, igual que entrena `predict.py` hoy en producción (con toda la historia). Así el walk-forward mide lo mismo que el sistema real hace, no un escenario artificial con ventana recortada. |
+| **Horizonte de test por fold: 2 trimestres** | Igual a `forecast_periods` de producción — el error medido es directamente comparable a lo que el cliente ve. |
+| **Número de folds: adaptativo por SKU, tope de 5** | Se calculan cuántos orígenes de test caben en la historia disponible, repartidos parejo a lo largo de toda la historia utilizable (no siempre los últimos períodos) — tope de 5 folds para acotar el costo de cómputo (hasta 5x más fits por SKU/modelo que el holdout simple). |
+| **`min_train=2` (solo anti-crash), sin corte duro de calidad — corregido tras verificar contra datos reales** | Se había propuesto `min_train=10` (lags+2) pensando que evitaba fits degenerados, pero matemáticamente eso solo garantiza 2 filas reales de entrenamiento (no evita degeneración, y el crash ya está resuelto genéricamente desde #69 con `len(train)>=2`, válido para cualquier `lags`). Verificado contra los 98 SKUs con historia local del grupo 201: con `min_train=10` se excluía el **46%** (45/98, peor que el 85/104 de #69) sin ganancia real de calidad — no existe un umbral que resuelva la tensión calidad-vs-cobertura por sí solo. Se usa `min_train=2` (mismo guardrail de #69, máxima cobertura) y en cambio se reporta **`n_train_rows`** (filas reales de entrenamiento tras construir los lags) por fold como señal de confianza transparente — un SKU con muy poca historia muestra folds de 1-2 filas reales, lo cual naturalmente lo marca "volátil" en la métrica de estabilidad sin necesidad de un corte arbitrario. La decisión de mínimo de historia para elegibilidad queda para #70, con evidencia real. |
+| **SKUs sin historia ni para 1 fold** (`N < min_train+horizon` = 4 trimestres) | Quedan fuera del reporte — mismo caso ya cubierto por el guardrail de #69. |
+| **Reporte de estabilidad, no solo precisión** | Por SKU se reporta **mediana e IQR** (más robusto que media/desvío frente a folds degenerados) de `r2_test` entre folds — responde directamente lo que #30 pedía. Umbral para "volátil": `std(r2_test entre folds) ≥ 0.2` cuando hay ≥2 folds; con 1 solo fold no se puede evaluar estabilidad (se marca explícitamente, no se fuerza un valor). |
+| **Ubicación del código** | Nuevo `walk_forward_split(...)` en `ml/evaluate.py` (generaliza `holdout_split`, no la reemplaza — `holdout_split` sigue existiendo). Nuevas `fit_rf_with_walkforward`/`fit_xgb_with_walkforward`/`fit_prophet_with_walkforward` en `ml/models.py`, reusando internamente `fit_*_insample` por fold (no se duplica lógica de features/entrenamiento). Las `fit_*_with_holdout` de #68 no se tocan ni se eliminan. |
+| **Script nuevo, no se extiende `eval_models.py`** | `ml/eval_walkforward.py` — el shape de datos es distinto (por SKU: n_folds/mediana-IQR/n_train_rows/estable) al de `eval_models.py` (por sku+modelo, un solo split). Mezclar ambos con branching complicaba sin necesidad; `eval_models.py` queda intacto como diagnóstico rápido de #69. |
+| **Hallazgo adicional (informativo para #70, no bloquea)** | `TEST-SKU-001` está tageado en el grupo 201 (`aplica_modelo_econometrico=1`) pero sin historia en `ventas_historicas` — parece un SKU de prueba mal cargado en el catálogo real. Limpieza de catálogo aparte, no se toca en #78. |
+| **Desglose en issues** | 2 unidades de trabajo, no más: (A) issue nuevo — implementar walk-forward + volver a correr el diagnóstico sobre el grupo 201, reemplazando el veredicto "zona gris" de #69. (B) editar el issue #70 existente (todavía no arrancado) para que su criterio de elegibilidad consuma métricas de walk-forward en vez de holdout simple — no se duplica como issue nuevo. |
+| **Estimación y numeración** | Issue A entra al roadmap como **B0.3** (continuación de B0 = #68+#69), 6-10h. #70 (B1) no suma horas nuevas — se reformula su alcance, la tarea de definir el criterio en sí no es más compleja. |
+| **Corrección durante la implementación: `horizon=2` rompía `r2_test`** | Se había elegido `horizon=2` (igual a `forecast_periods` de producción) para el tamaño de la ventana de test por fold. Con exactamente 2 puntos, `r2_score` (correlación de Pearson al cuadrado, la implementación de este proyecto) es **matemáticamente casi siempre 1.0 o 0.0** — una recta siempre pasa por 2 puntos, dando correlación ±1 sin importar la magnitud del error; solo colapsa a 0.0 si la predicción es constante. Verificado: la primera corrida dio `mediana r2_test = 1.0000` para PROPHET, un resultado imposible de creer que reveló el problema. Se corrigió a `horizon=4` (mismo tamaño de ventana que usó #69 originalmente, con grados de libertad reales para que la correlación varíe) — el RMSE/MAE no tienen este problema (son válidos a cualquier n), solo `r2_test` lo requiere. |
+
+**Resultado del diagnóstico final (grupo 201, walk-forward con `horizon=4`, DB local):**
+
+| Modelo | Cobertura | median r2_test | % estable | % volátil | % solo 1 fold |
+|--------|-----------|-----------------|-----------|-----------|----------------|
+| PROPHET | 53/98 | 0.332 | 45% | 43% | 11% |
+| RF | 85/98 | 0.000 | 80% | 12% | 8% |
+| XGB | 85/98 | 0.000 | 71% | 21% | 8% |
+
+**Simulación de selección real de producción:** PROPHET gana en 50 SKUs, RF en 33, XGB en 2. Mediana `r2_test` (walk-forward) del modelo elegido: **0.0659** (vs. 0.0623 de #69 con un solo split — prácticamente idéntico). **29.4%** de los SKUs elegidos son "volátiles" entre folds. **15.3%** solo tuvo 1 fold evaluable (historia insuficiente para medir estabilidad).
+
+**Veredicto: ZONA GRIS confirmado.** El hallazgo más importante no es el número (casi no cambió), es la **confianza**: el walk-forward confirma que el "zona gris" de #69 **no era ruido de un solo split de 4 puntos** — es un resultado estable y reproducible a través de múltiples ventanas de evaluación. Y agrega información nueva que #69 no podía dar: casi 3 de cada 10 SKUs elegidos por producción tienen una calidad de ajuste que varía fuertemente según qué período se use para medirla (volátiles), y 1 de cada 6 no tiene ni siquiera suficiente historia para saberlo. Esta evidencia (no un número inventado) es la que alimenta #70 para definir el mínimo de historia y el criterio de estabilidad de elegibilidad.
+
+---
+
 ## Issues conocidos / TODOs en código
 
 | Issue | Ubicación | Descripción |

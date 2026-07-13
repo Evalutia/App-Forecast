@@ -1,7 +1,7 @@
 # services/python-worker/ml/evaluate.py
 from __future__ import annotations
 from sklearn.metrics import mean_squared_error
-from typing import Tuple
+from typing import List, Tuple
 
 import numpy as np
 import pandas as pd
@@ -15,6 +15,33 @@ def holdout_split(series: pd.Series, k: int = 6) -> Tuple[pd.Series, pd.Series]:
     s = pd.Series(series.copy()).astype("float64")
     s = s.sort_index()
     return s.iloc[:-k].copy(), s.iloc[-k:].copy()
+
+def walk_forward_split(
+    series: pd.Series, min_train: int = 2, horizon: int = 2, max_folds: int = 5
+) -> List[Tuple[pd.Series, pd.Series]]:
+    """
+    Genera folds walk-forward con ventana de entrenamiento expanding (crece
+    con toda la historia disponible, igual que entrena predict.py).
+
+    Cada fold testea 'horizon' puntos. El numero de folds se adapta a la
+    historia disponible (minimo min_train, tope max_folds), repartidos
+    parejo a lo largo de toda la historia utilizable (no solo los ultimos
+    periodos). Si no entra ni un fold, devuelve lista vacia.
+    """
+    s = pd.Series(series.copy()).astype("float64").sort_index()
+    n = len(s)
+    max_origin = n - horizon
+    if max_origin < min_train:
+        return []
+
+    count = max_origin - min_train + 1
+    if count <= max_folds:
+        origins = list(range(min_train, max_origin + 1))
+    else:
+        idx = np.linspace(0, count - 1, max_folds)
+        origins = sorted({min_train + int(round(i)) for i in idx})
+
+    return [(s.iloc[:origin].copy(), s.iloc[origin:origin + horizon].copy()) for origin in origins]
 
 def rmse(y_true, y_pred) -> float:
     y_true = np.asarray(y_true, dtype=np.float64).ravel()
