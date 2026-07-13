@@ -1426,7 +1426,17 @@ El fix de código (`stock_resumen_365`, commit `1adafb3`) ya está commiteado y 
 | **Limpieza de `WS_URL` en ambos `.env` (local y producción)** | Confirmado que los 4 scripts `run_extract_*.sh`/`run_backfill_ventas.sh` sí requieren `WS_URL` (`: "${WS_URL:?missing}"`), pero **no la leen del `.env`** — llega como parámetro del `.kjb`, y `run_ofelia.sh` la hardcodea (`http://200.125.29.194:81`), ignorando el `.env` por completo. No se borra la variable (los scripts la necesitan si se corren manualmente) — se corrige el placeholder viejo (`https://cliente.com/...`, nunca real) por el valor real ya hardcodeado, con un comentario explicando que el cron nocturno no la usa. |
 | **`CERT_PATH`/`CACERT_PATH`/`CERT_PASSWORD` se agregan a `run_ofelia.sh` ahora, aunque queden inertes hasta `#51`** | Verificado en `job_etl_diario.kjb`: no declara ningún parámetro `CERT_*` todavía (es alcance de `#51`). Pentaho Kitchen tolera parámetros `-param` no declarados sin fallar — pasarlos ahora es inofensivo y deja `#51` con menos trabajo (solo declarar los parámetros en el `.kjb` y usarlos, sin tocar `run_ofelia.sh` de nuevo). Se usa `${CERT_PATH:-}` (con default vacío) para no romper `set -u` si la variable no está seteada en algún entorno. |
 
-**Deploy pendiente:** falta llevar el cambio de `run_ofelia.sh` y las variables nuevas al `.env` de producción en la VM.
+**Deploy ejecutado y verificado en producción (2026-07-13, mismo día):**
+
+| Paso | Resultado |
+|------|-----------|
+| Hallazgo al revisar el `.env` de producción antes de tocarlo | A diferencia del local, producción **no tenía ninguna sección de SOAP/ETL** (ni `WS_URL` stale ni nada) — consistente con que `run_ofelia.sh` hardcodea todo y no lee `.env` en el path automatizado. No hizo falta limpiar ningún placeholder ahí, solo agregar las 3 variables nuevas. |
+| `git merge --ff-only origin/Develop` | Fast-forward limpio, `0743a22` en `HEAD`. |
+| Variables agregadas a `.env` de producción | `CERT_PATH=/certs/cotech-prod.p12`, `CACERT_PATH=/certs/ca.crt` agregadas con un comando visible; `CERT_PASSWORD` agregada con un placeholder (`<REEMPLAZAR...>`) y reemplazada por el usuario mismo con `sed` en un comando aparte — el valor real no se pidió de vuelta en el chat para confirmar (aunque el usuario lo pegó espontáneamente una vez; no es información nueva, ya estaba en el `.env` local visto antes en la sesión). |
+| Recreate `etl` | Solo `up -d --force-recreate` (sin rebuild, es config vía `env_file`, no código). Confirmado `CREATED: 32 segundos`. |
+| Verificación sin exponer el secreto | `printenv CERT_PATH`/`CACERT_PATH` dentro del contenedor confirmaron los valores correctos. Para `CERT_PASSWORD` se verificó presencia y longitud (`${#CERT_PASSWORD}` = 12, coincide con la contraseña real) sin imprimir el valor. |
+
+**Resultado: Issue #50 completamente implementado y desplegado.** Las 3 variables ya están disponibles en el contenedor `etl` para que `#51` las declare en `job_etl_diario.kjb` y las use en las llamadas SOAP.
 
 ---
 
