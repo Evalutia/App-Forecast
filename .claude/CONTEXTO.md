@@ -1068,6 +1068,152 @@ Al verificar que el deploy no rompió nada (`GET /api/resultados/resumen`), la r
 | **Deploy** | Commit pusheado a Develop, mergeado a prod (`git merge --ff-only`), `docker compose build webapi` + `up -d --force-recreate webapi`. |
 | **Pendiente, fuera de esta sesión** | Sin profiling formal del tiempo real de respuesta post-fix más allá de un smoke test — si vuelve a ser lento, hay que medir con detalle en vez de asumir que el fix alcanza. Tampoco se agregó health-check/alerta para detectar este tipo de degradación a futuro (quedó anotado en el issue original como punto 8, no resuelto en esta sesión). |
 
+### El fix de código no resolvió el síntoma — causa real es infraestructura (sesión 2026-06-26, continuación)
+
+Smoke test post-deploy del fix: `GET /api/resultados/resumen` siguió sin responder, ahora con timeouts de hasta 300s. Investigación encontró la causa de fondo:
+
+| Verificación | Resultado |
+|--------------|-----------|
+| **Logs del contenedor durante el timeout** | `MySqlException: The Command Timeout expired before the operation completed` (`CommandTimeout=30`). `Program.cs:47` tiene `EnableRetryOnFailure(3)` — EF Core reintenta hasta 3 veces una query que ya viene fallando por timeout, multiplicando el tiempo total. |
+| **`EXPLAIN` de la query de `stock_diario`** | `type: index` (no `range`) — escanea **25.99M filas** (toda la tabla), porque MySQL elige el orden del índice `idx_stock_sku_fecha` para satisfacer el `GROUP BY sku, fecha` en vez de filtrar primero por fecha. Hay índices de sobra (`idx_stock_fecha`, `idx_stock_sku_fecha`, etc.) — no es falta de índices. |
+| **Prueba con `FORCE INDEX (idx_stock_fecha)`** | Cambia el plan a `type: range`, **13M filas** (acotado a los últimos 365 días, como se esperaba) — mejor plan, pero la query **igual tardó ~5 minutos** en ejecutar. `SHOW FULL PROCESSLIST` confirmó que no hay contención (ninguna otra query corriendo en simultáneo). |
+| **Causa real: la VM no tiene memoria para el volumen de datos actual** | `free -h`: 1.9 GiB RAM total, 84 MiB libres, **1.0 GiB de swap en uso activo**. MySQL: `innodb_buffer_pool_size=128MB` (ínfimo para una tabla de 24.75M filas) y `tmp_table_size`/`max_heap_table_size=16MB` (el `GROUP BY` de esta query produce ~2M filas, excede ese límite y se convierte en tabla temporal en disco). Esta configuración estaba bien para el catálogo original (104 artículos) pero quedó obsoleta tras el rollout de #41-44 (~5500 artículos, 24.75M filas en `stock_diario`). |
+| **Conclusión** | El fix de C# de esta sesión (agrupar en `Dictionary`) es una mejora real y se mantiene desplegado — elimina trabajo innecesario en la app. Pero **no alcanza por sí solo**: el cuello de botella real es de infraestructura (RAM + configuración de MySQL), no de código de aplicación ni de índices de base de datos. |
+| **Acción tomada** | Issue nuevo [#60](https://github.com/Evalutia/App-Forecast/issues/60) (CRÍTICO) para la decisión de infraestructura (subir RAM de la VM, ajustar `innodb_buffer_pool_size`/`tmp_table_size`, o evaluar si la solución de fondo de #59 —precalcular en vez de agregar en cada request— alcanza sin upgrade). #59 queda **abierto**, no se cierra — el síntoma reportado (timeout) no está resuelto, solo mitigado parcialmente por el fix de C#. |
+
+---
+
+### Re-diagnóstico y plan de resolución — Issue #60 (sesión 2026-07-10)
+
+Sesión `/grill-me` para confirmar si el hallazgo de #60 seguía vigente dos semanas después, y decidir cómo avanzar.
+
+| Verificación | Resultado |
+|--------------|-----------|
+| **RAM/swap de la VM (`free -h`)** | 1.9 GiB total, **76 MiB libres**, **747 MiB de swap en uso** — prácticamente igual que el snapshot original (84 MiB libres / 1.0 GiB swap). Sin cambios en dos semanas. |
+| **Config MySQL** | `innodb_buffer_pool_size=128MB`, `tmp_table_size`/`max_heap_table_size=16MB` — idéntico al original, nadie la tocó. |
+| **Tamaño de `stock_diario`** | Creció de 24.75M a **25.19M filas** (+1.8%, consistente con el ETL nocturno). 1.79 GB datos + 4.51 GB índices = 6.3 GB, ~50x el buffer pool disponible. |
+| **Reproducción de la query real de `GetResumenGlobal()`** (`GROUP BY sku, fecha` sobre 365 días, sin `FORCE INDEX`, sin otra query corriendo en paralelo — `SHOW FULL PROCESSLIST` limpio) | **7 min 50 seg**, 2,020,378 filas agrupadas. Peor que el ~5 min del test con `FORCE INDEX` documentado en la sesión original. **Confirmado: el problema sigue 100% vigente, no mejoró.** |
+
+| Decisión | Definición |
+|----------|-----------|
+| **Camino elegido: atacar el patrón de agregación en vivo antes que subir infraestructura** | En vez de upsizear la instancia AWS (costo recurrente + ventana de downtime), se prioriza implementar la solución de fondo ya prevista en #59: precalcular un resumen de `stock_diario` una vez por noche vía el ETL, en vez de agregar 25M filas en cada request HTTP. Subir RAM queda pospuesto condicionalmente — se retoma solo si, tras desplegar y verificar este fix, algún otro punto de la app (ETL, otro endpoint) sigue degradado por el swap/buffer pool chico. |
+| **Alcance: las 4 funciones de `ResultadosService.cs`, no solo `GetResumenGlobal()`** | `GetStockAnalysis()`, `GetTopVentasPerdidas()` y `GetStockoutDistribution()` tienen el mismo patrón exacto (`GroupBy` de `stock_diario` por sku+fecha en 365 días sobre el catálogo completo) y nunca fueron probadas con el catálogo de ~5500 SKUs — podrían estar igual de rotas sin que nadie lo haya notado todavía (línea "Impacto" de #59 ya lo anticipaba). Se migran las 4 en la misma pasada. |
+| **Diseño: rollup final por SKU, sin tabla intermedia día-por-día** | Ninguna de las 4 funciones necesita el detalle diario después de agregarlo — solo derivan `diasConStock`/`diasSinStock` por SKU. Tabla nueva `stock_resumen_365` (una fila por SKU, ~5500 filas en vez de ~2M): `sku` (PK, FK a `articulos`), `dias_con_stock`, `dias_sin_stock`, `total_dias`, `ventas_365`, `ventas_perdidas_365`, `stockout_rate`, `categoria`, `fecha_calculo`. No incluye `pronostico`/`sugerencia_compra` (vienen de `predicciones`, tabla chica sin este problema — no mezclar dos problemas distintos en una tabla). Si en el futuro hace falta el detalle día-por-día para otro caso de uso (ej. gráfico de evolución de stock), `StockDiarioRepository.GetDailySumBySkuAndMonth()` ya cubre consultas puntuales por SKU (barato, usa índice) — no hace falta precalcular algo que hoy no se usa. |
+| **Implementación: script Python hermano de `run_calc_planilla.py`** | Mismo patrón ya probado (`services/etl/run_calc_planilla.py` → `planilla_ventas_calculada`), orquestado desde el mismo `job_etl_diario.kjb` (Pentaho), mismo cron de Ofelia (3 AM). Evita tener un segundo scheduler paralelo en el backend .NET compitiendo por la misma tabla. Tabla creada vía script SQL numerado (`infra/sql/11-stock-resumen.sql`), siguiendo el patrón existente (no EF Core Migrations — este proyecto no las usa). |
+| **Orden de rollout** | (1) aplicar `infra/sql/11-stock-resumen.sql` (tabla vacía) → (2) correr el script Python manualmente una vez contra prod para poblarla (mismo patrón que el backfill de #44) → (3) verificar `SELECT COUNT(*) FROM stock_resumen_365` (~5500 filas esperadas) → (4) recién ahí deployar el código del backend que lee de la tabla. Mismo orden de 3 pasos que ya se usó en el deploy de grupos (`10-grupos.sql` → backfill → código) — evita que el código nuevo lea una tabla vacía y muestre todo en cero durante horas. |
+| **Estado de los issues** | #59 sigue **abierto** hasta desplegar y verificar el fix (mismo tipo de smoke test que destapó el problema: `curl` real a `/api/resultados/resumen` con catálogo completo, midiendo tiempo). #60 sigue **abierto pero re-priorizado** — de "bloqueante crítico" a "seguimiento condicional", con nota de que el diagnóstico se re-verificó hoy (7:50 min, peor que el dato original) y que se decidió no subir RAM todavía a favor de resolver el patrón de agregación en vivo primero. |
+
+> **Nota para quien retome esto:** el precálculo nocturno asume que `stock_minimo` (usado para clasificar días con/sin stock) es el valor *actual* del artículo al momento del recálculo, igual que el comportamiento hoy en vivo — no hay versionado histórico de ese umbral. Si el ETL de una noche falla o se salta (lock de backfill, ver `run_ofelia.sh`), `stock_resumen_365` simplemente no se actualiza esa noche y sigue sirviendo el dato del día anterior — mismo criterio de staleness que ya tiene el resto de la app (ETL nocturno como única fuente de actualización).
+
+---
+
+### Implementación — Issue #59/#60 (sesión 2026-07-10, continuación)
+
+Código escrito y verificado localmente (`dotnet build WebApi.sln` → 0 errores; `pytest services/etl/tests/` → 18/18 OK, incluye 4 tests nuevos). **No desplegado a producción todavía** — falta correr el rollout en la VM.
+
+| Archivo | Contenido |
+|---|---|
+| `infra/sql/11-stock-resumen.sql` | `CREATE TABLE stock_resumen_365` — PK `sku` VARCHAR(128), `dias_con_stock`/`dias_sin_stock`/`total_dias`/`ventas_365` crudos (sin tasas/categorías derivadas), FK a `articulos(sku)` igual que `planilla_ventas_calculada`. |
+| `apps/backend/WebApi/Models/StockResumen365.cs` + `EvalutiaDbContext.cs` | Entity + `DbSet<StockResumen365>`, mapeo mirror de `PlanillaVentasCalculada`. |
+| `apps/backend/WebApi/Services/Resultados/ResultadosService.cs` | Las 4 funciones (`GetResumenGlobal`, `GetStockAnalysis`, `GetTopVentasPerdidas`, `GetStockoutDistribution`) reescritas para leer `_db.StockResumen365` (~5500 filas) en vez de agregar `_db.StockDiario` en vivo (25M+ filas). Cada una conserva **exactamente** su propia fórmula/umbral original (confirmado que las 4 no son idénticas entre sí — ver corrección de diseño de la sesión anterior). `GetStockAnalysis` sigue sin filtrar por `stock_minimo > 0` (cubre todo `articulos`, como antes). |
+| `services/etl/run_calc_stock_resumen.py` | Calcula el resumen: 1 query SQL con `LEFT JOIN` desde `articulos` (cubre todos los SKUs) agregando `stock_diario` por sku+fecha con `CASE WHEN total > stock_minimo`, + 1 query de `ventas_historicas` agrupada por sku. Combina ambas en Python (`combinar()`, función pura, testeada sin DB). Escribe con `DELETE + INSERT` en una transacción (no `TRUNCATE` — mismo criterio que `run_calc_planilla.py`, rollbackeable). Registra inicio/fin en `jobs_historial` (`tipo_job='etl'`, `detalle.subtipo='calc_stock_resumen'`). |
+| `services/etl/run_calc_stock_resumen.sh` | Wrapper no bloqueante (siempre `exit 0`), mirror de `run_calc_planilla.sh`. |
+| `services/etl/tests/test_run_calc_stock_resumen.py` | 4 tests de `combinar()`: SKU sin ventas, SKU sin filas de stock_diario, cálculo de `dias_sin_stock`, ventas de SKU huérfano ignoradas. |
+| `services/etl/job_etl_diario.kjb` | Nuevo step `RUN CALC_STOCK_RESUMEN` enganchado entre `RUN CALC_SUGERENCIAS` y `TRUNCATE VENTAS_STAGE END` (mismo lugar que los otros steps de cálculo derivado). |
+
+**Pendiente — rollout en producción**, en este orden exacto (acordado en la sesión anterior):
+1. Aplicar `infra/sql/11-stock-resumen.sql` en la VM (`docker exec -i evalutia-mysql mysql -u root -p evalutia < infra/sql/11-stock-resumen.sql`, o vía `docker compose exec`).
+2. `docker compose build etl` (el Dockerfile hace `COPY . /app` — el script nuevo no existe en el contenedor hasta rebuildear la imagen) + correr manualmente `run_calc_stock_resumen.sh` una vez contra prod para poblar la tabla antes de que el código nuevo la lea (mismo patrón que el backfill de #44).
+3. Verificar `SELECT COUNT(*) FROM stock_resumen_365` (~5500 filas esperadas, todo `articulos`).
+4. Recién ahí: `docker compose build webapi` + `up -d --force-recreate webapi`.
+5. Smoke test: `curl` real a `/api/resultados/resumen`, `/api/resultados/stock-analysis`, `/api/resultados/charts/top-ventas-perdidas`, `/api/resultados/charts/stockout-distribution` — confirmar que responden en milisegundos y no en minutos.
+
+---
+
+### Plan de trabajo — Mail del cliente "Frecuencia de venta + Modelo econométrico" (sesión 2026-07-12)
+
+Origen: mail del cliente con dos pedidos independientes. **Parte A** (frecuencia de venta por tickets para desestacionalizar) e **Parte B** (ampliar modelo econométrico más allá del grupo 201). Se dividieron en issues con estimación en horas ($25/h) para presupuestar.
+
+#### Parte A — Frecuencia de venta por tickets
+
+| Decisión | Definición |
+|----------|-----------|
+| **"Histórico" y "Tickets" no están definidos por el cliente** | El mail no especifica qué ventana/fórmula es "Histórico" ni si "Ticket" = día distinto con venta en el mes (dato que ya tenemos en `ventas_historicas`) o transacción real de POS (granularidad que no tenemos hoy). Se decidió **no asumir por conveniencia técnica** — aunque `rotacion_sugerida` (`run_calc_sugerencias.py`) es candidato natural a reusar como "Histórico", no se da por sentado: va como pregunta abierta al cliente. |
+| **Colores: se reusa el mecanismo, no el significado** | El nuevo criterio de tickets se muestra con color de fondo (mismo mecanismo visual que `estado_mes`/`frecuencia_nivel`), pero **no reemplaza** el significado del color de quiebre ya validado contra el Excel del cliente (issues #36-#39). Conviven como señales separadas. |
+| **Sin columnas numéricas nuevas en la planilla principal** | La planilla solo muestra la señal de color. El detalle completo (tickets, Histórico, VentaReal/Extrapolación, valor final aplicado) va únicamente en la tabla exportable, que es donde el cliente pidió verlo con números — evita agregar un tercer bloque de 13 columnas a una tabla que ya tiene scroll horizontal con 2 bloques. |
+| **Umbrales (≤2, 3-4, ≥5) como constantes ajustables por código** | Mismo patrón que `FREQ_ALTA_MIN`/`FREQ_BAJA_MAX` en `run_calc_planilla.py` — no UI de configuración ahora (el cliente pidió esto para "un futuro", no ahora). Si más adelante pide tocarlo él mismo sin pasar por nosotros, es un issue nuevo aparte. |
+
+**Issues:**
+
+| # | Issue | Horas |
+|---|-------|-------|
+| #61 | Mail de dudas al cliente + cierre de definición (Histórico, Tickets) — bloqueante, arranca el resto de la Parte A | 2–3 |
+| #62 | Migración SQL: columnas nuevas en `planilla_ventas_calculada` (tickets, histórico, venta ajustada, criterio aplicado) | 1–2 |
+| #63 | ETL: cálculo de tickets/histórico/extrapolación y fórmula de blending (6 casos: 3 niveles × stock-completo/quiebre) en `run_calc_planilla.py` | 6–9 |
+| #64 | Verificación: casos de ejemplo del mail del cliente + validación SKU real contra su Excel (mismo tipo de QA que #36-#39) | 4–6 |
+| #65 | Frontend: indicador de color en `PlanillaTable.tsx` reusando la paleta de 3 niveles existente, sin pisar `estadoMesBg` | 4–6 |
+| #66 | Export: columnas nuevas en la tabla exportable (`exportPlanilla.ts`) | 1–2 |
+| #67 | *(Fuera de alcance ahora — futuro)* UI de configuración de umbrales, si el cliente la pide más adelante | — |
+
+**Subtotal Parte A: ≈18–28 h**
+
+#### Parte B — Modelo econométrico más allá del grupo 201 (plan anidado)
+
+| Decisión | Definición |
+|----------|-----------|
+| **Hallazgo: el R²/RMSE de producción es in-sample, no holdout** | `fit_rf_insample`/`fit_xgb_insample`/`fit_prophet_insample` (`ml/models.py`) entrenan con todos los datos disponibles y evalúan sobre esos mismos datos — no mide generalización, mide memorización. Confirma la sospecha del usuario de que los modelos "pueden no estar bien" sin haberlo verificado nunca con holdout real. |
+| **`ml/eval_models.py` (intento previo de evaluación con holdout) está roto** | Llama a `fit_xgb_with_holdout_multi`, función que ya no existe en `ml/models.py` (solo quedan las variantes in-sample). Coincide con un issue que el usuario había arrancado y dejado a mitad de camino. |
+| **No existe un modelo "econométrico" como técnica separada** | Lo que el proyecto llama "modelo econométrico" es el ensemble clásico (RF+XGB+Prophet, `--model-set=classic`) aplicado hoy solo a SKUs del grupo 201 vía `grupos.aplica_modelo_econometrico`. No hay SARIMAX/ETS conectado en el pipeline real pese a figurar en el stack tecnológico. |
+| **Secuencia: diagnóstico acotado antes de rediseño** | B0 es deliberadamente chico (arreglar el holdout roto + correr sobre 201 + medir el gap `r2_train` vs `r2_test`) antes de comprometerse a un rediseño completo de metodología (walk-forward validation, etc.). Si el gap es chico, se ahorra ese trabajo; si es grande, se abre un issue de rediseño con evidencia concreta, no a ciegas. |
+| **Se factura al cliente, con framing transparente** | No es "deuda técnica interna random" — es un prerrequisito directo de lo que el cliente pidió explícitamente ("usar R² para evaluar la calidad"). Sin arreglar el holdout, ese pedido no se puede cumplir honestamente. |
+| **Criterio de elegibilidad: comparativo, no absoluto** | Un SKU pasa a modelo econométrico si su R²/RMSE en holdout es **mejor** que el del ensemble que ya le asignarían — no un umbral fijo en el vacío. Cumple el pedido del cliente de aplicarlo "solo donde realmente me sea útil". |
+| **Elegibilidad por SKU individual, no por grupo** | Requiere migrar el esquema (`grupos.aplica_modelo_econometrico` → nivel SKU) porque dentro de un mismo grupo puede haber SKUs con buen ajuste econométrico y otros sin ninguno. |
+
+**Issues:**
+
+| # | Issue | Horas |
+|---|-------|-------|
+| #68 | B0.1 — Reconstruir la función de holdout faltante en `ml/models.py` para que `eval_models.py` corra | 3–5 |
+| #69 | B0.2 — Correr `eval_models.py` sobre el grupo 201 actual, medir gap train/test, documentar hallazgos | 2–4 |
+| #70 | B1 — Definir criterio de elegibilidad comparativo (R² test econométrico vs ensemble) + mínimo de meses con datos | 1–2 |
+| #71 | B2 — Migrar esquema de elegibilidad de nivel-grupo a nivel-SKU | 3–5 |
+| #72 | B3 — Extender evaluación holdout a todos los candidatos (no solo grupo 201) + persistir R²/RMSE comparativo | 6–9 |
+| #73 | B4 — Aplicar criterio y marcar SKUs elegibles | 3–4 |
+| #74 | B5 — Medir y resolver impacto de performance del job nocturno con el volumen ampliado (~5500 SKUs candidatos vs 104 hoy) | 3–6 |
+| #75 | B6 — Backfill de predicciones para SKUs recién elegibles + validación en producción (mismo patrón que #43-#46) | 6–10 |
+
+**Subtotal Parte B: ≈27–45 h** (B0 = #68+#69, ≈5–9 h, da la info real antes de comprometer el resto)
+
+| Decisión | Definición |
+|----------|-----------|
+| **#30 ya existía y anticipaba este mismo hallazgo** | Issue previo (2026-06-09) de auditoría de modelos, con criterio muy similar al encontrado en esta sesión (overfitting check train/holdout, R² sospechoso cerca de 1.0, walk-forward validation). #30 queda como issue paraguas — no se cierra, no se duplica. |
+| **División del alcance de #30** | #68/#69 ejecutan la parte de "overfitting check" de #30. La parte de SARIMA/ETS de #30 no aplica (confirmado que ninguno de los dos está conectado en `predict.py`). La parte de calibración de pesos del ensemble (inverse-RMSE) y los 3 casos borde (baja frecuencia, quiebre frecuente, <12 meses de historia) que #68-#75 no cubren pasan a **#76** (issue nuevo). |
+
+**Issue adicional:**
+
+| # | Issue | Horas |
+|---|-------|-------|
+| #76 | Auditar calibración de pesos del ensemble + casos borde (baja frecuencia, quiebre, <12 meses) — depende de #68, extraído de #30 | 4–6 |
+
+> **Nota de priorización:** el presupuesto acordado con el cliente para este paquete quedó por debajo del costo técnico estimado arriba (detalle de esa negociación fuera de este archivo — no corresponde documentar montos/condiciones comerciales acá). Si el tiempo disponible no alcanza para todo, el orden de entrega es: Parte A completa primero, después diagnóstico B0 (#68-#69), y B1-B6 según tiempo disponible.
+
+---
+
+### `ml/models.py` + `ml/eval_models.py` — Issue #68 (sesión 2026-07-12)
+
+| Decisión | Definición |
+|----------|-----------|
+| **Alcance del "equivalente"** | No se reconstruye el ensemble viejo de 14 variantes XGB (`XGB_lr_low`, `XGB_mid_trees`, features "rich", log-transform) que existía antes de la simplificación de `models.py` — está abandonado y producción no lo usa. Se construyen 3 funciones nuevas, una por modelo real en producción: `fit_rf_with_holdout`, `fit_xgb_with_holdout`, `fit_prophet_with_holdout`, cada una wrapeando su `*_insample` correspondiente + split train/test real. |
+| **Cálculo de `k` para `holdout_split`** | `holdout_split(series, k)` (en `ml/evaluate.py`) no se modifica. Las nuevas funciones calculan `k = years_test * (4 si freq empieza con "Q", sino 12)` antes de llamarla — preserva el significado original de `EVAL_TEST_YEARS` (que antes usaba `_split_last_year`, ya eliminado). |
+| **Shape de retorno** | Cada función devuelve `Optional[HoldoutResult]` (no `Dict[str, HoldoutResult]`) — ya no hay múltiples variantes internas por modelo. `eval_models.py` itera las 3 funciones por SKU y arma una fila por (sku, modelo). `fit_prophet_with_holdout` requiere `sku` explícito (hiperparámetros por SKU en `HIPERPARAMETROS_OPTIMOS`). |
+| **Guardrails de historia mínima** | Mismo patrón que las `*_insample` actuales: `try/except Exception: return None` dentro de cada función `fit_*_with_holdout`. Si el split no es viable (serie corta, `ValueError` de `holdout_split`, o el mínimo de Prophet no se cumple sobre el `train` ya recortado) se devuelve `None` y `eval_models.py` lo saltea con `continue` — no debe tumbar el script completo. |
+| **Filtro de SKUs para desarrollo** | Se agrega env var opcional `EVAL_ONLY_SKUS` (lista separada por comas) para acotar `eval_models.py` a 1-2 SKUs durante verificación local, reusando el parámetro `only_skus` que ya soporta `load_series_by_sku_mysql`. Default `None` (todas las series) sin cambiar el comportamiento actual. |
+| **Fuera de alcance** | No se toca `predict.py` ni la selección de "mejor modelo" en producción (sigue por RMSE in-sample). Extender la evaluación holdout a todo el catálogo y persistir resultados es #72 (depende de #68); calibración de ensemble y casos borde es #76; ninguno se mezcla con #68. |
+
+> **Nota:** el issue #30 (auditoría de modelos) ya anticipaba este mismo hallazgo de overfitting/in-sample — #68 es la ejecución acotada de esa parte, no una issue nueva desconectada.
+
+**Hallazgo durante la implementación — bug separado en producción (#77):** `fit_rf_insample` y `fit_xgb_insample` llaman a `_build_lag_month_trend`, función que fue borrada por accidente en el commit `1209bfd` (2025-12-04, el mismo que introdujo Prophet) pero cuyos call-sites nunca se actualizaron. Como ambas funciones atrapan cualquier excepción con `except Exception: return None`, el fallo es silencioso: **desde el 2025-12-04, RF y XGB nunca producen resultado ni en `predict.py` (producción) ni en el holdout nuevo de #68 — solo Prophet funciona.** Se documentó como issue nuevo (#77, bloqueante) en vez de arreglarlo dentro de #68, para no mezclar el bug de producción con el alcance original (reconstruir el script de evaluación). **Verificado en vivo:** `python -m ml.eval_models` con `EVAL_ONLY_SKUS=C00375` contra la DB real corre sin errores y produce el resumen (`PROPHET: r2_train=0.926, r2_test=0.336, mae_train=322, mae_test=1343, n_skus=1`) — cumple el criterio de aceptación de #68 tal como quedó acotado. RF/XGB en el resumen aparecerán en blanco hasta que se resuelva #77.
+
 ---
 
 ## Issues conocidos / TODOs en código

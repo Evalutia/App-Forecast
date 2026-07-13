@@ -14,7 +14,7 @@ from xgboost import XGBRegressor
 from statsmodels.tsa.statespace.sarimax import SARIMAX
 from statsmodels.tsa.holtwinters import ExponentialSmoothing
 from statsmodels.tools.sm_exceptions import ConvergenceWarning
-from .evaluate import rmse as _rmse, r2_score as _r2
+from .evaluate import rmse as _rmse, r2_score as _r2, holdout_split as _holdout_split
 
 # -------------------------------------------------------------------------
 # Prophet support: optional import (si no está instalado, fit_prophet_insample
@@ -434,6 +434,171 @@ def fit_prophet_insample(
             params=params,
             features=None,
             holdout_pred=holdout,
+        )
+    except Exception:
+        return None
+
+
+# -------------------------------------------------------------------------
+# Holdout real (train/test) para los modelos que usa producción (predict.py):
+# RF, XGB y Prophet. Cada función entrena sobre 'train' (serie sin los
+# últimos k periodos) y evalúa contra 'test' (esos k periodos), a diferencia
+# de las *_insample de arriba que solo miden ajuste sobre datos ya vistos.
+# -------------------------------------------------------------------------
+
+def _holdout_k(freq: str, years_test: int) -> int:
+    periods_per_year = 4 if str(freq).upper().startswith("Q") else 12
+    return int(years_test) * periods_per_year
+
+
+def _mae(y_true, y_pred) -> float:
+    return float(np.mean(np.abs(np.asarray(y_true, dtype="float64") - np.asarray(y_pred, dtype="float64"))))
+
+
+def fit_rf_with_holdout(
+    full_series: pd.Series,
+    freq: str,
+    forecast_periods: int,
+    lags: int = 12,
+    years_test: int = 1,
+) -> Optional[HoldoutResult]:
+    try:
+        k = _holdout_k(freq, years_test)
+        train, test = _holdout_split(full_series, k=k)
+        total_steps = k + max(0, int(forecast_periods))
+        base = fit_rf_insample(train, steps_forecast=total_steps, lags=lags, freq=freq)
+        if base is None or getattr(base, "forecast", None) is None:
+            return None
+        fc = np.asarray(base.forecast, dtype="float64")
+        if len(fc) < k:
+            return None
+        fc_test = fc[:k]
+        fc_future = fc[k : k + forecast_periods] if forecast_periods > 0 else np.asarray([], dtype="float64")
+
+        try:
+            fitted = base.holdout_pred.loc[train.index].values.astype("float64")  # type: ignore[union-attr]
+            mae_tr = _mae(train.values, fitted)
+        except Exception:
+            mae_tr = None
+        try:
+            r2_te = float(_r2(test.values, fc_test))
+        except Exception:
+            r2_te = None
+        try:
+            mae_te = _mae(test.values, fc_test)
+        except Exception:
+            mae_te = None
+
+        return HoldoutResult(
+            name=base.name,
+            r2_train=base.r2,
+            r2_test=r2_te,
+            mae_train=mae_tr,
+            mae_test=mae_te,
+            forecast_future=fc_future,
+            params=base.params,
+            features=getattr(base, "features", None),
+            test_pred=pd.Series(fc_test, index=test.index) if len(fc_test) == len(test) else None,
+        )
+    except Exception:
+        return None
+
+
+def fit_xgb_with_holdout(
+    full_series: pd.Series,
+    freq: str,
+    forecast_periods: int,
+    lags: int = 12,
+    years_test: int = 1,
+) -> Optional[HoldoutResult]:
+    try:
+        k = _holdout_k(freq, years_test)
+        train, test = _holdout_split(full_series, k=k)
+        total_steps = k + max(0, int(forecast_periods))
+        base = fit_xgb_insample(train, steps_forecast=total_steps, lags=lags, freq=freq)
+        if base is None or getattr(base, "forecast", None) is None:
+            return None
+        fc = np.asarray(base.forecast, dtype="float64")
+        if len(fc) < k:
+            return None
+        fc_test = fc[:k]
+        fc_future = fc[k : k + forecast_periods] if forecast_periods > 0 else np.asarray([], dtype="float64")
+
+        try:
+            fitted = base.holdout_pred.loc[train.index].values.astype("float64")  # type: ignore[union-attr]
+            mae_tr = _mae(train.values, fitted)
+        except Exception:
+            mae_tr = None
+        try:
+            r2_te = float(_r2(test.values, fc_test))
+        except Exception:
+            r2_te = None
+        try:
+            mae_te = _mae(test.values, fc_test)
+        except Exception:
+            mae_te = None
+
+        return HoldoutResult(
+            name=base.name,
+            r2_train=base.r2,
+            r2_test=r2_te,
+            mae_train=mae_tr,
+            mae_test=mae_te,
+            forecast_future=fc_future,
+            params=base.params,
+            features=getattr(base, "features", None),
+            test_pred=pd.Series(fc_test, index=test.index) if len(fc_test) == len(test) else None,
+        )
+    except Exception:
+        return None
+
+
+def fit_prophet_with_holdout(
+    full_series: pd.Series,
+    freq: str,
+    forecast_periods: int,
+    lags: int = 12,
+    years_test: int = 1,
+    *,
+    sku: str,
+) -> Optional[HoldoutResult]:
+    try:
+        k = _holdout_k(freq, years_test)
+        train, test = _holdout_split(full_series, k=k)
+        total_steps = k + max(0, int(forecast_periods))
+        base = fit_prophet_insample(sku=sku, train=train, steps_forecast=total_steps, lags=lags, freq=freq)
+        if base is None or getattr(base, "forecast", None) is None:
+            return None
+        fc = np.asarray(base.forecast, dtype="float64")
+        if len(fc) < k:
+            return None
+        fc_test = fc[:k]
+        fc_future = fc[k : k + forecast_periods] if forecast_periods > 0 else np.asarray([], dtype="float64")
+
+        try:
+            fitted = base.holdout_pred.loc[train.index].values.astype("float64")  # type: ignore[union-attr]
+            mae_tr = _mae(train.values, fitted)
+        except Exception:
+            mae_tr = None
+        try:
+            r2_te = float(_r2(test.values, fc_test))
+        except Exception:
+            r2_te = None
+        try:
+            mae_te = _mae(test.values, fc_test)
+        except Exception:
+            mae_te = None
+
+        return HoldoutResult(
+            name=base.name,
+            r2_train=base.r2,
+            r2_test=r2_te,
+            mae_train=mae_tr,
+            mae_test=mae_te,
+            forecast_future=fc_future,
+            params=base.params,
+            features=getattr(base, "features", None),
+            test_pred=pd.Series(fc_test, index=test.index) if len(fc_test) == len(test) else None,
         )
     except Exception:
         return None

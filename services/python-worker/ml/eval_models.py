@@ -4,7 +4,9 @@ import pandas as pd
 
 from ml.evaluate import r2_score
 from ml.models import (
-    fit_xgb_with_holdout_multi,
+    fit_rf_with_holdout,
+    fit_xgb_with_holdout,
+    fit_prophet_with_holdout,
 )
 from ioworker.db import DBConfig, get_engine
 from ioworker.data import load_series_by_sku_mysql
@@ -14,6 +16,9 @@ FREQ = os.getenv("EVAL_FREQ", "QS")
 TEST_YEARS = int(os.getenv("EVAL_TEST_YEARS", "1"))
 LAGS = int(os.getenv("EVAL_LAGS", "8"))
 FORECAST_PERIODS = int(os.getenv("EVAL_FORECAST_PERIODS", "2"))
+
+_only_skus_raw = os.getenv("EVAL_ONLY_SKUS", "").strip()
+ONLY_SKUS = [s.strip() for s in _only_skus_raw.split(",") if s.strip()] if _only_skus_raw else None
 
 
 def main() -> None:
@@ -26,33 +31,36 @@ def main() -> None:
     )
     engine = get_engine(db_cfg)
 
-    # Cargar TODAS las series de SKUs (sin tope de TOP_N)
+    # Cargar series de SKUs (todas por default, o solo EVAL_ONLY_SKUS si se seteó)
     series_by_sku = load_series_by_sku_mysql(
-        engine, table="ventas_historicas", freq=FREQ, only_skus=None, top_n=None
+        engine, table="ventas_historicas", freq=FREQ, only_skus=ONLY_SKUS, top_n=None
     )
 
     rows = []  # filas por (sku, modelo)
     for sku, s in series_by_sku.items():
-        try:
-            # Solo modelos XGB (features simples) con holdout
-            xgb_results = fit_xgb_with_holdout_multi(
-                s, freq=FREQ, forecast_periods=FORECAST_PERIODS, lags=LAGS, years_test=TEST_YEARS
-            )
-            for model_name, xgb_res in xgb_results.items():
-                if xgb_res is None:
-                    continue
-                rows.append(
-                    {
-                        "sku": sku,
-                        "model": model_name,
-                        "r2_train": xgb_res.r2_train,
-                        "r2_test": xgb_res.r2_test,
-                        "mae_train": xgb_res.mae_train,
-                        "mae_test": xgb_res.mae_test,
-                    }
+        for fit_holdout, kwargs in (
+            (fit_rf_with_holdout, {}),
+            (fit_xgb_with_holdout, {}),
+            (fit_prophet_with_holdout, {"sku": sku}),
+        ):
+            try:
+                res = fit_holdout(
+                    s, freq=FREQ, forecast_periods=FORECAST_PERIODS, lags=LAGS, years_test=TEST_YEARS, **kwargs
                 )
-        except Exception:
-            continue
+            except Exception:
+                continue
+            if res is None:
+                continue
+            rows.append(
+                {
+                    "sku": sku,
+                    "model": res.name,
+                    "r2_train": res.r2_train,
+                    "r2_test": res.r2_test,
+                    "mae_train": res.mae_train,
+                    "mae_test": res.mae_test,
+                }
+            )
 
     df = pd.DataFrame(rows)
     if df.empty:
