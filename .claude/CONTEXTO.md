@@ -1400,6 +1400,20 @@ El fix de código (`stock_resumen_365`, commit `1adafb3`) ya está commiteado y 
 | **`.gitignore`** | Se agregan `*.p12`, `*.crt`, `*.pem` — no porque los certs reales vivan en el repo (viven en `/opt/certs-ws`, fuera de git), sino como red de seguridad defensiva si alguna vez alguien copia certs dentro del directorio del repo por costumbre/error, tal como pedía el alcance original del issue. |
 | **Manejo de la contraseña del `.p12`** | No se lee el PDF de instructivo ni se extrae la contraseña en esta sesión — #49 es solo almacenamiento/montaje, no requiere la contraseña todavía (eso es uso en tiempo de ejecución, alcance de `#50`/`#51`). Mismo criterio de la sesión anterior: la contraseña no se escribe en ningún archivo del repo. |
 
+**Deploy ejecutado y verificado en producción (2026-07-13, mismo día):**
+
+| Paso | Resultado |
+|------|-----------|
+| Transferencia por base64 | **Lección real de esta sesión:** pegar el base64 en una sola línea larga (5860 caracteres) o en un solo bloque de 78 líneas cortas **falló dos veces** en la terminal de Session Manager (una vez con `base64: invalid input`, otra con el paste duplicándose a mitad de camino) — el navegador/terminal tiene un límite práctico de tamaño de paste confiable. **Solución que funcionó:** partir el base64 en 4 chunks de ~20 líneas cada uno (`split -l 20`), cargarlos de a uno con `cat >>` (append), verificando `wc -l` después de cada chunk antes de seguir al siguiente. Para transferencias futuras de archivos chicos por este mismo canal, usar chunks de ~20-25 líneas desde el principio, no intentar el archivo completo de una. |
+| `ca.crt` transferido | 1935 bytes — coincide exacto con el original. `openssl x509` confirma el mismo certificado (CA de MG Soluciones IT, válido a 2036) tanto local como en la VM. |
+| `cotech-prod.p12` transferido | 4394 bytes — coincide exacto con el original (tras descartar un primer intento corrupto de 3071 bytes). |
+| Permisos | `/opt/certs-ws` en `700`, ambos archivos en `600`, propietario `root`. |
+| `git merge --ff-only origin/Develop` | Fast-forward limpio, `7da23e1` en `HEAD` — confirma que el cambio pendiente de puerto de `webapp` (`WEBAPP_PORT`→`80`) es una modificación local de la máquina de Nico, no algo que exista en el working tree de la VM (el merge no tuvo conflictos). |
+| Recreate `etl` | Solo `docker compose up -d --force-recreate` — **sin rebuild**, porque el cambio es únicamente de `docker-compose.yml` (el volumen), no del código dentro de la imagen. Confirmado `CREATED: 30 segundos`. |
+| Verificación del mount | `docker compose exec etl ls -la /certs` — ambos archivos visibles dentro del contenedor, mismos tamaños y permisos que en el host. |
+
+**Resultado: Issue #49 completamente implementado, desplegado y verificado.** Los certificados ya están disponibles para que `#50`/`#51` los consuman (`CERT_PATH=/certs/cotech-prod.p12`, `CACERT_PATH=/certs/ca.crt`).
+
 ---
 
 ## Issues conocidos / TODOs en código
