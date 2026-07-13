@@ -27,65 +27,40 @@ namespace Services.Resultados
 
     public ResumenGlobalDto GetResumenGlobal()
     {
-      var today = DateOnly.FromDateTime(DateTime.UtcNow.Date);
-      var desde365 = today.AddDays(-365);
-
-      // SKUs con stock_minimo definido y que tengan datos de stock
+      // SKUs con stock_minimo definido (mismo universo que antes)
       var skusConStock = _db.Articulos
         .AsNoTracking()
         .Where(a => a.StockMinimo > 0)
-        .Select(a => new { a.Sku, a.StockMinimo })
+        .Select(a => a.Sku)
+        .ToHashSet();
+
+      // Resumen precalculado por el ETL nocturno (issue #59/#60) — reemplaza la
+      // agregación en vivo de stock_diario (25M+ filas), que era la causa real del
+      // timeout en producción con el catálogo ampliado (~5500 SKUs). Guarda solo
+      // conteos crudos; la fórmula de stockout/ventas-perdidas sigue siendo la misma
+      // de acá abajo, solo cambia el origen del dato.
+      var resumen = _db.StockResumen365
+        .AsNoTracking()
+        .ToList()
+        .Where(r => skusConStock.Contains(r.Sku))
         .ToList();
 
-      var skuSet = skusConStock.Select(s => s.Sku).ToHashSet();
-      var minimos = skusConStock.ToDictionary(s => s.Sku, s => s.StockMinimo);
-
-      // Stock diario de los últimos 365 días para esos SKUs
-      var stockRows = _db.StockDiario
-        .AsNoTracking()
-        .Where(s => skuSet.Contains(s.Sku) && s.Fecha >= desde365 && s.Fecha <= today)
-        .GroupBy(s => new { s.Sku, s.Fecha })
-        .Select(g => new { g.Key.Sku, g.Key.Fecha, Total = (long)g.Sum(x => (long)x.Cantidad) })
-        .ToList();
-
-      // Agrupado por SKU una sola vez (issue #59) — antes cada SKU hacía stockRows.Where(...)
-      // sobre la lista completa dentro de un foreach, O(totalSkus × totalFilas). Con ~4900 SKUs
-      // y ~1.8M filas (post-rollout de grupos, #41-44) eso son ~10 mil millones de comparaciones
-      // y la causa real del timeout en producción. Mismo patrón ya usado en GetStockAnalysis/
-      // GetTopVentasPerdidas/GetStockoutDistribution.
-      var stockPorSku = stockRows
-        .GroupBy(r => r.Sku)
-        .ToDictionary(g => g.Key, g => g.ToList());
-
-      // Ventas perdidas totales
-      var ventas365 = _db.VentasHistoricas
-        .AsNoTracking()
-        .Where(v => v.Fecha >= desde365 && v.Fecha <= today && skuSet.Contains(v.Sku))
-        .GroupBy(v => v.Sku)
-        .Select(g => new { Sku = g.Key, Total = g.Sum(x => (long)x.Cantidad) })
-        .ToDictionary(x => x.Sku, x => x.Total);
-
-      int totalSkus = skuSet.Count;
+      int totalSkus = resumen.Count;
       int skusConStockout = 0;
       double sumStockoutRate = 0;
       long ventasPerdidasTotal = 0;
 
-      // Un solo pase por SKU: antes el stockout y las ventas perdidas se calculaban en dos
-      // foreach separados, recalculando diasConStock cada vez.
-      foreach (var sku in skuSet)
+      foreach (var r in resumen)
       {
-        var dias = stockPorSku.TryGetValue(sku, out var diasSku) ? diasSku : new();
-        var diasConStock = dias.Count(d => d.Total > minimos[sku]);
-        var totalDias = Math.Max(dias.Count, 1);
-        var stockoutRate = (double)(totalDias - diasConStock) / totalDias * 100;
+        var totalDias = Math.Max(r.TotalDias, 1);
+        var stockoutRate = (double)(totalDias - r.DiasConStock) / totalDias * 100;
         sumStockoutRate += stockoutRate;
-        if (diasConStock < totalDias) skusConStockout++;
+        if (r.DiasConStock < totalDias) skusConStockout++;
 
-        var diasSinStock = Math.Max(dias.Count - diasConStock, 0);
-        if (diasConStock > 0 && ventas365.TryGetValue(sku, out var ventaTotal))
+        if (r.DiasConStock > 0 && r.Ventas365 > 0)
         {
-          var ventasPorDia = (double)ventaTotal / diasConStock;
-          ventasPerdidasTotal += (long)(ventasPorDia * diasSinStock);
+          var ventasPorDia = (double)r.Ventas365 / r.DiasConStock;
+          ventasPerdidasTotal += (long)(ventasPorDia * r.DiasSinStock);
         }
       }
 
@@ -131,7 +106,6 @@ namespace Services.Resultados
       pageSize = Math.Clamp(pageSize, 1, 200);
 
       var today = DateOnly.FromDateTime(DateTime.UtcNow.Date);
-      var desde365 = today.AddDays(-365);
 
       // Get articulos (paginated)
       var artQ = _db.Articulos.AsNoTracking().AsQueryable();
@@ -141,23 +115,13 @@ namespace Services.Resultados
       var articulos = artQ.OrderBy(a => a.Sku).ToList();
       var skuList = articulos.Select(a => a.Sku).ToList();
 
-      // Stock data for 365 days
-      var stockData = _db.StockDiario
+      // Resumen precalculado de stock_diario por el ETL nocturno (issue #59/#60) —
+      // cubre todos los SKUs de articulos, no solo stock_minimo > 0 (esta función,
+      // a diferencia de las otras 3 de este archivo, no filtra por ese umbral).
+      var resumen = _db.StockResumen365
         .AsNoTracking()
-        .Where(s => skuList.Contains(s.Sku) && s.Fecha >= desde365 && s.Fecha <= today)
-        .GroupBy(s => new { s.Sku, s.Fecha })
-        .Select(g => new { g.Key.Sku, g.Key.Fecha, Total = (long)g.Sum(x => (long)x.Cantidad) })
         .ToList()
-        .GroupBy(x => x.Sku)
-        .ToDictionary(g => g.Key, g => g.ToList());
-
-      // Ventas 365 días
-      var ventasData = _db.VentasHistoricas
-        .AsNoTracking()
-        .Where(v => skuList.Contains(v.Sku) && v.Fecha >= desde365 && v.Fecha <= today)
-        .GroupBy(v => v.Sku)
-        .Select(g => new { Sku = g.Key, Total = g.Sum(x => (long)x.Cantidad) })
-        .ToDictionary(x => x.Sku, x => x.Total);
+        .ToDictionary(r => r.Sku);
 
       // Predicciones (próximo trimestre, modelo COMBINADA preferido; solo SKUs elegibles — issue #57)
       var skusElegiblesModelo = GetSkusElegiblesModelo();
@@ -180,17 +144,11 @@ namespace Services.Resultados
       foreach (var art in articulos)
       {
         var minStock = art.StockMinimo;
-        var ventas365 = ventasData.ContainsKey(art.Sku) ? (int)ventasData[art.Sku] : 0;
+        var r = resumen.TryGetValue(art.Sku, out var rr) ? rr : null;
 
-        int diasConStock = 0;
-        int totalDias = 0;
-
-        if (stockData.ContainsKey(art.Sku))
-        {
-          var dias = stockData[art.Sku];
-          totalDias = dias.Count;
-          diasConStock = dias.Count(d => d.Total > minStock);
-        }
+        int totalDias = r?.TotalDias ?? 0;
+        int diasConStock = r?.DiasConStock ?? 0;
+        int ventas365 = (int)(r?.Ventas365 ?? 0);
 
         var diasSinStock = Math.Max(totalDias - diasConStock, 0);
         var stockoutRate = totalDias > 0 ? (double)diasSinStock / totalDias * 100 : 0;
@@ -238,49 +196,30 @@ namespace Services.Resultados
     public IReadOnlyList<TopVentasPerdidasDto> GetTopVentasPerdidas(int top)
     {
       top = Math.Clamp(top, 1, 50);
-      var today = DateOnly.FromDateTime(DateTime.UtcNow.Date);
-      var desde365 = today.AddDays(-365);
 
       var skusConStock = _db.Articulos.AsNoTracking()
         .Where(a => a.StockMinimo > 0)
-        .Select(a => new { a.Sku, a.Descripcion, a.StockMinimo })
+        .Select(a => new { a.Sku, a.Descripcion })
         .ToList();
-      var skuSet = skusConStock.Select(s => s.Sku).ToHashSet();
-      var descMap = skusConStock.ToDictionary(s => s.Sku, s => s.Descripcion);
-      var minimos = skusConStock.ToDictionary(s => s.Sku, s => s.StockMinimo);
 
-      var stockRows = _db.StockDiario.AsNoTracking()
-        .Where(s => skuSet.Contains(s.Sku) && s.Fecha >= desde365 && s.Fecha <= today)
-        .GroupBy(s => new { s.Sku, s.Fecha })
-        .Select(g => new { g.Key.Sku, g.Key.Fecha, Total = (long)g.Sum(x => (long)x.Cantidad) })
-        .ToList()
-        .GroupBy(x => x.Sku)
-        .ToDictionary(g => g.Key, g => g.ToList());
-
-      var ventas365 = _db.VentasHistoricas.AsNoTracking()
-        .Where(v => v.Fecha >= desde365 && v.Fecha <= today && skuSet.Contains(v.Sku))
-        .GroupBy(v => v.Sku)
-        .Select(g => new { Sku = g.Key, Total = g.Sum(x => (long)x.Cantidad) })
-        .ToDictionary(x => x.Sku, x => x.Total);
+      // Resumen precalculado de stock_diario por el ETL nocturno (issue #59/#60).
+      var resumen = _db.StockResumen365.AsNoTracking().ToList().ToDictionary(r => r.Sku);
 
       const int MIN_DIAS = 30;
       var results = new List<TopVentasPerdidasDto>();
 
       foreach (var s in skusConStock)
       {
-        if (!stockRows.ContainsKey(s.Sku)) continue;
-        var dias = stockRows[s.Sku];
-        if (dias.Count < MIN_DIAS) continue;
-        var diasConStock = dias.Count(d => d.Total > minimos[s.Sku]);
-        var diasSinStock = dias.Count - diasConStock;
-        if (diasConStock <= 0 || !ventas365.ContainsKey(s.Sku)) continue;
-        var ventasPorDia = (double)ventas365[s.Sku] / diasConStock;
-        var perdidas = (int)(ventasPorDia * diasSinStock);
+        if (!resumen.TryGetValue(s.Sku, out var r)) continue;
+        if (r.TotalDias < MIN_DIAS) continue;
+        if (r.DiasConStock <= 0 || r.Ventas365 <= 0) continue;
+        var ventasPorDia = (double)r.Ventas365 / r.DiasConStock;
+        var perdidas = (int)(ventasPorDia * r.DiasSinStock);
         if (perdidas <= 0) continue;
         results.Add(new TopVentasPerdidasDto
         {
           Sku = s.Sku,
-          Descripcion = descMap[s.Sku],
+          Descripcion = s.Descripcion,
           VentasPerdidas = perdidas
         });
       }
@@ -290,23 +229,13 @@ namespace Services.Resultados
 
     public StockoutDistributionDto GetStockoutDistribution()
     {
-      var today = DateOnly.FromDateTime(DateTime.UtcNow.Date);
-      var desde365 = today.AddDays(-365);
-
       var skusConStock = _db.Articulos.AsNoTracking()
         .Where(a => a.StockMinimo > 0)
-        .Select(a => new { a.Sku, a.StockMinimo, a.Descripcion })
+        .Select(a => new { a.Sku, a.Descripcion })
         .ToList();
-      var skuSet = skusConStock.Select(s => s.Sku).ToHashSet();
-      var minimos = skusConStock.ToDictionary(s => s.Sku, s => s.StockMinimo);
 
-      var stockRows = _db.StockDiario.AsNoTracking()
-        .Where(s => skuSet.Contains(s.Sku) && s.Fecha >= desde365 && s.Fecha <= today)
-        .GroupBy(s => new { s.Sku, s.Fecha })
-        .Select(g => new { g.Key.Sku, g.Key.Fecha, Total = (long)g.Sum(x => (long)x.Cantidad) })
-        .ToList()
-        .GroupBy(x => x.Sku)
-        .ToDictionary(g => g.Key, g => g.ToList());
+      // Resumen precalculado de stock_diario por el ETL nocturno (issue #59/#60).
+      var resumen = _db.StockResumen365.AsNoTracking().ToList().ToDictionary(r => r.Sku);
 
       const int MIN_DIAS = 30;
       int bueno = 0, moderado = 0, critico = 0, sinDatos = 0;
@@ -314,15 +243,13 @@ namespace Services.Resultados
 
       foreach (var s in skusConStock)
       {
-        if (!stockRows.ContainsKey(s.Sku) || stockRows[s.Sku].Count < MIN_DIAS)
+        if (!resumen.TryGetValue(s.Sku, out var r) || r.TotalDias < MIN_DIAS)
         {
           sinDatos++;
           items.Add(new StockoutItemDto { Sku = s.Sku, Descripcion = s.Descripcion, StockoutRate = -1, Categoria = "SinDatos" });
           continue;
         }
-        var dias = stockRows[s.Sku];
-        var diasConStock = dias.Count(d => d.Total > minimos[s.Sku]);
-        var rate = (double)(dias.Count - diasConStock) / dias.Count * 100;
+        var rate = (double)r.DiasSinStock / r.TotalDias * 100;
         string cat;
         if (rate > 30) { critico++; cat = "Critico"; }
         else if (rate > 15) { moderado++; cat = "Moderado"; }

@@ -238,6 +238,20 @@ ON DUPLICATE KEY UPDATE
     </entry>
 
     <entry>
+      <name>RUN CALC_STOCK_RESUMEN</name>
+      <type>SHELL</type>
+      <filename>/bin/sh</filename>
+      <work_directory>${Internal.Entry.Current.Directory}</work_directory>
+      <arguments><argument>-c</argument></arguments>
+      <insertScript>Y</insertScript>
+      <script><![CDATA[
+/app/services/etl/run_calc_stock_resumen.sh
+      ]]></script>
+      <wait>Y</wait>
+      <xloc>2370</xloc><yloc>64</yloc><draw>Y</draw>
+    </entry>
+
+    <entry>
       <name>TRUNCATE VENTAS_STAGE END</name>
       <type>SQL</type>
       <connection>MYSQL_EVALUTIA</connection>
@@ -267,7 +281,8 @@ DELETE FROM ventas_historicas_stage;
     <hop><from>CALC_UPSERT_VENTAS_MENSUALES</from><to>RUN PREDICT.PY</to><enabled>Y</enabled><unconditional>Y</unconditional></hop>
     <hop><from>RUN PREDICT.PY</from><to>RUN CALC_PLANILLA</to><enabled>Y</enabled><unconditional>Y</unconditional></hop>
     <hop><from>RUN CALC_PLANILLA</from><to>RUN CALC_SUGERENCIAS</to><enabled>Y</enabled><unconditional>Y</unconditional></hop>
-    <hop><from>RUN CALC_SUGERENCIAS</from><to>TRUNCATE VENTAS_STAGE END</to><enabled>Y</enabled><unconditional>Y</unconditional></hop>
+    <hop><from>RUN CALC_SUGERENCIAS</from><to>RUN CALC_STOCK_RESUMEN</to><enabled>Y</enabled><unconditional>Y</unconditional></hop>
+    <hop><from>RUN CALC_STOCK_RESUMEN</from><to>TRUNCATE VENTAS_STAGE END</to><enabled>Y</enabled><unconditional>Y</unconditional></hop>
     <hop><from>TRUNCATE VENTAS_STAGE END</from><to>SUCCESS</to><enabled>Y</enabled><unconditional>Y</unconditional></hop>
   </hops>
 

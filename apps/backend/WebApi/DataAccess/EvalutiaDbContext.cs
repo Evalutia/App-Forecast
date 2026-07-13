@@ -39,6 +39,8 @@ public class EvalutiaDbContext : DbContext
 
   public virtual DbSet<Grupo> Grupos { get; set; }
 
+  public virtual DbSet<StockResumen365> StockResumen365 { get; set; }
+
   protected override void OnModelCreating(ModelBuilder modelBuilder)
   {
     modelBuilder
@@ -413,6 +415,29 @@ public class EvalutiaDbContext : DbContext
           .ValueGeneratedOnAddOrUpdate()
           .HasColumnType("timestamp(6)")
           .HasColumnName("actualizado_en");
+    });
+
+    modelBuilder.Entity<StockResumen365>(entity =>
+    {
+      entity.HasKey(e => e.Sku).HasName("PRIMARY");
+
+      entity.ToTable("stock_resumen_365");
+
+      entity.Property(e => e.Sku)
+          .HasMaxLength(128)
+          .HasColumnName("sku");
+      entity.Property(e => e.DiasConStock)
+          .HasColumnName("dias_con_stock");
+      entity.Property(e => e.DiasSinStock)
+          .HasColumnName("dias_sin_stock");
+      entity.Property(e => e.TotalDias)
+          .HasColumnName("total_dias");
+      entity.Property(e => e.Ventas365)
+          .HasColumnName("ventas_365");
+      entity.Property(e => e.TsCarga)
+          .HasDefaultValueSql("CURRENT_TIMESTAMP(6)")
+          .HasColumnType("timestamp(6)")
+          .HasColumnName("ts_carga");
     });
   }
 }
