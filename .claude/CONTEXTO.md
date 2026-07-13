@@ -1184,35 +1184,28 @@ Origen: mail del cliente con dos pedidos independientes. **Parte A** (frecuencia
 
 **Subtotal Parte B: ≈27–45 h** (B0 = #68+#69, ≈5–9 h, da la info real antes de comprometer el resto)
 
-| Decisión | Definición |
-|----------|-----------|
-| **#30 ya existía y anticipaba este mismo hallazgo** | Issue previo (2026-06-09) de auditoría de modelos, con criterio muy similar al encontrado en esta sesión (overfitting check train/holdout, R² sospechoso cerca de 1.0, walk-forward validation). #30 queda como issue paraguas — no se cierra, no se duplica. |
-| **División del alcance de #30** | #68/#69 ejecutan la parte de "overfitting check" de #30. La parte de SARIMA/ETS de #30 no aplica (confirmado que ninguno de los dos está conectado en `predict.py`). La parte de calibración de pesos del ensemble (inverse-RMSE) y los 3 casos borde (baja frecuencia, quiebre frecuente, <12 meses de historia) que #68-#75 no cubren pasan a **#76** (issue nuevo). |
+**Total combinado (costo técnico estimado): ≈45–73 h → US$1.125–US$1.825 a $25/h.**
 
-**Issue adicional:**
-
-| # | Issue | Horas |
-|---|-------|-------|
-| #76 | Auditar calibración de pesos del ensemble + casos borde (baja frecuencia, quiebre, <12 meses) — depende de #68, extraído de #30 | 4–6 |
-
-> **Nota de priorización:** el presupuesto acordado con el cliente para este paquete quedó por debajo del costo técnico estimado arriba (detalle de esa negociación fuera de este archivo — no corresponde documentar montos/condiciones comerciales acá). Si el tiempo disponible no alcanza para todo, el orden de entrega es: Parte A completa primero, después diagnóstico B0 (#68-#69), y B1-B6 según tiempo disponible.
+> **Decisión de precio (no técnica):** Nico decidió cobrarle a Rodrigo **USD 600 fijo** por este paquete completo (Parte A + Parte B + "el matcher"), muy por debajo del costo técnico estimado — no por error de cálculo sino como decisión deliberada de relación con el cliente (ver [[project_rodrigo_pricing_agreement]]: acuerdo previo de mantener accesibles los cambios sobre el portal existente, más el valor de aprendizaje/relación de este cliente para el equipo). El orden de prioridad de entrega dentro de ese precio, si el tiempo se estira, es el mismo del plan de arriba: Parte A completa primero, después diagnóstico B0 (#68-#69), y B1-B6 según tiempo disponible.
 
 ---
 
-### `ml/models.py` + `ml/eval_models.py` — Issue #68 (sesión 2026-07-12)
+### `ml/models.py` — Issue #77 (sesión 2026-07-12)
 
 | Decisión | Definición |
 |----------|-----------|
-| **Alcance del "equivalente"** | No se reconstruye el ensemble viejo de 14 variantes XGB (`XGB_lr_low`, `XGB_mid_trees`, features "rich", log-transform) que existía antes de la simplificación de `models.py` — está abandonado y producción no lo usa. Se construyen 3 funciones nuevas, una por modelo real en producción: `fit_rf_with_holdout`, `fit_xgb_with_holdout`, `fit_prophet_with_holdout`, cada una wrapeando su `*_insample` correspondiente + split train/test real. |
-| **Cálculo de `k` para `holdout_split`** | `holdout_split(series, k)` (en `ml/evaluate.py`) no se modifica. Las nuevas funciones calculan `k = years_test * (4 si freq empieza con "Q", sino 12)` antes de llamarla — preserva el significado original de `EVAL_TEST_YEARS` (que antes usaba `_split_last_year`, ya eliminado). |
-| **Shape de retorno** | Cada función devuelve `Optional[HoldoutResult]` (no `Dict[str, HoldoutResult]`) — ya no hay múltiples variantes internas por modelo. `eval_models.py` itera las 3 funciones por SKU y arma una fila por (sku, modelo). `fit_prophet_with_holdout` requiere `sku` explícito (hiperparámetros por SKU en `HIPERPARAMETROS_OPTIMOS`). |
-| **Guardrails de historia mínima** | Mismo patrón que las `*_insample` actuales: `try/except Exception: return None` dentro de cada función `fit_*_with_holdout`. Si el split no es viable (serie corta, `ValueError` de `holdout_split`, o el mínimo de Prophet no se cumple sobre el `train` ya recortado) se devuelve `None` y `eval_models.py` lo saltea con `continue` — no debe tumbar el script completo. |
-| **Filtro de SKUs para desarrollo** | Se agrega env var opcional `EVAL_ONLY_SKUS` (lista separada por comas) para acotar `eval_models.py` a 1-2 SKUs durante verificación local, reusando el parámetro `only_skus` que ya soporta `load_series_by_sku_mysql`. Default `None` (todas las series) sin cambiar el comportamiento actual. |
-| **Fuera de alcance** | No se toca `predict.py` ni la selección de "mejor modelo" en producción (sigue por RMSE in-sample). Extender la evaluación holdout a todo el catálogo y persistir resultados es #72 (depende de #68); calibración de ensemble y casos borde es #76; ninguno se mezcla con #68. |
+| **Restauración verbatim, sin corregir el desalineamiento de `trend`** | `_build_lag_month_trend` se restaura tal cual existía antes del borrado accidental (commit `1209bfd^`). Se detectó que la feature `trend` tiene un salto de `lags` posiciones entre el rango visto en entrenamiento (`0..len(train)-lags-1`, calculado post-`dropna()`) y el usado al pronosticar (`len(tr)+i`, sobre la serie sin recortar) — para RF/XGB esto no rompe nada, pero satura la feature de tendencia en todo el horizonte de forecast. No se corrige ahora: es un problema de calidad de modelado preexistente al bug de #77, no parte de su alcance ("restaurar lo borrado", no "mejorar el feature engineering"). Queda como hallazgo para #76 (auditoría de calibración/casos borde del ensemble). |
+| **No se restaura `_build_lag_month_trend_rich`** | Se borró en el mismo commit, pero no tiene ningún call-site vigente (pertenecía al ensemble de 14 variantes ya abandonado, mismo hallazgo de #68). Restaurarla sería código muerto. |
+| **Impacto en producción — validar antes de dejarlo al cron** | Desde 2025-12-04 todas las predicciones con `--model-set classic/tree` quedaron en Prophet por descarte (RF/XGB rotos). Al deployar el fix, el próximo job de las 3 AM va a volver a comparar los 3 modelos de verdad por RMSE — es esperable que varios SKUs cambien de "mejor modelo" de un día para otro. Se corre `predict.py` manualmente contra producción (o un dump reciente) primero, se compara contra lo ya persistido, y si el movimiento es grande se avisa al cliente antes de que lo note solo en el dashboard. |
+| **Sin backfill de predicciones históricas** | Las predicciones ya persistidas desde diciembre (con Prophet por descarte) no se reprocesan como parte de #77. El fix aplica solo hacia adelante. Si el negocio pide backfillear, es un issue nuevo siguiendo el patrón ya usado en #43-#46 — no una decisión implícita de este fix. |
+| **Logging dentro de los `except Exception` de `ml/models.py`** | Se agrega `log.exception(...)` (nuevo `logging.getLogger(__name__)`, el archivo no tenía logger) dentro de los bloques `except` de `fit_rf_insample`, `fit_xgb_insample` y `fit_prophet_insample` — sin cambiar el `return None` de fallback. Esto es lo que permitió que el `NameError` de `_build_lag_month_trend` quedara invisible 7 meses; el logging no arregla el patrón de raíz pero deja rastro la próxima vez. |
 
-> **Nota:** el issue #30 (auditoría de modelos) ya anticipaba este mismo hallazgo de overfitting/in-sample — #68 es la ejecución acotada de esa parte, no una issue nueva desconectada.
+> **Nota:** el mismo patrón de `except Exception: return None` sigue existiendo en las nuevas `fit_*_with_holdout` de #68 — quedan sin el logging agregado acá porque #77 se acotó a los 3 `*_insample` que ya tenían el bug real. Si se decide extenderlo, es continuación natural pero no se asumió sin pedirlo.
 
-**Hallazgo durante la implementación — bug separado en producción (#77):** `fit_rf_insample` y `fit_xgb_insample` llaman a `_build_lag_month_trend`, función que fue borrada por accidente en el commit `1209bfd` (2025-12-04, el mismo que introdujo Prophet) pero cuyos call-sites nunca se actualizaron. Como ambas funciones atrapan cualquier excepción con `except Exception: return None`, el fallo es silencioso: **desde el 2025-12-04, RF y XGB nunca producen resultado ni en `predict.py` (producción) ni en el holdout nuevo de #68 — solo Prophet funciona.** Se documentó como issue nuevo (#77, bloqueante) en vez de arreglarlo dentro de #68, para no mezclar el bug de producción con el alcance original (reconstruir el script de evaluación). **Verificado en vivo:** `python -m ml.eval_models` con `EVAL_ONLY_SKUS=C00375` contra la DB real corre sin errores y produce el resumen (`PROPHET: r2_train=0.926, r2_test=0.336, mae_train=322, mae_test=1343, n_skus=1`) — cumple el criterio de aceptación de #68 tal como quedó acotado. RF/XGB en el resumen aparecerán en blanco hasta que se resuelva #77.
+**Verificado en vivo (DB local, no el servidor de producción real):**
+- Sintético: `fit_rf_with_holdout`/`fit_xgb_with_holdout` pasan de devolver `None` siempre a producir `HoldoutResult` real.
+- `python -m ml.eval_models` con `EVAL_ONLY_SKUS=C00375`: ahora aparecen RF y XGB en el resumen además de PROPHET (antes solo PROPHET). El `mean_gap` de RF (0.85) y XGB (0.30) muestra overfitting real — justo lo que #69 va a medir en profundidad sobre el grupo 201.
+- `predict.py --model-set classic --skus C00375 --version test-77-verify` (fila de prueba, borrada después de verificar): el mejor modelo para este SKU pasó de PROPHET (RMSE in-sample 544) a **XGB** (RMSE in-sample 343). El valor pronosticado cambió entre ~15% y ~26% respecto a lo persistido con `mvp-002`. Confirma que el impacto en producción es real y significativo — antes de deployar, corresponde repetir esta comparación sobre el conjunto completo de SKUs del `--model-set` vigente en producción (no solo este SKU) y decidir si se avisa al cliente antes de que el cron de las 3 AM lo aplique solo.
 
 ---
 

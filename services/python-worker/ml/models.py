@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import warnings
 import itertools
+import logging
 import numpy as np
 import pandas as pd
 import os
@@ -15,6 +16,8 @@ from statsmodels.tsa.statespace.sarimax import SARIMAX
 from statsmodels.tsa.holtwinters import ExponentialSmoothing
 from statsmodels.tools.sm_exceptions import ConvergenceWarning
 from .evaluate import rmse as _rmse, r2_score as _r2, holdout_split as _holdout_split
+
+log = logging.getLogger(__name__)
 
 # -------------------------------------------------------------------------
 # Prophet support: optional import (si no está instalado, fit_prophet_insample
@@ -220,6 +223,22 @@ def _base_xgb_params() -> Dict:
         "objective": "reg:squarederror",
     }
 
+def _build_lag_month_trend(series: pd.Series, lags: int, freq: str = "MS") -> tuple[pd.DataFrame, pd.Series, List[str]]:
+    df = pd.DataFrame({"y": pd.Series(series).astype("float64").sort_index()})
+    for i in range(1, lags + 1):
+        df[f"lag_{i}"] = df["y"].shift(i)
+    df = df.dropna()
+    if str(freq).upper().startswith("Q"):
+        df["period"] = df.index.quarter
+    else:
+        df["period"] = df.index.month
+    df["trend"] = np.arange(len(df))
+    X = df.drop("y", axis=1)
+    y = df["y"]
+    feats = list(X.columns)
+    return X, y, feats
+
+
 def fit_xgb_insample(train: pd.Series, steps_forecast: int, lags: int = 12, freq: str = "MS") -> Optional[ModelResult]:
     try:
         tr = pd.Series(train).astype("float64").sort_index()
@@ -277,6 +296,7 @@ def fit_xgb_insample(train: pd.Series, steps_forecast: int, lags: int = 12, freq
             holdout_pred=xgb_full,
         )
     except Exception:
+        log.exception("fit_xgb_insample fallo (lags=%s, freq=%s, n=%s)", lags, freq, len(train))
         return None
 
 # ... [Resto del archivo exactamente igual] ...
@@ -344,6 +364,7 @@ def fit_rf_insample(train: pd.Series, steps_forecast: int, lags: int = 12, freq:
             holdout_pred=rf_full,
         )
     except Exception:
+        log.exception("fit_rf_insample fallo (lags=%s, freq=%s, n=%s)", lags, freq, len(train))
         return None
 
 # (El resto del archivo permanece idéntico.)
@@ -436,6 +457,7 @@ def fit_prophet_insample(
             holdout_pred=holdout,
         )
     except Exception:
+        log.exception("fit_prophet_insample fallo (sku=%s, lags=%s, freq=%s, n=%s)", sku, lags, freq, len(train))
         return None
 
 
