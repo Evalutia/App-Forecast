@@ -1315,6 +1315,47 @@ El fix de código (`stock_resumen_365`, commit `1adafb3`) ya está commiteado y 
 | **Riesgo de performance identificado y medido: la query nueva agrega una pasada extra sobre `stock_diario` sin ventana de fechas** | A diferencia de `stock_resumen_365` (acotada a 365 días), esta query recalcula el historial completo cada noche por diseño (ver fila "Sin backfill necesario") — el fix agrega un `GROUP BY sku, fecha` intermedio sobre **todo** `stock_diario` antes de agrupar por mes. Medido localmente (686K filas): query vieja 1.8s, nueva 2.7s (~50% más lenta). En producción (`stock_diario` con 25M+ filas, VM con RAM ajustada y `tmp_table_size=16MB` documentados en #60) el resultado intermedio podría desbordar a disco, mismo patrón que causó el timeout de #59. **Decisión:** desplegar igual — es un job batch nocturno sin timeout duro (a diferencia de un request HTTP), y ya se probó que este tipo de agregación sobre `stock_diario` tarda minutos pero termina (`CALC_STOCK_RESUMEN` tardó 574s en prod). Si se dispara demasiado, se ataca como issue nuevo con datos reales. |
 | **Plan de monitoreo corregido: no sirve mirar `jobs_historial`** | Se planteó inicialmente monitorear la duración en `jobs_historial`, pero se verificó que `CALC_UPSERT_VENTAS_MENSUALES` es una entrada SQL cruda dentro del `.kjb` — no hace su propio insert en `jobs_historial` (a diferencia de `run_calc_planilla.py`/`run_calc_stock_resumen.py`, que sí registran su propio job vía Python). Solo se podría ver la duración agregada de todo el job nocturno, señal demasiado ruidosa para aislar el impacto de este cambio puntual. **Corrección:** al desplegar, correr la query manualmente contra producción envuelta en `time` (mismo patrón usado para medirla localmente) para obtener una medición aislada y limpia, en vez de inferirla del job completo. |
 
+**Deploy ejecutado y verificado en producción (2026-07-13, mismo día):**
+
+| Paso | Resultado |
+|------|-----------|
+| Push a `origin/Develop` | `1adafb3..27b179d`. |
+| Backup extra de solo `ventas_mensuales` | 15 MB, rápido (tabla de agregados mensuales, no 25M filas como `stock_diario`). |
+| Tag de rollback | `evalutia-etl:pre-ventas-mensuales-fix` (nombre nuevo, no pisa el tag `pre-stock-resumen` de la sesión anterior del mismo día). |
+| `git merge --ff-only origin/Develop` en `/opt/evalutia` | Fast-forward limpio, `27b179d` en `HEAD`. |
+| Rebuild + recreate `etl` | Confirmado con `CREATED: 33 segundos` (se repitió el chequeo aprendido en el deploy de #59 — esta vez sin el problema del Ctrl+C). |
+| Query corregida corrida manualmente, medida con `time` | **10 minutos 5 segundos** — mismo orden de magnitud que `CALC_STOCK_RESUMEN` (9.6 min), consistente con el riesgo de performance anticipado. Terminó sin error. |
+| Verificación — conteo total | `SELECT COUNT(*) FROM ventas_mensuales` = **153404** filas (vs. 11639 en local — consistente con la escala de producción). |
+| Verificación — caso real afectado en producción | Se encontraron 3 SKUs reales con el patrón del bug (`I00932`, `I00963`, `I01491`). Para `I00963`/nov-2020: `dias_con_stock=3`, `actualizado_en` coincide exactamente con el momento de la corrida — confirma que la fila se recalculó con la query corregida, no que quedó con un valor viejo por casualidad. |
+
+**Resultado: fix desplegado y verificado en producción.** El riesgo de performance identificado se confirmó (10 min, no segundos) pero dentro de lo tolerable para un job batch nocturno sin timeout duro — no rompió nada, terminó limpio.
+
+---
+
+### Intento de sincronizar entorno local con producción — Issue #38 (sesión 2026-07-13, pausado)
+
+| Decisión | Definición |
+|----------|-----------|
+| **Alcance: dump parcial, no completo** | Excluir `usuarios` (hashes de contraseñas reales), `jobs_historial` y `predicciones` — mismo criterio que un dump parcial usado en una sesión anterior. El objetivo es testear ETL/planilla con volumen y catálogo reales, no replicar el sistema de auth de producción localmente. Igual incluye `ventas_historicas` y `stock_diario` (las tablas grandes), así que no es un archivo chico. |
+| **Dump nuevo, no reusar el backup de hoy** | El `mysqldump` completo de 2.6GB tomado esta mañana (antes del deploy de #59) quedó desactualizado por los dos deploys de hoy mismo (`stock_resumen_365` poblada, fix de `ventas_mensuales` de #40) — sincronizar con un dump viejo de horas atrás derrotaría el propósito del issue. |
+| **Bloqueador real encontrado: no hay mecanismo de transferencia disponible sin instalar herramientas nuevas** | El acceso a la VM es por AWS Session Manager vía navegador (no SSH directo, no AWS CLI local). Verificado en la VM: `sshd` corre (con `ec2-instance-connect.conf`), pero `aws` CLI **no está instalado**. Sin AWS CLI en ningún lado, ni el camino de S3 (subir desde la VM, bajar desde la consola web) ni el port-forwarding de SSM son viables sin un setup de infraestructura real (instalar awscli + crear bucket S3 + permisos IAM, o habilitar SSH con una key y armar `scp`). |
+| **Decisión: pausado, no se invierte el setup hoy** | El issue ya estaba marcado sin urgencia — no vale la pena el trabajo de infra (que además excede el alcance original de "sincronizar datos") solo para sacarlo de encima hoy. Queda documentado el camino técnico mapeado (S3+awscli, o SSH+EC2 Instance Connect) para cuando alguien lo retome con tiempo dedicado. |
+| **Hallazgo aparte, no relacionado (informativo, no se tocó)** | El log de `sshd` mostró intentos de fuerza bruta activos (usuarios `root`, `dd`, IP externa) — sugiere que el puerto 22 podría estar expuesto públicamente en el security group. No se investigó ni se tocó; vale la pena revisarlo en algún momento como tema de seguridad aparte. |
+
+---
+
+### `infra/sql/12-fix-grupos-encoding.sql` — Issue #56 (sesión 2026-07-13)
+
+| Decisión | Definición |
+|----------|-----------|
+| **Causa raíz confirmada con evidencia de bytes, no solo hipótesis** | Se verificaron los bytes crudos (`xxd`) de `infra/sql/10-grupos.sql` (el seed original) para las 4 filas afectadas: el archivo fuente **ya tenía el texto correctamente codificado en UTF-8** (`C38D`=Í, `C389`=É, `C381`=Á, `C3A9`=é, todos de 2 bytes, válidos). La corrupción no está en el archivo — ocurrió al aplicar el seed. Confirmado en vivo: el cliente `mysql` tiene `character_set_client`/`connection`/`results` = `latin1` por default (aunque `character_set_database`=`utf8mb4`) — el mecanismo exacto de la doble codificación. |
+| **Fix: script SQL numerado (`12-fix-grupos-encoding.sql`), no un `UPDATE` suelto** | Mismo criterio que el resto de `infra/sql/` — todo cambio de base queda como archivo versionado, aunque sea solo datos y no schema, para que sobreviva a un rebuild completo del entorno desde `01` a `12`. No se re-corre el seed completo de `10-grupos.sql` (reintroduciría el mismo bug si se aplica con la misma conexión mal configurada). |
+| **`SET NAMES utf8mb4;` embebido en el archivo, no un flag del comando** | Para que el propio fix no repita el bug que está corrigiendo, sin depender de que quien lo aplique se acuerde de `--default-character-set=utf8mb4` en el comando. Viaja con el archivo. |
+| **Error propio detectado y corregido antes de aplicar nada: "Económetrico" → "Econométrico"** | Al transcribir el valor esperado de la fila 201 se escribió mal la posición de la tilde. Verificado byte por byte contra el hex del archivo fuente (`c3a9` cae justo después de "Econom", antes de "trico") — la palabra correcta es "Econométrico" (mismo término usado en todo el sistema: `aplica_modelo_econometrico`, "modelo econométrico"), no "Económetrico". Se verificaron los 4 valores del archivo de fix byte por byte contra el seed original antes de aplicar. |
+| **Radio de impacto reverificado** | Único consumidor confirmado de `grupos.descripcion`: `PlanillaRepository.GetFiltros()` (dropdown de filtro de grupo, #45) — que además hace `OrderBy(g => g.Descripcion)`, así que estas 4 filas también estaban mal ordenadas alfabéticamente hasta ahora (efecto secundario menor, se corrige solo con el fix). `ResultadosService.cs` también usa `_db.Grupos` pero solo filtra por `AplicaModeloEconometrico`, no lee `Descripcion` — confirma la afirmación del issue de que ningún otro lugar expone el campo. |
+| **Verificado localmente** | Aplicado contra la DB local: las 4 filas pasan de `HEX` con patrón `C383C2XX` (doble-encoding) a `C38D`/`C389`/`C381`/`C3A9` (encoding simple correcto). |
+| **Pendiente antes del deploy a producción** | Correr el mismo scan (`HEX(col) LIKE '%C383%'`) contra `articulos` en producción real (el scan local dio 0 filas afectadas, pero el local no está sincronizado con producción — no es representativo, ver #38) para cerrar la segunda parte del alcance del issue ("revisar otras columnas"). |
+
 ---
 
 ## Issues conocidos / TODOs en código
