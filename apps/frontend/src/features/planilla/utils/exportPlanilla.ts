@@ -76,6 +76,27 @@ function ddstk(meses: PlanillaMesDto[]): number | null {
   return totalDias === 0 ? null : totalVentas / totalDias;
 }
 
+// Issue #66: "VentaReal/Extrapolación" no esta persistido por separado en #62
+// (solo valor_ajustado y criterio_frecuencia) -- se reconstruye con datos ya
+// expuestos, misma formula exacta que run_calc_planilla.py (Extrapolacion =
+// rotacion_diaria_real * dias_naturales_mes). Si es sin_stock (rotacionDiariaReal
+// null, extrapolacion indefinida), no hubo componente real que usar en el
+// blend para esa fila -- se deja en blanco, no se inventa un valor.
+function ventaRealOExtrapolacion(mes: PlanillaMesDto): number | null {
+  if (mes.estadoMes === 'normal') return Number(mes.ventasCantidad);
+  if (mes.rotacionDiariaReal != null) return mes.rotacionDiariaReal * mes.diasNaturalesMes;
+  return null;
+}
+
+// Issue #66: etiqueta legible del criterio (mismo criterio que #65 en
+// PlanillaTable.tsx) -- el Excel lo lee el cliente directo, no un programador.
+function criterioFrecuenciaLabel(criterio: string | null | undefined, estadoMes: string): string {
+  if (criterio === 'historico') return 'Histórico';
+  if (criterio === 'promedio')  return 'Promedio';
+  if (criterio === 'real_extrapolado') return estadoMes === 'normal' ? 'Venta real' : 'Extrapolado';
+  return '';
+}
+
 async function fetchAll(params: PlanillaVentasParams): Promise<PlanillaVentasDto[]> {
   const first = await fetchPlanillaVentas({ ...params, page: 1, pageSize: 200 });
   const total = first.total;
@@ -109,6 +130,9 @@ export async function exportPlanillaExcel(
   // Fixed (4): SKU, Descripción, Cód.Barras, Género
   // Monthly Vta (n): Vta.Mes/Año × 13
   // Monthly Rot (n): Rot.Mes/Año × 13
+  // Monthly Tickets/Histórico/VentaReal-Extrapolación/Criterio/ValorAjustado
+  // (n cada uno) × 13 -- Issue #61/#63/#66, detalle completo del blending
+  // que la planilla en pantalla no muestra (solo el color, ver #65).
   // Summary (7): Rot.DesEstac., Estado, VTA, DDSTK, ROT.S, Fiabilidad%, QBK
   const mesesRef   = items[0].meses;
   const n          = mesesRef.length;
@@ -116,14 +140,19 @@ export async function exportPlanillaExcel(
   const mesLabels  = mesesRef.map(m => mesLabel(m.year, m.month));
 
   // Column index helpers (1-based)
-  const COL_VTA_MES  = (i: number) => 5 + i;          // i = 0..n-1
-  const COL_ROT_MES  = (i: number) => 5 + n + i;      // i = 0..n-1
-  const COL_RD       = 5 + 2 * n;
-  const COL_VTA      = 7 + 2 * n;
-  const COL_DD       = 8 + 2 * n;
-  const COL_ROTS     = 9 + 2 * n;
-  const COL_FIAB     = 10 + 2 * n;
-  const COL_QBK      = 11 + 2 * n;
+  const COL_VTA_MES   = (i: number) => 5 + i;             // i = 0..n-1
+  const COL_ROT_MES   = (i: number) => 5 + n + i;
+  const COL_TICK_MES  = (i: number) => 5 + 2 * n + i;
+  const COL_HIST_MES  = (i: number) => 5 + 3 * n + i;
+  const COL_VE_MES    = (i: number) => 5 + 4 * n + i;     // VentaReal/Extrapolación
+  const COL_CRIT_MES  = (i: number) => 5 + 5 * n + i;
+  const COL_VAJ_MES   = (i: number) => 5 + 6 * n + i;     // Valor ajustado
+  const COL_RD        = 5 + 7 * n;
+  const COL_VTA       = 7 + 7 * n;
+  const COL_DD        = 8 + 7 * n;
+  const COL_ROTS      = 9 + 7 * n;
+  const COL_FIAB      = 10 + 7 * n;
+  const COL_QBK       = 11 + 7 * n;
 
   const headers = [
     'SKU',
@@ -132,6 +161,11 @@ export async function exportPlanillaExcel(
     'Género',
     ...mesLabels.map(l => `Vta.${l}`),
     ...mesLabels.map(l => `Rot.${l}`),
+    ...mesLabels.map(l => `Tick.${l}`),
+    ...mesLabels.map(l => `Hist.${l}`),
+    ...mesLabels.map(l => `V/E.${l}`),
+    ...mesLabels.map(l => `Crit.${l}`),
+    ...mesLabels.map(l => `VAj.${l}`),
     'Rot. DesEstac.',
     'Estado',
     'VTA',
@@ -148,6 +182,11 @@ export async function exportPlanillaExcel(
     { width: 18 },                                          // Género
     ...mesesRef.map((_, i) => ({ width: i === lastMesIdx ? 10 : 9 })),  // Vta months
     ...mesesRef.map((_, i) => ({ width: i === lastMesIdx ? 10 : 9 })),  // Rot months
+    ...mesesRef.map(() => ({ width: 8 })),                  // Tickets months
+    ...mesesRef.map(() => ({ width: 9 })),                  // Histórico months
+    ...mesesRef.map(() => ({ width: 9 })),                  // VentaReal/Extrapolación months
+    ...mesesRef.map(() => ({ width: 12 })),                 // Criterio months (texto)
+    ...mesesRef.map(() => ({ width: 9 })),                  // Valor ajustado months
     { width: 15 },                                          // Rot. DesEstac.
     { width: 13 },                                          // Estado
     { width: 10 },                                          // VTA
@@ -182,6 +221,11 @@ export async function exportPlanillaExcel(
       item.generoDescripcion ?? '',
       ...item.meses.map(m => Number(m.ventasCantidad)),
       ...item.meses.map(m => m.rotacionDiariaReal ?? 0),
+      ...item.meses.map(m => m.ticketsMes ?? 0),
+      ...item.meses.map(m => m.valorHistorico ?? null),
+      ...item.meses.map(m => ventaRealOExtrapolacion(m)),
+      ...item.meses.map(m => criterioFrecuenciaLabel(m.criterioFrecuencia, m.estadoMes)),
+      ...item.meses.map(m => m.valorAjustado ?? null),
       rd,
       item.estadoArticulo ?? 'activo',
       vta,
@@ -208,6 +252,33 @@ export async function exportPlanillaExcel(
     item.meses.forEach((mes, i) => {
       const cell = row.getCell(COL_ROT_MES(i));
       cell.numFmt = '0.0000';
+      applyMesStyle(cell, mes, i === lastMesIdx);
+    });
+
+    // Issue #61/#63/#66: detalle completo del blending de frecuencia de venta,
+    // mismo color de fondo por quiebre (applyMesStyle) que Vta./Rot.
+    item.meses.forEach((mes, i) => {
+      const cell = row.getCell(COL_TICK_MES(i));
+      cell.numFmt = '0';
+      applyMesStyle(cell, mes, i === lastMesIdx);
+    });
+    item.meses.forEach((mes, i) => {
+      const cell = row.getCell(COL_HIST_MES(i));
+      cell.numFmt = '#,##0.00';
+      applyMesStyle(cell, mes, i === lastMesIdx);
+    });
+    item.meses.forEach((mes, i) => {
+      const cell = row.getCell(COL_VE_MES(i));
+      cell.numFmt = '#,##0.00';
+      applyMesStyle(cell, mes, i === lastMesIdx);
+    });
+    item.meses.forEach((mes, i) => {
+      const cell = row.getCell(COL_CRIT_MES(i));
+      applyMesStyle(cell, mes, i === lastMesIdx);
+    });
+    item.meses.forEach((mes, i) => {
+      const cell = row.getCell(COL_VAJ_MES(i));
+      cell.numFmt = '#,##0.00';
       applyMesStyle(cell, mes, i === lastMesIdx);
     });
 

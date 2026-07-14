@@ -66,6 +66,9 @@ namespace Services.Planilla
                     EstadoMes                      = f.Fila.EstadoMes,
                     FrecuenciaNivel                = f.Fila.FrecuenciaNivel,
                     RotacionAjustada               = f.Fila.RotacionAjustada,
+                    TicketsMes                     = f.Fila.TicketsMes,
+                    ValorHistorico                 = f.Fila.ValorHistorico,
+                    ValorAjustado                  = f.Fila.ValorAjustado,
                     CriterioFrecuencia             = f.Fila.CriterioFrecuencia
                   })
                   .ToList()

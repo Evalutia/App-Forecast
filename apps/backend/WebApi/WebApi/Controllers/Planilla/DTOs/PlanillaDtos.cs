@@ -39,6 +39,9 @@ namespace WebApi.Controllers.Planilla.DTOs
     public string EstadoMes { get; init; } = string.Empty;
     public string? FrecuenciaNivel { get; init; }
     public decimal? RotacionAjustada { get; init; }
+    public byte TicketsMes { get; init; }
+    public decimal? ValorHistorico { get; init; }
+    public decimal? ValorAjustado { get; init; }
     public string? CriterioFrecuencia { get; init; }
 
     public PlanillaMesOutDto(PlanillaMesDto dto)
@@ -54,6 +57,9 @@ namespace WebApi.Controllers.Planilla.DTOs
       EstadoMes                      = dto.EstadoMes;
       FrecuenciaNivel                = dto.FrecuenciaNivel;
       RotacionAjustada               = dto.RotacionAjustada;
+      TicketsMes                     = dto.TicketsMes;
+      ValorHistorico                 = dto.ValorHistorico;
+      ValorAjustado                  = dto.ValorAjustado;
       CriterioFrecuencia             = dto.CriterioFrecuencia;
     }
   }

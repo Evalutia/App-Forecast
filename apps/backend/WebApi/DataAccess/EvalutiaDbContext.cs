@@ -369,6 +369,15 @@ public class EvalutiaDbContext : DbContext
       entity.Property(e => e.RotacionAjustada)
           .HasPrecision(10, 4)
           .HasColumnName("rotacion_ajustada");
+      entity.Property(e => e.TicketsMes)
+          .HasColumnType("tinyint unsigned")
+          .HasColumnName("tickets_mes");
+      entity.Property(e => e.ValorHistorico)
+          .HasPrecision(10, 2)
+          .HasColumnName("valor_historico");
+      entity.Property(e => e.ValorAjustado)
+          .HasPrecision(10, 2)
+          .HasColumnName("valor_ajustado");
       entity.Property(e => e.CriterioFrecuencia)
           .HasColumnType("enum('historico','promedio','real_extrapolado')")
           .HasColumnName("criterio_frecuencia");

@@ -62,6 +62,9 @@ namespace Services.Planilla
     public string EstadoMes { get; init; } = string.Empty;
     public string? FrecuenciaNivel { get; init; }
     public decimal? RotacionAjustada { get; init; }
+    public byte TicketsMes { get; init; }
+    public decimal? ValorHistorico { get; init; }
+    public decimal? ValorAjustado { get; init; }
     public string? CriterioFrecuencia { get; init; }
   }
 }

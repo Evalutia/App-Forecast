@@ -1772,6 +1772,16 @@ Revisados los 4 archivos identificados: `TablaVentas.tsx`, `PlanillaTable.tsx`, 
 
 ---
 
+### Export: columnas de frecuencia de venta — Issue #66 (sesión 2026-07-14)
+
+| Decisión | Definición |
+|----------|-----------|
+| **"VentaReal/Extrapolación" se reconstruye en el frontend, sin nueva columna en la DB** | No está persistido por separado en `#62` (solo `valor_ajustado`, el resultado final del blending, y `criterio_frecuencia`, qué fórmula se usó). Se reconstruye con datos ya expuestos: `ventasCantidad` cuando `estadoMes === 'normal'`, o `rotacionDiariaReal × diasNaturalesMes` cuando hay quiebre — misma fórmula exacta que ya implementa `run_calc_planilla.py` en Python (`Extrapolación`). |
+| **5 bloques nuevos de 13 columnas cada uno, mismo patrón que Vta./Rot.** | La hoja pasa de ~30 a ~91 columnas, pero es exportable, no una tabla en pantalla con restricción de scroll horizontal — el mail pidió explícitamente granularidad **por mes**, no un texto combinado que el cliente tendría que parsear a mano. Columnas: tickets del mes, Histórico, VentaReal/Extrapolación, criterio aplicado, valor final (`valor_ajustado`). |
+| **Etiqueta legible del criterio, no el string crudo del enum** | Reusa la misma reconstrucción de `#65` ("Venta real"/"Extrapolado"/"Histórico"/"Promedio" según `estadoMes`) en vez de exportar `real_extrapolado` tal cual — el Excel lo lee el cliente directo, no un programador. Función chica (~4 líneas), se duplica en `exportPlanilla.ts` en vez de crear una dependencia cruzada entre el archivo de utilidades de export y el componente de UI (`PlanillaTable.tsx`). |
+
+---
+
 ## Issues conocidos / TODOs en código
 
 | Issue | Ubicación | Descripción |
