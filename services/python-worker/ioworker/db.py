@@ -78,3 +78,34 @@ def upsert_predicciones(engine: Engine, rows: List[Dict], job_id: Optional[int] 
     with engine.begin() as conn:
         res = conn.execute(sql, rows)
         return len(rows)
+
+
+def upsert_elegibilidad_metrics(engine: Engine, rows: List[Dict]) -> int:
+    """
+    Issue #72: persiste metricas crudas de walk-forward (r2_test, estable,
+    n_folds, meses_historia) en articulos_elegibilidad_econometrico. No
+    toca 'elegible' -- ese flag lo calcula #73 con el criterio completo de
+    #70. Commit incremental (una transaccion por SKU, no un batch gigante):
+    una corrida de horas sobre ~5500 SKUs no debe perder todo el progreso
+    si se corta a mitad de camino, y queda naturalmente reanudable.
+    """
+    sql = text(
+        """
+        INSERT INTO articulos_elegibilidad_econometrico
+            (sku, r2_test, estable, n_folds, meses_historia, evaluado_en)
+        VALUES
+            (:sku, :r2_test, :estable, :n_folds, :meses_historia, NOW(6))
+        ON DUPLICATE KEY UPDATE
+            r2_test        = VALUES(r2_test),
+            estable        = VALUES(estable),
+            n_folds        = VALUES(n_folds),
+            meses_historia = VALUES(meses_historia),
+            evaluado_en    = VALUES(evaluado_en)
+        """
+    )
+    n = 0
+    for r in rows:
+        with engine.begin() as conn:
+            conn.execute(sql, r)
+        n += 1
+    return n

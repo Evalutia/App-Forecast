@@ -7,7 +7,7 @@ from ml.models import (
     fit_xgb_with_walkforward,
     fit_prophet_with_walkforward,
 )
-from ioworker.db import DBConfig, get_engine
+from ioworker.db import DBConfig, get_engine, upsert_elegibilidad_metrics
 from ioworker.data import load_series_by_sku_mysql
 
 
@@ -20,6 +20,32 @@ _only_skus_raw = os.getenv("EVAL_ONLY_SKUS", "").strip()
 ONLY_SKUS = [s.strip() for s in _only_skus_raw.split(",") if s.strip()] if _only_skus_raw else None
 
 OUTPUT_CSV = os.getenv("EVAL_OUTPUT_CSV", "").strip() or None
+
+# Issue #72: si esta seteado, persiste metricas crudas por SKU en
+# articulos_elegibilidad_econometrico (no toca 'elegible', ver #73).
+# Default off para no cambiar el comportamiento de diagnostico puro que ya
+# usaban #69/#78 contra DB local.
+PERSIST = os.getenv("EVAL_PERSIST", "").strip().lower() in ("1", "true", "yes")
+
+
+def _load_meses_historia(engine, only_skus) -> dict:
+    """
+    Span calendario real por SKU (fecha_max - fecha_min + 1 mes), calculado
+    directo contra ventas_historicas -- no se deriva de la serie ya
+    resampleada de load_series_by_sku_mysql, que trunca desde la primera
+    venta con cantidad > 0 y por lo tanto subestimaria la historia real de
+    un SKU cuyas filas iniciales fueran solo notas de credito (ver #81).
+    """
+    q = """
+        SELECT sku, TIMESTAMPDIFF(MONTH, MIN(fecha), MAX(fecha)) + 1 AS meses_historia
+        FROM ventas_historicas
+        GROUP BY sku
+    """
+    df = pd.read_sql_query(q, con=engine)
+    if only_skus:
+        only = set(s.strip() for s in only_skus if s and s.strip())
+        df = df[df["sku"].isin(only)]
+    return dict(zip(df["sku"], df["meses_historia"].astype(int)))
 
 
 def main() -> None:
@@ -126,6 +152,23 @@ def main() -> None:
     else:
         veredicto = "ZONA GRIS - no es claramente aceptable ni claramente roto. Documentar y decidir con el cliente."
     print(f"\nVeredicto (walk-forward, reemplaza el de #69, issue #78): {veredicto}")
+
+    if PERSIST:
+        meses_historia_map = _load_meses_historia(engine, ONLY_SKUS)
+        rows_to_persist = []
+        for _, row in winners.iterrows():
+            r2_test = row["r2_test_median"]
+            rows_to_persist.append(
+                {
+                    "sku": row["sku"],
+                    "r2_test": float(r2_test) if pd.notna(r2_test) and np.isfinite(r2_test) else None,
+                    "estable": (bool(row["stable"]) if row["stable"] is not None else None),
+                    "n_folds": int(row["n_folds"]),
+                    "meses_historia": meses_historia_map.get(row["sku"]),
+                }
+            )
+        n_persisted = upsert_elegibilidad_metrics(engine, rows_to_persist)
+        print(f"\n[PERSIST] {n_persisted} filas escritas en articulos_elegibilidad_econometrico (r2_test/estable/n_folds/meses_historia; 'elegible' sin tocar, ver #73).")
 
 
 if __name__ == "__main__":

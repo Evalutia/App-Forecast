@@ -1548,6 +1548,34 @@ Rodrigo respondió por mail la pregunta bloqueante de `#61` ("Histórico" ya hab
 
 > **Nota:** `services/etl/run_extract_sales_chunk.py` necesita una función nueva (no reusar `clamp_nonneg_int`) para `cantidad` — el uso existente de esa función sobre `stock` (líneas ~122-124, 137 del mismo archivo) debe seguir clampeado a 0 sin cambios, es un concepto distinto (inventario físico, no venta neta).
 
+**Corrección encontrada en la revisión final (antes de commitear):** solo `ventas_historicas` tiene un `CHECK` nombrado (`chk_ventas_cantidad`), verificado directo contra `information_schema.check_constraints` — las otras 4 tablas dependen solo del tipo `UNSIGNED`, sin `CHECK` propio. El patrón defensivo de `DROP CHECK` aplica a una sola tabla, no a las 5; las otras 4 solo necesitan `MODIFY COLUMN` (ya idempotente por sí solo). Esto simplificó la migración final respecto a la versión inicial documentada arriba.
+
+**Implementado y verificado en DB local (2026-07-13, mismo día):**
+
+| Paso | Resultado |
+|------|-----------|
+| `infra/sql/14-ventas-cantidad-signed.sql` | Aplicada 2 veces seguidas — segunda corrida silenciosa (toma la rama `SELECT 1` para el `DROP CHECK`), sin error. |
+| Tipos resultantes (las 5 tablas) | Confirmado `signed` (sin `unsigned`) vía `information_schema.columns`. |
+| `run_extract_sales_chunk.py`: `clamp_signed_int` nueva, usada solo para `cantidad` | `stock` (líneas 133, 146) confirmado sin tocar — sigue en `clamp_nonneg_int`. |
+| Prueba sintética end-to-end (SKU `TEST-NEG-80`, neto `-5`) | Insertado en `ventas_historicas_stage` → simulado el paso MERGE del `.kjb` → `-5` llegó intacto a `ventas_historicas` → simulado `CALC_UPSERT_VENTAS_MENSUALES` → `-5` llegó intacto a `ventas_mensuales`. Sin error, sin rollback. Datos de prueba borrados después de verificar. |
+| Commit y push | `d6d0ce9` — solo los 2 archivos de código + `CONTEXTO.md`, `docker-compose.yml` (cambio no relacionado de `WEBAPP_PORT`) queda fuera, mismo patrón que `#51`/`#71`. |
+| **Deploy a producción: decidido no tocar todavía** | Mismo acoplamiento que `#71`: el rebuild/recreate de `etl` (necesario porque el script queda horneado en la imagen) activaría también `#51` (mTLS), gateado por `#52`. A diferencia de `#71`, acá el usuario decidió **no aplicar ni siquiera la migración SQL sola** en producción por ahora — `#80` queda pusheado pero sin ningún cambio en la VM, abierto en GitHub. |
+
+---
+
+### Extender evaluación holdout a todo el catálogo — Issue #72 (sesión 2026-07-13)
+
+| Decisión | Definición |
+|----------|-----------|
+| **Hallazgo: "extender a todos los candidatos" ya está resuelto estructuralmente** | `ml/eval_walkforward.py` + `load_series_by_sku_mysql` no filtran por grupo — sin `EVAL_ONLY_SKUS` seteado, ya evalúan **todo** `ventas_historicas`. Lo que realmente falta es la persistencia (hoy solo imprime/CSV) y dos cálculos nuevos. |
+| **`#72` persiste solo métricas crudas, no `elegible`** | Escribe `r2_test`/`estable`/`n_folds`/`meses_historia` en `articulos_elegibilidad_econometrico` (tabla de `#71`) — la columna `elegible` no se toca acá. `#73` ("Aplicar criterio y marcar SKUs") es quien calcula y escribe el flag final para todo el catálogo, incluyendo recalcular los 101 SKUs de grupo 201 que hoy están `elegible=TRUE` por el seed provisorio de `#71`. Separa "medir" de "decidir", consistente con los nombres de los issues. |
+| **`meses_historia` = span calendario, cálculo nuevo** | `(fecha_max - fecha_min)` en meses + 1, por SKU, contra `ventas_historicas` — no existía en el script (que solo tenía `n_train_rows_mean/min`, un concepto distinto: filas reales de entrenamiento por fold, no historia total). Es la métrica que realmente limita a Prophet (necesita que la serie resampleada tenga ≥8 trimestres de longitud). |
+| **Se persiste el modelo *ganador* por SKU, no los 3 por separado ni un promedio** | Reusa la lógica ya existente en el script (`winners = valid.loc[valid.groupby("sku")["rmse_train_median"].idxmin()]`) — el modelo que ganaría por menor RMSE in-sample, misma selección real de `predict.py`. Coincide exactamente con la definición del criterio de `#70` ("el modelo que ganaría por RMSE en ese SKU"). |
+| **Ejecución real contra producción, vía VM** | La DB local solo tiene los ~104 SKUs de grupo 201 sincronizados (`#38`, todavía sin resolver) — no el catálogo completo (~5500 SKUs). Correr contra local no evaluaría "todos los candidatos" de verdad. Se corre contra producción: de solo lectura sobre `ventas_historicas` + `INSERT/UPDATE` acotado a la tabla de `#71`, bajo riesgo, no bloqueado por `#38`. |
+| **Commits incrementales + corrida en background (`nohup`), no una transacción gigante** | A diferencia del patrón de `run_calc_stock_resumen.py` (una sola transacción con `executemany`, aceptable ahí porque tardó ~9.6 min con una simple suma SQL), acá el volumen de trabajo es mucho mayor (RF+XGB+Prophet × hasta 5 folds × ~5500 SKUs) y puede tardar horas — commits por SKU/lote evitan perder todo el progreso si se corta, y `nohup` evita que la terminal de Session Manager (ya mostró fragilidad esta sesión) mate la corrida si se desconecta. Naturalmente reanudable vía `INSERT ... ON DUPLICATE KEY UPDATE`. |
+
+> **Nota:** el tiempo real de ejecución medido en esta corrida es insumo directo de `#74` (medir impacto de performance del job nocturno con volumen ampliado) — no hace falta medirlo aparte.
+
 ---
 
 ## Issues conocidos / TODOs en código
