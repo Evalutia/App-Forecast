@@ -1795,6 +1795,14 @@ Revisados los 4 archivos identificados: `TablaVentas.tsx`, `PlanillaTable.tsx`, 
 
 > **Nota:** con este deploy, el código de #71/#80/#81/#82/#62/#63/#65/#66 pasa de "commiteado" a **realmente corriendo en producción** por primera vez — pendiente decidir si esto cierra también #79 (épica que se dejó abierta a propósito hasta confirmar el deploy).
 
+### Activación prematura de mTLS por el rebuild de `etl` — hallazgo y fix (#51, sesión 2026-07-14)
+
+| Decisión | Definición |
+|----------|-----------|
+| **El rebuild de `etl` del deploy de arriba activó `https` sin querer** | `#51` (`7af0867`) ya tenía `WS_URL` hardcodeado a `https://200.125.29.194:81` en `run_ofelia.sh` desde antes de esta sesión, pero el contenedor `etl` en producción no se había reconstruido desde antes de ese commit — el `docker compose build etl` + `up -d --force-recreate etl` de hoy (para desplegar #71/#80) fue el primer rebuild que incluyó el código de #51, activando el switch a `https` 4 días antes del corte coordinado con Martín (viernes 18/07). Confirma el riesgo de acoplamiento ya documentado: recrear `etl` por cualquier motivo activa todo lo que esté mergeado a `Develop`, no solo el issue puntual que motivó el rebuild. |
+| **Impacto real si no se corregía** | El servidor del cliente todavía no acepta TLS en el puerto 81 (confirmado semanas atrás: `https` da "wrong version number", solo `http` responde `200 OK`) — el cron de las 3 AM iba a fallar **las 3 noches hasta el viernes**, no solo una. El job es atómico (sin corrupción, `jobs_historial` en `fallido`) y recuperable con `FORCE_START`/`FORCE_END`, pero son 3 recuperaciones manuales evitables. |
+| **Fix: revert temporal a `http://`** | Commit `037c03a`, un cambio de una línea. Se vuelve a `https://` recién en el paso 3 del plan ya coordinado con Martín (después de validar los 3 pasos el viernes 9-12hs) — no antes. Verificado dentro del contenedor real (`docker compose exec etl grep WS_URL ...`), no solo en el commit. |
+
 ---
 
 ## Issues conocidos / TODOs en código
