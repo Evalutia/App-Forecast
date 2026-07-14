@@ -15,6 +15,12 @@ Se dividen en dos tipos (mismo criterio que usa el repo de origen):
 - **User-invoked** — solo se disparan si las tipeás vos (`disable-model-invocation` en su frontmatter). Orquestan trabajo grande o tocan estado del repo (crear issues, editar config).
 - **Model-invoked** — puedo llegar a ellas solo cuando el trabajo lo pide, sin que las tipees. Son la disciplina reutilizable que las de arriba invocan por dentro.
 
+**El usuario no tiene que acordarse de los 19 nombres — esa es mi responsabilidad, no la suya.** En concreto:
+
+- Para las **model-invoked** (`diagnosing-bugs`, `domain-modeling`, `improve-codebase-architecture`, `codebase-design`, `tdd`, `research`, `resolving-merge-conflicts`, `graphify`, `grilling`), reach for them yo solo cuando la situación calza — no hace falta que el usuario las pida ni las nombre.
+- Para las **user-invoked** (`to-spec`, `to-tickets`, `triage`, `wayfinder`, `implement`, `setup-matt-pocock-skills`, `code-review-standards-spec`) no puedo dispararlas solo (crean issues, tocan config, commitean) — pero sí puedo y debo **proponerlas proactivamente** cuando algo tiene esa forma ("esto es del tamaño de un `/wayfinder`, ¿lo armo así?") en vez de esperar a que el usuario piense en el nombre correcto.
+- `/ponytail` no es una skill que se "dispara" para una tarea puntual — es un modo de trabajo por defecto (YAGNI, diff más chico que funcione) que aplico salvo que se pida explícitamente lo contrario.
+
 ### Issue tracker
 
 GitHub (`Evalutia/App-Forecast`), vía CLI `gh`. Sin PRs externas como superficie de triage. Incluye las operaciones de wayfinding (dependencias nativas de issues) para `/wayfinder`. Ver `docs/agents/issue-tracker.md`.
