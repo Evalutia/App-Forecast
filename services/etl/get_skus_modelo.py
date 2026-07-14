@@ -1,9 +1,11 @@
 #!/usr/bin/env python3
 # get_skus_modelo.py - resuelve la lista de SKUs que reciben modelo econometrico.
 #
-# Prioridad (Issue #43):
+# Prioridad (Issue #43, esquema actualizado en #71):
 #   1) Override manual: env SKUS, si viene seteado (debug/reproceso puntual).
-#   2) articulos JOIN grupos WHERE aplica_modelo_econometrico = TRUE.
+#   2) articulos_elegibilidad_econometrico WHERE elegible = TRUE (antes:
+#      articulos JOIN grupos WHERE aplica_modelo_econometrico = TRUE -- ese
+#      flag de grupo queda sin usar, sin DROP, ver #71).
 #
 # Imprime los SKUs separados por coma en stdout (formato que espera --skus de
 # predict.py), ej: "C00184,I01088". Lista vacia -> imprime "" y sale 0; quien
@@ -32,10 +34,9 @@ def from_db():
     try:
         with conn.cursor() as cur:
             cur.execute("""
-                SELECT a.sku
-                FROM articulos a
-                JOIN grupos g ON g.id = a.grupo_id
-                WHERE g.aplica_modelo_econometrico = TRUE
+                SELECT sku
+                FROM articulos_elegibilidad_econometrico
+                WHERE elegible = TRUE
             """)
             return [row[0] for row in cur.fetchall()]
     finally:

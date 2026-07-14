@@ -1440,6 +1440,73 @@ El fix de código (`stock_resumen_365`, commit `1adafb3`) ya está commiteado y 
 
 ---
 
+### `job_etl_diario.kjb` + `run_ofelia.sh` + 4 scripts curl — Issue #51 (sesión 2026-07-13)
+
+| Decisión | Definición |
+|----------|-----------|
+| **Flags de curl obligatorios, sin fallback a HTTP** | `--cert-type P12 --cert "${CERT_PATH}:${CERT_PASSWORD}" --cacert "${CACERT_PATH}"` se agregan incondicionalmente en los 4 scripts (`run_extract_articulos.sh`, `run_backfill_ventas.sh`, `run_extract_sales_chunk.sh`, `run_extract_stockxml.sh`), con guards `: "${CERT_PATH:?missing}"` etc. al inicio. Ningún camino sigue permitiendo HTTP sin certificado. |
+| **Sintaxis exacta según IT** | Se verificó contra `instructivo-cliente-mtls.pdf` de MG Soluciones IT (Martín García): usan `--cert su-nombre.p12:LA_CONTRASEÑA` con la contraseña embebida tras `:`, no `--pass` por separado. Se corrigió una recomendación inicial propia (`--pass`) para igualar exactamente el ejemplo documentado por IT. |
+| **`WS_URL` pasa a `https://`** | `run_ofelia.sh`: `-param:WS_URL=https://200.125.29.194:81` (puerto 81 sin cambios, confirmado en el instructivo — el corte es solo de protocolo, no de puerto). |
+| **`job_etl_diario.kjb` declara los 3 parámetros nuevos** | `CERT_PATH`, `CACERT_PATH`, `CERT_PASSWORD` — se exponen a las entradas `SHELL` como variables de entorno automáticamente (mismo mecanismo confirmado empíricamente para `WS_URL`/`MYSQL_*`, sin plumbing adicional). |
+| **No deployar a producción todavía** | Se comitea y pushea el código (`7af0867`), pero el `docker compose up -d --force-recreate etl` en producción queda explícitamente pendiente hasta que `#52` (coordinación con IT) confirme el 200 OK con mTLS real. Producción sigue corriendo con `WS_URL=http://...` hoy, sin riesgo. |
+
+**Validación en vivo (2026-07-13), antes de comitear:**
+
+| Prueba | Resultado |
+|--------|-----------|
+| curl mTLS desde la máquina local de Nico | `curl: (28) Connection timed out` — no es error de certificado, es timeout de conexión TCP. Causa: IT solo tiene whitelisteada la IP fija de la VM de producción (`3.150.104.146`), no las IPs dinámicas de oficina (decisión ya documentada en la sesión de `#49`). |
+| curl mTLS desde el contenedor `etl` en la VM (IP whitelisteada), usando `CERT_PATH`/`CACERT_PATH`/`CERT_PASSWORD` ya cargados por `#49`/`#50` | TCP conecta, pero TLS falla: `error:0A00010B:SSL routines::wrong version number`. Esto indica que el servidor todavía responde con bytes no-TLS, no que el certificado esté mal. |
+| curl HTTP plano (sin cert) al mismo endpoint desde la VM | `HTTP_STATUS:200` — el servidor de IT **todavía sirve HTTP sin cifrar**. Confirma que el corte a mTLS anunciado en el instructivo ("a partir de la fecha de corte que se les comunicará") **aún no ocurrió del lado de IT**. |
+| **Conclusión** | El código, la sintaxis de curl, el cert, la URL y el puerto están correctos y listos. El bloqueo restante es 100% del lado de IT (fecha de corte pendiente) — no hay nada más para corregir en el código de `#51`. |
+
+> **Nota para `#52`:** cuando IT confirme la fecha de corte, repetir la prueba de curl mTLS desde la VM (`sudo docker compose exec etl bash -c 'curl -v --cert-type P12 --cert "${CERT_PATH}:${CERT_PASSWORD}" --cacert "${CACERT_PATH}" "https://200.125.29.194:81/VsWebProduccion/SwNadWeb.asmx"'`) — si responde WSDL/HTML, recién ahí se hace `docker compose up -d --force-recreate etl` en producción para activar el `WS_URL=https://...` ya comiteado.
+
+---
+
+### Runbook (#53) y plan de rollback (#54) — sesión de grill-me pausada (2026-07-13)
+
+| Decisión | Definición |
+|----------|-----------|
+| **Hallazgo que contradice el plan original de junio** | La sesión de `/grill-me` del 2026-06-25 (ver sección "Plan de trabajo — Migración a mTLS") había anotado que *"IT optó por no fijar en el firewall las IPs dinámicas de la oficina... el acceso queda cubierto únicamente por el certificado"*. La prueba real de hoy (ver sesión de `#51` arriba) usó exactamente ese escenario — `curl` con `cotech-dev.p12` desde la máquina de oficina de Nico (IP dinámica, no whitelisteada) — y dio **timeout de conexión TCP**, no un rechazo de certificado. Esto pone en duda esa premisa: el firewall de IT podría estar bloqueando por IP también para el certificado de prueba, no solo para el de producción. |
+| **No confirmado todavía si aplica también a la oficina del socio** | Solo se probó desde la IP de Nico. La IP del socio (`179.24.239.134`, según el plan de junio) no se probó — sigue siendo una incógnita separada. |
+| **El mail ya enviado a Martín no cubre esta pregunta** | El mail enviado hoy (sesión de `#51`/`#52`) solo pregunta por la fecha de corte — no menciona la duda sobre si las IPs de oficina (de Nico y su socio) van a estar habilitadas para el certificado `cotech-dev.p12`. Queda pendiente decidir si se manda como pregunta de seguimiento o se espera la respuesta del mail actual primero. |
+| **Decisión: pausar #53 y #54 hasta la respuesta de Martín** | El usuario decidió no redactar ninguno de los dos documentos todavía — se prefiere esperar la confirmación real de IT antes de invertir tiempo en documentar un flujo que podría no funcionar tal como está planteado. Se descartó la alternativa (redactar igual con un aviso de riesgo marcado) que se había recomendado. |
+
+> **Nota:** `#54` ya tenía una dependencia declarada desde el plan original (`Depende de: #52`). Lo nuevo de esta sesión es que `#53` (que decía "Depende de: —") en la práctica también quedó bloqueado por la misma incertidumbre de IT, aunque no estaba declarado así en el issue.
+
+---
+
+### Criterio de elegibilidad para modelo econométrico — Issue #70 (sesión 2026-07-13)
+
+| Decisión | Definición |
+|----------|-----------|
+| **Ambigüedad resuelta: no hay "ensemble" contra el cual comparar** | El texto original de `#70` pedía comparar el R²/RMSE walk-forward del modelo econométrico "vs. el ensemble que hoy se le asignaría a ese SKU". Verificado en código (`run_predict.sh` + `get_skus_modelo.py`): `predict.py` corre una sola vez por noche, filtrado a los SKUs de `grupos.aplica_modelo_econometrico = TRUE` (hoy solo grupo 201, ~104 SKUs); si esa lista da vacía, `run_predict.sh` aborta sin correr nada. Los ~5400 SKUs restantes **no reciben ninguna predicción hoy** — no existe un "ensemble" corriendo para ellos contra el cual comparar. Además, `#68` ya había establecido que "modelo econométrico" y "ensemble" son el mismo código (RF+XGB+Prophet), no dos cosas distintas. |
+| **Elegibilidad = criterio absoluto sobre métricas propias, no comparativo** | Se decide qué SKUs *nuevos* merecen empezar a recibir predicción evaluando solo las métricas walk-forward de ese SKU (sin rival contra el cual medirse). Construir un modelo baseline nuevo para poder comparar quedó descartado — está fuera del alcance/estimación de `#70` (1-2h) y del acuerdo de precio fijo con Rodrigo (ver [[project_rodrigo_pricing_agreement]]); el cliente nunca pidió un baseline, pidió usar R² para saber cuándo confiar en el econométrico. |
+| **Mínimo de historia: 24 meses (8 trimestres)** | No es un número nuevo — coincide exactamente con el mínimo que `fit_prophet_insample` (`ml/models.py:415`) ya exige para poder correr (`min_needed = 8` en frecuencia trimestral, comentario original: "al igual que el notebook: 8 trimestres"). Verificado con `walk_forward_split`: 8 trimestres de historia producen **3 folds** evaluables (no solo 2), dando mejor señal de estabilidad que el piso mínimo técnico. Se descartó agregar un umbral de meses inventado aparte — este ya es el que efectivamente usa el sistema. |
+| **Métrica y umbral** | `r2_test` (walk-forward) del modelo que ganaría por menor RMSE in-sample en ese SKU — la misma lógica de selección que ya usa `predict.py` en producción. Umbral: **`r2_test ≥ 0`** (el modelo generaliza mejor que predecir la media). Se descartó el umbral de 0.3 usado en `#69` para juzgar la salud general del grupo — ese umbral es para el diagnóstico agregado, no para elegibilidad por SKU individual: aplicado literalmente dejaría fuera al grupo 201 actual (mediana real de `r2_test` del modelo seleccionado: 0.0659), que el cliente ya usa y acepta. |
+| **Estabilidad como descalificador duro, no solo aviso** | Un SKU clasificado "volátil" en `#78` (`std(r2_test) ≥ 0.2` entre folds, con ≥2 folds) queda **no elegible** aunque su `r2_test` mediano pase el umbral — un número que salta fuerte según qué trimestre se mida no es una señal confiable para el cliente. |
+| **SKUs con solo 1 fold evaluable** | No se puede medir estabilidad con un solo fold — se tratan como **no elegibles por ahora** (no como "elegibles sin verificar"), consistente con que `#70` pide incorporar estabilidad como factor de decisión, no solo el promedio. En la práctica esto ya queda cubierto por el piso de 24 meses (8 trimestres → 3 folds), así que no debería ser un caso frecuente entre los SKUs que sí cumplen el mínimo de historia. |
+| **`r2_test ≥ 0` es un umbral débil a propósito — riesgo detectado y mitigado, no ignorado** | Con `horizon=4` (4 puntos de test por fold), el error estándar de una correlación estimada es ~1 (`1/√(n-3)` con n=4) — un `r2_test` de 0.2-0.4 puede aparecer por puro ruido estadístico. El umbral `≥0` casi no filtra nada por sí solo; el filtro real de calidad lo hace la regla de estabilidad (folds consistentes entre sí), no la magnitud del R². Se mantiene igual (no se sube el umbral) porque la alternativa para estos SKUs hoy es **cero predicción** — pasar a tener una, aunque con señal débil, sigue siendo una mejora, siempre que no se le oculte al cliente qué tan débil es esa señal (ver punto siguiente). |
+| **Transparencia: el `r2_test` real se expone al cliente, no solo un flag binario "elegible"** | Decisión explícita del usuario: no alcanza con que un SKU "pase" el gate de elegibilidad — el valor real de `r2_test` debe llegar a la UI/export junto con la predicción, para que el cliente distinga un SKU con `r2_test=0.35` de uno con `r2_test=0.02` (ambos "elegibles" bajo el gate binario). Esto conecta directo con la motivación original de `#30`: *"el cliente solicita un modelo econométrico que muestre la fiabilidad de los datos para saber cuándo tomarlo en cuenta"* — el gate decide si hay predicción; el número real es lo que le permite al cliente decidir cuánto confiar en ella. `#71` ya contempla persistir "las métricas de R²/RMSE del holdout" a nivel SKU en su alcance original — este punto confirma que ese dato no es solo para uso interno/diagnóstico, tiene que ser visible para el cliente (alcance de UI queda para el issue de frontend correspondiente, no de `#70`/`#71`). |
+
+> **Nota para `#71`/`#72`/`#73`:** el criterio completo a implementar es: **historia ≥ 24 meses** Y **`r2_test` (walk-forward, modelo ganador por RMSE) ≥ 0** Y **no volátil** (`std(r2_test) < 0.2` entre folds). Los tres deben cumplirse — no es un score ponderado ni umbrales alternativos. `n_train_rows` (señal de confianza de `#78`) queda como dato informativo en el reporte, no como cuarto criterio duro. Además, el `r2_test` persistido por SKU (`#71`) debe quedar accesible para mostrarse al cliente, no solo para uso técnico interno — probablemente amerita un issue de frontend aparte para decidir dónde/cómo mostrarlo (ej. planilla, tooltip, columna de export).
+
+---
+
+### Migración de elegibilidad a nivel-SKU — Issue #71 (sesión 2026-07-13)
+
+| Decisión | Definición |
+|----------|-----------|
+| **Tabla nueva dedicada, no columnas en `articulos`** | `articulos_elegibilidad_econometrico` (PK `sku`, FK a `articulos`). Los campos (elegible, `r2_test`, estable, folds, fecha de evaluación) son resultado del pipeline de ML, no datos del ERP — separarlos de `articulos` mantiene la línea clara entre "lo que dice el SOAP" y "lo que calculamos nosotros", y evita que `run_extract_articulos.py` (que hace upsert masivo con lista explícita de columnas) tenga que acordarse de excluirlos. |
+| **Riesgo de rollout detectado y mitigado: seed obligatorio en la misma migración** | `get_skus_modelo.py` migra a leer de la tabla nueva; si esa tabla queda vacía al momento del deploy (porque `#72`/`#73`, que recién van a poblarla con la evaluación completa, corren *después* de `#71` en el roadmap), `run_predict.sh` aborta sin correr nada — no solo no se agregan SKUs nuevos, se **pierde la predicción de los 104 SKUs que ya funcionan hoy en producción**. Se decide sembrar la tabla nueva, como parte del mismo script SQL de `#71`, con los SKUs actuales de `grupos.aplica_modelo_econometrico = TRUE` marcados `elegible = TRUE` (mismo patrón que el backfill de `grupo_id` en `10-grupos.sql`, vía `INSERT ... SELECT`, no lista hardcodeada). Cero cambio de comportamiento real hasta que `#72`/`#73` recalculen con el criterio completo. |
+| **`grupos.aplica_modelo_econometrico` no se elimina** | Se deja como columna muerta, sin `DROP COLUMN` ni cambios en `10-grupos.sql`. Es la operación más difícil de deshacer del lote — si algo falla con la tabla nueva en producción, la columna vieja queda de referencia/rollback trivial sin restaurar backup. Limpieza como issue de deuda técnica aparte, una vez `#72`/`#73` estén validados en producción. |
+| **Esquema exacto** | `sku PK/FK`, `elegible BOOLEAN NOT NULL DEFAULT FALSE`, `r2_test DOUBLE NULL`, `estable BOOLEAN NULL` (NULL = no evaluable, <2 folds), `n_folds TINYINT UNSIGNED NULL`, `meses_historia SMALLINT UNSIGNED NULL`, `evaluado_en TIMESTAMP(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6)`. `ON DELETE CASCADE` en la FK (consistente con que `articulos` prácticamente nunca borra filas, usa el enum `estado` en su lugar). |
+| **Archivo de migración** | Próximo número disponible en `infra/sql/`: `13-articulos-elegibilidad-econometrico.sql` (el 12 ya lo usó `#56` para el fix de encoding de grupos). |
+
+> **Nota:** `#71` es deliberadamente acotado a schema + wiring de `get_skus_modelo.py` + seed de continuidad — la evaluación real sobre los ~5400 SKUs candidatos y la aplicación del criterio completo de `#70` quedan para `#72`/`#73`, que van a hacer `UPDATE`/`INSERT ... ON DUPLICATE KEY UPDATE` sobre esta misma tabla con los resultados reales del walk-forward.
+
+---
+
 ## Issues conocidos / TODOs en código
 
 | Issue | Ubicación | Descripción |
