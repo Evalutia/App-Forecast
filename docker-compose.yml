@@ -63,7 +63,7 @@ services:
     env_file:
       - .env
     environment:
-      ConnectionStrings__Default: "Server=mysql;Port=3306;Database=evalutia;User=evalutia;Password=evalutia;TreatTinyAsBoolean=false;AllowUserVariables=True;CharSet=utf8mb4;SslMode=None;AllowPublicKeyRetrieval=True"
+      ConnectionStrings__Default: "Server=mysql;Port=3306;Database=evalutia;User=evalutia;Password=evalutia;TreatTinyAsBoolean=false;AllowUserVariables=True;CharSet=utf8mb4;SslMode=None;AllowPublicKeyRetrieval=True;Default Command Timeout=90"
       JWT__Issuer: ${JWT_ISSUER}
       JWT__Audience: ${JWT_AUDIENCE}
       JWT__Secret: ${JWT_SECRET}
