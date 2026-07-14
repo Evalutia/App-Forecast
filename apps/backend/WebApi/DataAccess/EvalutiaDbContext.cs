@@ -369,6 +369,9 @@ public class EvalutiaDbContext : DbContext
       entity.Property(e => e.RotacionAjustada)
           .HasPrecision(10, 4)
           .HasColumnName("rotacion_ajustada");
+      entity.Property(e => e.CriterioFrecuencia)
+          .HasColumnType("enum('historico','promedio','real_extrapolado')")
+          .HasColumnName("criterio_frecuencia");
     });
 
     modelBuilder.Entity<PlanillaSugerencias>(entity =>

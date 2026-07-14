@@ -1744,6 +1744,34 @@ Revisados los 4 archivos identificados: `TablaVentas.tsx`, `PlanillaTable.tsx`, 
 
 ---
 
+### Indicador de color para frecuencia de venta — Issue #65 (sesión 2026-07-14)
+
+| Decisión | Definición |
+|----------|-----------|
+| **Hallazgo: falta wiring de backend, no estaba en el alcance de ningún issue** | `criterio_frecuencia` no existe en ningún punto de la cadena backend (`PlanillaVentasCalculada.cs`, `PlanillaRepository.cs`, `PlanillaDtos.cs`) — solo `frecuencia_nivel` (sistema viejo de quiebre) está conectado. Se amplía `#65` para incluir este wiring (mecánico, repite el mismo patrón ya usado para `FrecuenciaNivel` en los 3 archivos) en vez de abrir un issue nuevo aparte — es un prerrequisito que bloquea `#65` por completo, no una funcionalidad independiente. |
+| **Mecanismo visual: borde, no fondo** | `estadoMesBg` ya pinta el **fondo** de la celda para quiebre (amarillo/naranja/rojo/gris) — el propio mail de Rodrigo pidió evitar acumular colores ("ver cómo resolver esto, para que no sean muchos colores, o buscar otra forma"). Se usa `border-left` de color para `criterio_frecuencia`, dejando `backgroundColor` intacto — dos señales en la misma celda sin competir. |
+| **Paleta fría, deliberadamente distinta de la de quiebre** | `historico` = azul, `promedio` = violeta, `real_extrapolado` = verde azulado (teal) — alejada del amarillo/naranja/rojo de quiebre para que ambas señales se distingan a simple vista. |
+| **Solo en el bloque "Vta.", no en "Rot."** | La tabla tiene 2 bloques de columnas por mes. Duplicar el borde en "Rot." sería la misma señal dos veces por fila sin información nueva — alcanza con que aparezca una vez. |
+| **Explicación vía el `title` (tooltip) ya existente, sin leyenda nueva** | La celda "Vta." ya tiene un `title` nativo (`"Vta.{mes} · {cantidad} uds."`) — se le agrega `· Criterio: {nombre}` al final, reusando el mecanismo ya descubierto por el usuario (pasa el mouse por la celda), en vez de sumar un elemento visual fijo más a una tabla que ya tiene leyenda + scroll horizontal. |
+
+> **Nota de implementación:** el enum `criterio_frecuencia` solo tiene 3 valores (`historico`/`promedio`/`real_extrapolado` — ver `#62`/`#63`), pero el mail distingue 4 conceptos (Histórico, VentaRealMes, Extrapolación, y el promedio de cualquiera de los dos con Histórico). El frontend puede reconstruir la etiqueta más precisa para `real_extrapolado` usando `estadoMes` (ya disponible en el mismo `PlanillaMesDto`): `estadoMes === 'normal'` → "Venta real", cualquier otro valor → "Extrapolado". No hace falta un cuarto valor de enum en la DB para esto.
+
+**Wiring de backend (revisión final antes de codear, más largo de lo estimado):** la cadena real son 6 archivos, no 3 — hay una capa intermedia (`IPlanillaService.cs`/`PlanillaService.cs`) que no se había mirado en detalle: `PlanillaVentasCalculada.cs` (modelo EF) → `EvalutiaDbContext.cs` (mapeo Fluent API) → `PlanillaRepository.cs` (proyección LINQ + reconstrucción, 2 lugares) → `IPlanillaService.cs` (`PlanillaMesDto`) → `PlanillaService.cs` (construcción del DTO) → `PlanillaDtos.cs` (`PlanillaMesOutDto`, respuesta final). Mismo patrón mecánico en los 6, repitiendo exactamente cómo ya fluye `FrecuenciaNivel`.
+
+**Implementado y verificado (2026-07-14):**
+
+| Paso | Resultado |
+|------|-----------|
+| Backend (`dotnet build`) | 0 errores |
+| Frontend (`tsc --noEmit`) | 0 errores |
+| Verificación visual con Playwright (script propio, mismo patrón que `playwright-verify/verify-issue32.js` ya usado en este proyecto) | Login real contra `/api/auth/login`, navegación a `/planilla`, inspección de estilos computados. |
+| Rebuild necesario detectado a tiempo | El contenedor local `webapi` seguía sirviendo el código viejo — `dotnet build` local no alcanza, hace falta `docker compose build webapi && up -d --force-recreate webapi` para que el contenedor real lo sirva. |
+| Borde solo en bloque "Vta." | 400/800 celdas con borde (exactamente la mitad del total, confirma que "Rot." no lo tiene). |
+| Color y tooltip correctos | Muestra real: `rgba(20,184,166,0.55)` (teal) + `"Criterio: Venta real"` para una fila `normal`. |
+| Convivencia con fondo de quiebre, sin conflicto | Celda real con ambas señales activas: `backgroundColor: rgba(234,88,12,0.18)` (quiebre media freq) + `borderLeftColor: rgba(20,184,166,0.55)` (teal) simultáneos, tooltip `"Criterio: Extrapolado"` (reconstruido bien porque esa fila es `quiebre_parcial`, no `normal`). Confirma que las dos señales no se pisan — son propiedades CSS distintas. |
+
+---
+
 ## Issues conocidos / TODOs en código
 
 | Issue | Ubicación | Descripción |

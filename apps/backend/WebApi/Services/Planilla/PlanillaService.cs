@@ -65,7 +65,8 @@ namespace Services.Planilla
                     RotacionDiariaDesestacionalizada = f.Fila.RotacionDiariaDesestacionalizada,
                     EstadoMes                      = f.Fila.EstadoMes,
                     FrecuenciaNivel                = f.Fila.FrecuenciaNivel,
-                    RotacionAjustada               = f.Fila.RotacionAjustada
+                    RotacionAjustada               = f.Fila.RotacionAjustada,
+                    CriterioFrecuencia             = f.Fila.CriterioFrecuencia
                   })
                   .ToList()
             };

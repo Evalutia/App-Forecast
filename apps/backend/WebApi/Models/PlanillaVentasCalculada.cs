@@ -14,5 +14,6 @@ namespace WebApi.Models
     public string EstadoMes { get; set; } = string.Empty;
     public string? FrecuenciaNivel { get; set; }
     public decimal? RotacionAjustada { get; set; }
+    public string? CriterioFrecuencia { get; set; }
   }
 }

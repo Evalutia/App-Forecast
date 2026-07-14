@@ -10,6 +10,7 @@ export interface PlanillaMesDto {
   estadoMes: 'normal' | 'quiebre_parcial' | 'sin_stock';
   frecuenciaNivel: 'alta' | 'media' | 'baja' | null;
   rotacionAjustada: number | null;
+  criterioFrecuencia: 'historico' | 'promedio' | 'real_extrapolado' | null;
 }
 
 export interface PlanillaVentasDto {

@@ -19,6 +19,27 @@ function estadoMesBg(estado: string, frecuenciaNivel?: string | null): string {
   return '';
 }
 
+// Issue #65: borde (no fondo, para no competir con estadoMesBg/quiebre) para la
+// frecuencia de venta por tickets (#61/#63) -- paleta fria, deliberadamente
+// distinta de la amarillo/naranja/rojo/gris de quiebre.
+function criterioFrecuenciaBorder(criterio?: string | null): string {
+  if (criterio === 'historico')        return '3px solid rgba(37,99,235,0.55)';   // azul
+  if (criterio === 'promedio')          return '3px solid rgba(139,92,246,0.55)';  // violeta
+  if (criterio === 'real_extrapolado')  return '3px solid rgba(20,184,166,0.55)';  // teal
+  return '';
+}
+
+// Etiqueta del criterio para el tooltip. "real_extrapolado" cubre dos conceptos
+// distintos del mail (VentaRealMes vs. Extrapolación) que comparten un solo
+// valor de enum -- se reconstruye la etiqueta precisa usando estadoMes, que ya
+// viene en la misma fila.
+function criterioFrecuenciaLabel(criterio: string | null | undefined, estadoMes: string): string {
+  if (criterio === 'historico') return 'Histórico';
+  if (criterio === 'promedio')  return 'Promedio';
+  if (criterio === 'real_extrapolado') return estadoMes === 'normal' ? 'Venta real' : 'Extrapolado';
+  return '—';
+}
+
 function calcRotDesEstac(meses: PlanillaMesDto[]): string {
   const closed = meses.slice(0, -1);
   const vals: number[] = [];
@@ -373,8 +394,11 @@ export default function PlanillaTable({ params, onPageChange, sugerencias, suger
                       <td
                         key={`vta-${mes.year}-${mes.month}`}
                         className="planilla-col-mes"
-                        style={{ backgroundColor: estadoMesBg(mes.estadoMes, mes.frecuenciaNivel) }}
-                        title={`Vta.${mesLabel(mes.year, mes.month)} · ${mes.ventasCantidad} uds.`}
+                        style={{
+                          backgroundColor: estadoMesBg(mes.estadoMes, mes.frecuenciaNivel),
+                          borderLeft: criterioFrecuenciaBorder(mes.criterioFrecuencia),
+                        }}
+                        title={`Vta.${mesLabel(mes.year, mes.month)} · ${mes.ventasCantidad} uds. · Criterio: ${criterioFrecuenciaLabel(mes.criterioFrecuencia, mes.estadoMes)}`}
                       >
                         <span style={idx === lastMesIdx ? { opacity: 0.6, fontStyle: 'italic' } : undefined}>
                           {Number(mes.ventasCantidad).toLocaleString('es-UY')}
