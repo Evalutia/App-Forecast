@@ -1653,6 +1653,27 @@ Motivación actual (más amplia que el alcance original del issue, que era puntu
 
 ---
 
+### ML: corregir descarte de negativos en Prophet + heurísticas de historia — Issue #81 (sesión 2026-07-14)
+
+| Decisión | Definición |
+|----------|-----------|
+| **Sacar el filtro `df_prop['y'] >= 0]` en `fit_prophet_insample`** | No es solo un fix de sesgo de entrenamiento — es un **crash latente**: `ml/models.py:464` construye `holdout = pd.Series(insample['yhat'].values, index=tr.index)` usando el índice completo (`tr.index`) pero valores de predecir sobre `df_prop` (filtrado, potencialmente más corto). Con negativos reales (post-`#80`), esas longitudes no coinciden y `pd.Series` tira `ValueError`. Sacar el filtro basta — sin él, `df_prop` y `tr` siempre tienen la misma longitud, no hace falta un chequeo de longitud aparte (sería validar contra un estado que ya no puede ocurrir). |
+| **Confirmado: `_sanitize_forecast`/`np.maximum(y_fc, 0.0)` solo tocan el forecast futuro** | Verificado en código — `_sanitize_forecast` (definida y usada una sola vez en `predict.py:120,388`) se aplica solo a `r.forecast`, nunca a `tr`/`train`. No hace falta cambiar nada ahí. |
+| **Asimetría entre las dos heurísticas de corte de historia** | **"Primera venta efectiva"** (`ensure_monthly_series:106`, `ioworker/data.py`, `cantidad > 0`): se documenta como **correcta tal cual**, no se cambia — una devolución sin venta previa es un dato raro (probablemente un ajuste de stock inicial mal cargado), no debería contar como "acá empezó a venderse esto" (mismo criterio ya aplicado en `#82` para `VentasService.cs:150`). Confirmado el mismo patrón triplicado sin cambios necesarios: `predict.py:106`, `ioworker/data.py:63` (loader CSV) y `:131` (loader MySQL). **"Última venta"** (`predict.py:291,313`, `last_sale = train_full[train_full > 0].last_valid_index()`): **sí se corrige** — si el período más reciente es neto negativo, esta heurística saltaba hacia atrás al último período positivo, corriendo mal la ventana de pronóstico (re-prediciendo un período que ya tiene dato real, o desplazando el horizonte sin que nadie lo pida). Pasa a usar el último período con cualquier dato, sin filtrar por signo. |
+
+**Implementado y verificado (2026-07-14):**
+
+| Paso | Resultado |
+|------|-----------|
+| Sintaxis (`py_compile`) | OK en `ml/models.py` y `predict.py` |
+| Rebuild + recreate `python-worker` local | Confirmado (`CREATED` reciente) |
+| Prophet entrena con negativo real (llamada directa a `fit_prophet_insample`, serie sintética de 10 trimestres con uno de neto -20) | `RESULTADO OK`, sin `ValueError`; `holdout_pred` en el trimestre negativo da `-16.6` (aprendió el dato real, no lo ignoró); forecast futuro sigue clampeado a valores positivos (`[12.57, 1.82]`) — confirma que el clamp sigue aplicando solo al output, no al entrenamiento. |
+| "Última venta" — comparación directa viejo vs. nuevo con serie sintética (último trimestre neto -15) | Viejo: saltaba a `2025-01` (último positivo). Nuevo: usa `2025-04` (el período real, sin importar signo) — confirma que el fix evita re-predecir un período que ya tiene dato real. |
+| Commit y push | `docker-compose.yml` (no relacionado) y los 2 scripts de `#38` (sin probar, bloqueados por acceso a AWS) quedan fuera. |
+| **Deploy a producción** | Pendiente — bloqueado por falta de acceso a la VM (`#38`). `python-worker` no tiene acoplamiento con el corte mTLS (`etl` es un servicio distinto) — se puede desplegar independientemente en cuanto haya acceso. |
+
+---
+
 ## Issues conocidos / TODOs en código
 
 | Issue | Ubicación | Descripción |

@@ -422,7 +422,12 @@ def fit_prophet_insample(
             'y': tr.values
         })
         df_prop = df_prop.dropna()
-        df_prop = df_prop[df_prop['y'] >= 0]
+        # Issue #81: sin filtro de signo -- una nota de credito (venta neta
+        # negativa) es un dato de entrenamiento real, no debe descartarse.
+        # Descartarla generaba huecos irregulares en la serie (sesgaba la
+        # estacionalidad anual de Prophet) y, con negativos reales, un
+        # mismatch de longitud entre df_prop y tr al construir 'holdout' mas
+        # abajo (ValueError).
         if len(df_prop) < min_needed:
             return None
 
