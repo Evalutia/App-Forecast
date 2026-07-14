@@ -1674,6 +1674,25 @@ Motivación actual (más amplia que el alcance original del issue, que era puntu
 
 ---
 
+### Frontend: revisión UX de valores negativos — Issue #83 (sesión 2026-07-14), cerrado sin código
+
+Revisados los 4 archivos identificados: `TablaVentas.tsx`, `PlanillaTable.tsx`, `AbcChart.tsx`, `VentasTrendChart.tsx`.
+
+| Decisión | Definición |
+|----------|-----------|
+| **Sin riesgo de crash en ningún lugar** | TypeScript usa `number` en todos los tipos de venta; `.toLocaleString()` (usado en `PlanillaTable.tsx` y `AbcChart.tsx`) maneja negativos sin problema, con signo y separadores de miles. |
+| **`PlanillaTable.tsx`: coloreado ya es independiente del signo** | `estadoMesBg` colorea celdas según `estado_mes`/`frecuencia_nivel` (clasificación de negocio calculada en el ETL), no según el signo crudo de `ventasCantidad` — no hay conflicto que resolver. |
+| **`AbcChart.tsx`: el donut usa conteo de SKUs, no totales** | El donut/leyenda principal grafica `cantidadA/B/C` (conteos, siempre positivos) — un SKU de total negativo no lo afecta visualmente. Solo aparece el valor crudo en la tabla expandible de detalle, ya formateado correctamente. |
+| **`VentasTrendChart.tsx`: `beginAtZero: true` no recorta negativos** | Chart.js extiende el rango del eje hacia abajo si hay datos negativos reales — no hay pérdida visual de datos. |
+| **Cierre sin cambios de código** | Un signo negativo es una convención universalmente entendida — agregar color/ícono especial sería decoración sin necesidad real. Coincide con el propio issue ("con o sin cambio visual") y con el patrón ya usado en la sesión (no agregar tratamiento más allá de lo que hace falta). |
+
+**Revisión ampliada (antes de cerrar, "revisa todo" final):** se encontraron 9 archivos más no cubiertos por el grill original (`TablaVentasAgregadas.tsx`, `TopSkusVentasTable.tsx`, `DatosExtra.tsx`, `ProjectedSalesChart.tsx`, `VentasMensualesPage.tsx`, `exportPlanilla.ts`, y los tipos asociados). Todos confirmados seguros:
+- `formatNumber`/`formatPronostico` (`format.ts`) y `fmtPct` (`DatosExtra.tsx`): verificado que `Math.abs()` solo decide el formato (con/sin comas), nunca se aplica al valor mostrado — un negativo se muestra con su signo real, sin "robo de signo".
+- `ProjectedSalesChart.tsx` ya tiene un checkbox existente (`startFromZero`) que le da al usuario control sobre si el eje Y arranca en cero o se autoescala — sin pérdida de datos negativos en ningún caso.
+- El resto (`TablaVentasAgregadas.tsx`, `TopSkusVentasTable.tsx`, `VentasMensualesPage.tsx`, `exportPlanilla.ts`) renderiza el valor crudo sin ningún tratamiento que pueda perder el signo.
+
+---
+
 ## Issues conocidos / TODOs en código
 
 | Issue | Ubicación | Descripción |
