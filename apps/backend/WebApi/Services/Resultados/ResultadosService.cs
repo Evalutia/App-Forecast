@@ -282,7 +282,13 @@ namespace Services.Resultados
       var descMap = _db.Articulos.AsNoTracking()
         .ToDictionary(a => a.Sku, a => a.Descripcion);
 
-      long granTotal = ventasPorSku.Sum(x => x.Total);
+      // Issue #82: granTotal solo suma SKUs con Total > 0 (el "pastel" real de ventas
+      // positivas). Con notas de credito reales, un SKU de neto negativo/cero puede
+      // hacer que el acumulado supere el 100% antes de terminar de recorrer la lista
+      // si se incluye en granTotal -- rompe la clasificacion A/B/C de todos los
+      // siguientes. Esos SKUs se clasifican "C" directamente, sin participar del
+      // acumulado, pero siguen apareciendo en la lista por transparencia.
+      long granTotal = ventasPorSku.Where(x => x.Total > 0).Sum(x => x.Total);
       if (granTotal == 0) return new AbcSummaryDto();
 
       double acum = 0;
@@ -291,8 +297,17 @@ namespace Services.Resultados
 
       foreach (var v in ventasPorSku)
       {
-        acum += (double)v.Total / granTotal * 100;
-        string clasif = acum <= 80 ? "A" : acum <= 95 ? "B" : "C";
+        string clasif;
+        if (v.Total <= 0)
+        {
+          clasif = "C";
+        }
+        else
+        {
+          acum += (double)v.Total / granTotal * 100;
+          clasif = acum <= 80 ? "A" : acum <= 95 ? "B" : "C";
+        }
+
         if (clasif == "A") cantA++;
         else if (clasif == "B") cantB++;
         else cantC++;

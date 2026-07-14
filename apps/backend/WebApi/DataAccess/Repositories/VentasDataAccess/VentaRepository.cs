@@ -77,7 +77,7 @@ namespace DataAccess.Repositories.VentaDataAccess
               Month = 0,
               Day = 0,
               Sku = g.Key.Sku,
-              TotalCantidad = (uint)g.Sum(x => (long)x.Cantidad),
+              TotalCantidad = g.Sum(x => (long)x.Cantidad),
               Quarter = g.Key.Quarter
             })
             .OrderByDescending(x => x.Year)
@@ -111,7 +111,7 @@ namespace DataAccess.Repositories.VentaDataAccess
               Month = g.Key.Month,
               Day = 1,
               Sku = g.Key.Sku,
-              TotalCantidad = (uint)g.Sum(x => x.Cantidad),
+              TotalCantidad = g.Sum(x => (long)x.Cantidad),
               Quarter = 0
             })
         : lowerPeriodo == "anual"
@@ -122,7 +122,7 @@ namespace DataAccess.Repositories.VentaDataAccess
                 Month = 0,
                 Day = 0,
                 Sku = g.Key.Sku,
-                TotalCantidad = (uint)g.Sum(x => x.Cantidad),
+                TotalCantidad = g.Sum(x => (long)x.Cantidad),
                 Quarter = 0
               })
           : q.GroupBy(v => new { v.Sku, Fecha = v.Fecha })
@@ -132,7 +132,7 @@ namespace DataAccess.Repositories.VentaDataAccess
                 Month = g.Key.Fecha.Month,
                 Day = g.Key.Fecha.Day,
                 Sku = g.Key.Sku,
-                TotalCantidad = (uint)g.Sum(x => x.Cantidad),
+                TotalCantidad = g.Sum(x => (long)x.Cantidad),
                 Quarter = 0
               });
 

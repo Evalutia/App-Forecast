@@ -13,7 +13,7 @@ namespace DataAccess.Repositories.VentasMensualesDataAccess
       _db = db;
     }
 
-    public void Upsert(string sku, ushort year, byte month, ulong ventasCantidad, ushort diasConStock, string fuente)
+    public void Upsert(string sku, ushort year, byte month, long ventasCantidad, ushort diasConStock, string fuente)
     {
       using var tx = _db.Database.BeginTransaction();
       try

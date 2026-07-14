@@ -1578,6 +1578,81 @@ Rodrigo respondió por mail la pregunta bloqueante de `#61` ("Histórico" ya hab
 
 ---
 
+### Plan de trabajo para el corte mTLS del viernes 18/07 (sesión 2026-07-13)
+
+Martín García (MG Soluciones IT) confirmó por mail: curl del lado de ellos listo, propuso fecha de corte y un procedimiento de 3 pasos. Se le contestó confirmando `curl 7.81.0`/OpenSSL 3.0.2 (verificado localmente contra la misma imagen base de `etl`), que no hay otros sistemas propios que consuman el WS, y se aceptó **viernes 18/07, 9-12hs**.
+
+| Decisión | Definición |
+|----------|-----------|
+| **No se crea un issue nuevo — se actualiza `#52`** | El alcance de `#52` ya coincidía casi punto por punto con el procedimiento de Martín. Se le agrega la fecha concreta y el paso nuevo que no tenía: probar **primero sin certificado** y confirmar que rechaza (`tlsv13 alert certificate required`) — prueba más fuerte que solo confirmar `200 OK` con certificado, valida que el servidor realmente exige mTLS. |
+| **`#53` sigue pausado** | El mail de Martín no resuelve la pregunta que lo bloqueaba (si las IPs dinámicas de oficina de Nico/socio van a estar habilitadas para `cotech-dev.p12`) — es un tema distinto del corte de producción del viernes, sigue sin info nueva. |
+| **`#54` se redacta ahora** | Antes era hipotético; ahora hay info concreta: Martín confirmó que el rollback de su lado es inmediato y sin impacto ("vuelve a HTTP plano"), y el rollback de nuestro lado es trivial — simplemente no mergear/deployar el cambio de `WS_URL` a `https://`, seguimos en `http://` sin ningún riesgo. |
+| **Migración SQL de `#80` se aplica en producción antes del viernes, desacoplada del corte** | Si el viernes se recrea `etl` con el código de `#80` pero sin la migración aplicada, `run_extract_sales_chunk.py` intentaría insertar negativos en una columna todavía `UNSIGNED` — no rompe el job (el `try/except` ya existente descarta la fila y sigue) pero vuelve silenciosamente al comportamiento viejo (pierde el signo) hasta que se aplique. Aplicarla antes evita esa sorpresa durante la ventana acotada del viernes (9-12hs) — es de bajo riesgo, ya verificada localmente (idempotente, sin errores), y no depende en nada del corte mTLS. |
+
+**Plan resultante (orden de ejecución):**
+1. Aplicar migración de `#80` en producción (cualquier momento antes del viernes, independiente de todo lo demás).
+2. Viernes 18/07, 9-12hs, coordinado en vivo con Martín: correr los 3 pasos de `#52` (rechazo sin cert → `200 OK` con cert → corrida manual del job).
+3. Si los 3 pasos pasan: `docker compose build etl` + `up -d --force-recreate etl` — activa `#51` (mTLS/`WS_URL=https`) + `#71` (elegibilidad SKU, ya migrado) + `#80` (ventas negativas, ya migrado) juntos en la misma imagen.
+4. Si algo falla: no se hace el rebuild/recreate — se sigue en `http://` sin impacto, tal como confirmó Martín de su lado.
+5. Verificar el primer cron nocturno real post-corte (esa misma noche, 3 AM) antes de dar por cerrado `#51`/`#52`.
+
+**`#54` redactado (comentario en el issue, 2026-07-13):** aclarado que el plan aplica *después* del corte definitivo, no al día de la prueba en sí (eso es trivialmente seguro, ya cubierto por `#52` — si falla, simplemente no se deploya). Procedimiento: el cron falla atómico sin corromper nada → diagnosticar vía `docker compose logs etl` → resolver (cert vencido, `.env` mal seteado, o coordinar con Martín si es de su lado) → recuperar con `FORCE_START`/`FORCE_END` (mismo mecanismo de `#44`) → confirmar `exitoso` en `jobs_historial`. Sin fallback a HTTP, sería código muerto.
+
+---
+
+### Retomado: sincronizar entorno local con producción — Issue #38 (sesión 2026-07-13)
+
+Motivación actual (más amplia que el alcance original del issue, que era puntual a #34/#35): el usuario quiere poder desarrollar y debuggear localmente con datos reales de producción, usando la VM únicamente para deployar cambios ya validados — no depender de la VM para cada lectura/prueba.
+
+| Decisión | Definición |
+|----------|-----------|
+| **Transporte: S3, no túnel SSM** | Subir el dump desde la VM a un bucket S3 con `aws s3 cp`, bajarlo en local igual. Se descarta `aws ssm start-session --document-name AWS-StartPortForwardingSession` (túnel directo a MySQL de la VM) por menor privilegio: la credencial de S3 solo puede tocar un bucket puntual (`s3:GetObject`/`PutObject`), el túnel SSM requeriría `ssm:StartSession` sobre la instancia — una puerta de acceso de red mucho más amplia. Además el volumen (~2.6 GB, visto en el backup de `#59`/`#60`) es más robusto de mover por S3 que sostenido en un túnel en vivo. |
+| **`usuarios` se excluye del dump** | Contiene credenciales reales de usuarios del cliente (contraseñas hasheadas + correos reales) — no aporta nada a lo que se busca validar (Planilla, predicciones, elegibilidad) y expondría datos de usuarios reales en una máquina de desarrollo sin necesidad. El entorno local sigue usando el admin local ya seedeado por `99-creacion-admin.sql`. Se sincroniza el resto completo: `articulos`, `ventas_historicas`, `ventas_mensuales`, `stock_diario`, `grupos`, `articulos_elegibilidad_econometrico`, `predicciones`, `jobs_historial`. |
+| **Proceso documentado y repetible, no un dump puntual** | Dado que el objetivo es trabajar localmente de forma continua (no una vez y listo), se arma un script de cada lado (dump+upload en la VM, download+import en local) en vez de un procedimiento ad-hoc que haya que re-derivar cada vez que la producción avance. |
+| **Credencial AWS en `~/.aws/credentials`, perfil dedicado (ej. `evalutia-sync`)** | No en el `.env` del proyecto — es una credencial de la máquina, no del repo; separarla evita mezclarla con los secretos que ya viven en `.env` (DB, JWT, certs mTLS). Cualquier comando la usa con `--profile evalutia-sync`. |
+| **La cuenta de AWS la administra otra persona, pero el usuario tiene acceso a ella (falta el código MFA)** | No hace falta un pedido externo formal (como con Martín/IT) — el usuario puede crear el bucket S3 y el usuario IAM él mismo en la consola, una vez que consiga el código MFA de quien lo tiene. No se sabía si ya existe un bucket reusable — se asume que hay que crear uno nuevo dedicado. |
+
+> **Nota:** el rol de la VM (EC2) para poder subir a ese mismo bucket también hay que confirmarlo/configurarlo — si la instancia ya tiene un IAM role adjunto, alcanza con agregarle permiso al bucket nuevo; si no, hay que decidir entre adjuntarle un role o usar una access key también ahí. Queda como paso siguiente, no resuelto en esta sesión.
+
+**Hallazgo durante la implementación:** ya existía `scripts/sync_local_from_prod.sh` de una sesión anterior (2026-06-17), con un diseño **distinto** al decidido hoy — asumía conexión directa desde el PC al MySQL de producción (`PROD_MYSQL_HOST`/etc.), whitelisteando la IP del usuario en el security group. Se comparó con el diseño de hoy (S3) y se decidió mantener S3 — más seguro (nunca expone el puerto de MySQL a internet, ni siquiera acotado a una IP, que además es dinámica). El script viejo se sobrescribió con el nuevo diseño.
+
+**Implementado (2026-07-13), pendiente de probarse — bloqueado en acceso a AWS:**
+- `scripts/prod_dump_to_s3.sh` (nuevo, corre en la VM): `mysqldump` de 11 tablas (`articulos`, `grupos`, `ventas_historicas`, `ventas_mensuales`, `stock_diario`, `stock_resumen_365`, `articulos_elegibilidad_econometrico`, `predicciones`, `jobs_historial`, `planilla_ventas_calculada`, `planilla_sugerencias` — sin `usuarios` ni tablas `*_stage`), comprime y sube a `s3://BUCKET/latest.sql.gz`.
+- `scripts/sync_local_from_prod.sh` (reescrito, corre en local): baja el dump de S3, trunca las mismas 11 tablas localmente y restaura. Sintaxis verificada (`bash -n`), no probado end-to-end todavía (falta el bucket + credenciales).
+- Política IAM (para el usuario `evalutia-sync`, acotada a un bucket): `s3:ListBucket` sobre el bucket + `s3:GetObject`/`PutObject`/`DeleteObject` sobre su contenido. El mismo usuario/credencial se pensaba reusar en la VM (evita crear un segundo usuario para un bucket de un solo propósito).
+
+**Bloqueado:** el socio de Nico administra la cuenta de AWS y todavía no le pasó el acceso (MFA) — no se pudo crear el bucket/usuario IAM ni probar el flujo completo. Se sigue usando el relevo por la VM (Session Manager) para todo lo que necesite producción mientras tanto, sin que esto bloquee el resto del backlog.
+
+---
+
+### Backend: soportar cantidad negativa sin corromper agregados — Issue #82 (sesión 2026-07-13)
+
+| Decisión | Definición |
+|----------|-----------|
+| **Hallazgo antes de grillar: `StockResumen365.Ventas365` ya es `long`** | No tiene el problema de tipos que suponía la auditoría original — el riesgo real está concentrado en `VentaHistorica.Cantidad` (`uint`), `VentaAgregada.TotalCantidad` (`uint`) y los campos `ulong` de `VentaSkuResumen`. |
+| **Filtros `v.Cantidad > 0` en `VentasService.cs` se eliminan** | `TopSkusByVentas` y `GetSkuResumen` (al menos 6 lugares) filtraban filas antes de sumar — inofensivo cuando `Cantidad` era siempre ≥0, pero post-`#80` esto excluiría las devoluciones de la suma, mostrando bruto en vez de neto real. Se saca el filtro, se suman todas las filas (positivas y negativas) — es exactamente lo que pidió el cliente en `#61`/`#79`. |
+| **`GetAbcClassification` (`ResultadosService.cs`): rediseño del algoritmo de Pareto** | Hoy `granTotal` incluye todos los totales (incluso negativos), lo que puede hacer que el acumulado supere el 100% antes de terminar de recorrer la lista, rompiendo la clasificación A/B/C de todos los SKUs subsiguientes. Se recalcula `granTotal` solo con la suma de SKUs de `Total > 0` (el "pastel" real de ventas positivas); los SKUs con `Total <= 0` se clasifican automáticamente como "C" (reusa la categoría existente, no inventa una nueva) sin participar del acumulado — siguen apareciendo en la lista por transparencia, solo no afectan el corte 80/95% de los demás. |
+| **Migración de tipos** | `VentaHistorica.Cantidad`: `uint`→`int` (fila individual). `VentaAgregada.TotalCantidad`: `uint`→`long` (suma agregada). `VentaSkuResumen` (`MinimoVentasTrimestral`, `MaximoVentasTrimestral`, `VentasUltimoTrimestre`, `VentasUltimoAnioCalendario`): `ulong`→`long`. Todos los casts `(uint)`/`(ulong)` en `VentaRepository.cs`/`VentasService.cs` pasan a `(long)`, **sin** los `Math.Max(0, ...)` que hoy clampean negativos a 0 antes de mostrar (eso es justo lo que hay que sacar). |
+| **Verificación: cero regresión + caso sintético negativo** | Contra la DB local (ya tiene el esquema signed de `#80`): (1) los datos actuales (solo positivos) deben dar exactamente el mismo resultado que antes, (2) un SKU sintético con neto negativo real (mismo patrón usado para probar `#80`) confirma que `GetAbcClassification` no rompe el acumulado y que los totales reflejan el neto, no el bruto. |
+
+**Hallazgos adicionales durante la implementación (revisión final antes de codear):**
+- `VentaAgregadaOutDto` (`VentasDtos.cs`) tenía su propio `uint TotalCantidad` separado del modelo interno — sin corregirlo, el código no compilaba tras cambiar `VentaAgregada.TotalCantidad` a `long`.
+- `VentasMensuales.VentasCantidad` (`ulong`) también mapea a `ventas_mensuales.ventas_cantidad`, migrada por `#80`. Evaluación inicial ("código muerto") fue **incorrecta** — `VentasMensualesController.Get()` sí consulta `_db.VentasMensuales` directo (bypasea el repositorio) y expone el valor en `GET /api/ventasmensuales`, un endpoint real. Corregido `VentasMensualesOutDto`, `IVentasMensualesRepository`/`VentasMensualesRepository.Upsert`, `IStockService`/`StockService.UpsertVentasMensualesCalculated` (todos ulong→long).
+- Confirmado que `StockDiario.Cantidad`/`StockDiarioRepository` (`uint`, stock físico) y `UsuarioService.Id` (`ulong`, PK de usuario) son conceptos no relacionados — no se tocan.
+
+**Implementado y verificado (2026-07-14):**
+
+| Paso | Resultado |
+|------|-----------|
+| `dotnet build` | 0 errores (warnings preexistentes no relacionados) |
+| Rebuild + recreate `webapi` local | Confirmado (`CREATED` reciente) |
+| Cero regresión | `GET /api/resultados/charts/abc` antes/después/tras limpieza: `21A/27B/55C/103 items` idéntico en los 3 momentos |
+| Caso sintético (SKU `TEST-NEG-82`, ventas `+50`/`-80`, neto `-30`) | `ventasTotal: -30` y `ventasUltimoAnioCalendario: -30` (neto real, sin clamp ni wraparound); clasificado `"C"`; `porcentajeAcumulado` nunca supera 100% en toda la lista; ranking correcto (último lugar, 104/104). Datos de prueba borrados después. |
+| Commit y push | `2eef51f..HEAD` — `docker-compose.yml` (no relacionado) y los 2 scripts de `#38` (sin probar, bloqueados por acceso a AWS) quedan fuera. |
+| **Deploy a producción** | Pendiente — bloqueado por falta de acceso a la VM (socio administra la cuenta de AWS, sin MFA todavía). A diferencia de `#51`/`#71`/`#80`, `#82` no tiene acoplamiento con el corte mTLS (`webapi` es un servicio distinto de `etl`) — se puede desplegar independientemente en cuanto haya acceso a la VM. |
+
+---
+
 ## Issues conocidos / TODOs en código
 
 | Issue | Ubicación | Descripción |

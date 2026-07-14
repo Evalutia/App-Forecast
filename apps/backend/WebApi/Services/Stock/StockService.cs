@@ -44,7 +44,7 @@ namespace Services.Stock
       return (ushort)diasConStock;
     }
 
-    public void UpsertVentasMensualesCalculated(string sku, int year, int month, ulong ventasCantidad)
+    public void UpsertVentasMensualesCalculated(string sku, int year, int month, long ventasCantidad)
     {
       if (string.IsNullOrWhiteSpace(sku))
         throw new ArgumentException("SKU is required.", nameof(sku));

@@ -4,6 +4,6 @@ namespace WebApi.Models
   {
     public string Periodo { get; set; } = string.Empty;
     public string Sku { get; set; } = string.Empty;
-    public uint TotalCantidad { get; set; }
+    public long TotalCantidad { get; set; }
   }
 }

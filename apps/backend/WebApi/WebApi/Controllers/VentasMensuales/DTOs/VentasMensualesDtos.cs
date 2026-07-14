@@ -9,10 +9,10 @@ namespace WebApi.Controllers.VentasMensuales.DTOs
     public string Sku { get; init; } = string.Empty;
     public int Year { get; init; }
     public int Month { get; init; }
-    public ulong VentasCantidad { get; init; }
+    public long VentasCantidad { get; init; }
     public ushort DiasConStock { get; init; }
     public string Fuente { get; init; } = string.Empty;
-    public VentasMensualesOutDto(ulong id, string sku, int year, int month, ulong ventasCantidad, ushort diasConStock, string fuente)
+    public VentasMensualesOutDto(ulong id, string sku, int year, int month, long ventasCantidad, ushort diasConStock, string fuente)
     {
       Id = id;
       Sku = sku;

@@ -53,7 +53,7 @@ namespace Services.Ventas
       return _repo.DistinctSkus(filtro);
     }
 
-    public IReadOnlyList<(string Sku, ulong TotalCantidad, double PorcentajeVentas, int? PronosticoProximoTrimestre)> TopSkusByVentas(DateOnly fechaDesde, DateOnly fechaHasta, int take)
+    public IReadOnlyList<(string Sku, long TotalCantidad, double PorcentajeVentas, int? PronosticoProximoTrimestre)> TopSkusByVentas(DateOnly fechaDesde, DateOnly fechaHasta, int take)
     {
       if (fechaHasta < fechaDesde)
         throw new InvalidOperationException("fechaHasta debe ser >= fechaDesde");
@@ -64,8 +64,10 @@ namespace Services.Ventas
       // Usar los parámetros del controller (UTC) para coherencia con GetSkuResumen
       var fechaDesde12Meses = fechaHasta.AddMonths(-12);
 
+      // Issue #82: sin filtro de signo -- se suman todas las filas (ventas y
+      // notas de credito) para reflejar el neto real, no el bruto.
       var ventasFiltro = _repo.GetAllVentas()
-          .Where(v => v.Fecha >= fechaDesde12Meses && v.Fecha <= fechaHasta && v.Cantidad > 0)
+          .Where(v => v.Fecha >= fechaDesde12Meses && v.Fecha <= fechaHasta)
           .ToList();
 
       var ventasPorSkuList = ventasFiltro
@@ -73,7 +75,7 @@ namespace Services.Ventas
           .Select(g => new
           {
             Sku = g.Key,
-            Total = (ulong)g.Sum(x => (long)x.Cantidad),
+            Total = g.Sum(x => (long)x.Cantidad),
             FechaPrimera = g.OrderBy(x => x.Fecha).Select(x => x.Fecha).FirstOrDefault()
           })
           .OrderByDescending(x => x.Total)
@@ -100,7 +102,7 @@ namespace Services.Ventas
             }
           );
 
-      var result = new List<(string Sku, ulong TotalCantidad, double PorcentajeVentas, int? PronosticoProximoTrimestre)>();
+      var result = new List<(string Sku, long TotalCantidad, double PorcentajeVentas, int? PronosticoProximoTrimestre)>();
       foreach (var entry in ventasPorSkuList)
       {
         var sku = entry.Sku;
@@ -110,7 +112,7 @@ namespace Services.Ventas
         result.Add((sku, total, porcentaje, pronostico));
       }
 
-      result.Add(("TOTAL", (ulong)totalGeneral, 100.0, null));
+      result.Add(("TOTAL", (long)totalGeneral, 100.0, null));
       return result;
     }
 
@@ -202,8 +204,10 @@ namespace Services.Ventas
         fullQuarterly.Add((Year: y, Quarter: q, Total: total));
       }
 
-      // Calculamos mínimo incluyendo ceros (solo trimestres posteriores a la primera venta)
-      ulong minTotal = 0;
+      // Calculamos mínimo incluyendo ceros (solo trimestres posteriores a la primera venta).
+      // Issue #82: sin Math.Max(0, ...) -- un trimestre con neto negativo (devoluciones
+      // superan la venta) se muestra tal cual, no se clampea a 0.
+      long minTotal = 0;
       int? minYear = null, minQuarter = null;
       if (fullQuarterly.Any())
       {
@@ -214,7 +218,7 @@ namespace Services.Ventas
             .ThenByDescending(x => x.Quarter)
             .First();
 
-        minTotal = (ulong)Math.Max(0, minCandidate.Total);
+        minTotal = minCandidate.Total;
         minYear = minCandidate.Year;
         minQuarter = minCandidate.Quarter;
       }
@@ -225,7 +229,7 @@ namespace Services.Ventas
       var quarterly = fullQuarterly.Select(f => new { Year = f.Year, Quarter = f.Quarter, Total = f.Total }).ToList();
       var quarterlyWithSales = quarterly.Where(x => x.Total > 0).ToList();
 
-      ulong maxTotal = 0;
+      long maxTotal = 0;
       int? maxYear = null, maxQuarter = null;
       if (quarterly.Any())
       {
@@ -235,7 +239,7 @@ namespace Services.Ventas
             .ThenByDescending(x => x.Quarter)
             .First();
 
-        maxTotal = (ulong)Math.Max(0, maxCandidate.Total);
+        maxTotal = maxCandidate.Total;
         maxYear = maxCandidate.Year;
         maxQuarter = maxCandidate.Quarter;
       }
@@ -246,26 +250,26 @@ namespace Services.Ventas
       var lastQuarterYear = lastCompleteYear;
       var lastQuarterNum = lastCompleteQuarter;
       var lastQuarterLabel = $"{lastQuarterYear}-Q{lastQuarterNum}";
-      var ventasUltimoTrimestreLong = fullQuarterly.FirstOrDefault(x => x.Year == lastQuarterYear && x.Quarter == lastQuarterNum).Total;
-      var ventasUltimoTrimestre = (ulong)Math.Max(0, ventasUltimoTrimestreLong);
+      var ventasUltimoTrimestre = fullQuarterly.FirstOrDefault(x => x.Year == lastQuarterYear && x.Quarter == lastQuarterNum).Total;
 
-      // Ventas últimos 12 meses: coherente con TopSkusByVentas
+      // Ventas últimos 12 meses: coherente con TopSkusByVentas.
+      // Issue #82: sin filtro de signo -- se suma el neto real (ventas y notas de credito).
       var desdeUltimoAnio = todayDateOnly.AddMonths(-12);
       var desdeAnioAnterior = todayDateOnly.AddMonths(-24);
 
       var ventasFiltro = _repo.GetAllVentas()
-          .Where(v => v.Fecha >= desdeUltimoAnio && v.Fecha <= todayDateOnly && v.Cantidad > 0)
+          .Where(v => v.Fecha >= desdeUltimoAnio && v.Fecha <= todayDateOnly)
           .ToList();
 
-      var ventasUltimoAnio = (ulong)ventasFiltro
+      var ventasUltimoAnio = ventasFiltro
           .Where(v => v.Sku == sku)
           .Sum(v => (long)v.Cantidad);
 
       var ventasPrevFiltro = _repo.GetAllVentas()
-          .Where(v => v.Fecha >= desdeAnioAnterior && v.Fecha < desdeUltimoAnio && v.Cantidad > 0)
+          .Where(v => v.Fecha >= desdeAnioAnterior && v.Fecha < desdeUltimoAnio)
           .ToList();
 
-      var ventasAnioAnterior = (ulong)ventasPrevFiltro
+      var ventasAnioAnterior = ventasPrevFiltro
           .Where(v => v.Sku == sku)
           .Sum(v => (long)v.Cantidad);
 
@@ -284,16 +288,16 @@ namespace Services.Ventas
       var lastQuarterStart = new DateOnly(lastQuarterYear, qStartMonth, 1);
       var lastQuarterEndCalc = lastQuarterStart.AddMonths(3).AddDays(-1);
 
-      var skuLastQuarter = (ulong)_repo.GetVentasBySku(sku)
-          .Where(v => v.Fecha >= lastQuarterStart && v.Fecha <= lastQuarterEndCalc && v.Cantidad > 0)
+      var skuLastQuarter = _repo.GetVentasBySku(sku)
+          .Where(v => v.Fecha >= lastQuarterStart && v.Fecha <= lastQuarterEndCalc)
           .Sum(v => (long)v.Cantidad);
 
       var prevQuarterYear = lastQuarterYear - 1;
       var prevQuarterStart = new DateOnly(prevQuarterYear, qStartMonth, 1);
       var prevQuarterEnd = prevQuarterStart.AddMonths(3).AddDays(-1);
 
-      var skuPrevYearSameQuarter = (ulong)_repo.GetVentasBySku(sku)
-          .Where(v => v.Fecha >= prevQuarterStart && v.Fecha <= prevQuarterEnd && v.Cantidad > 0)
+      var skuPrevYearSameQuarter = _repo.GetVentasBySku(sku)
+          .Where(v => v.Fecha >= prevQuarterStart && v.Fecha <= prevQuarterEnd)
           .Sum(v => (long)v.Cantidad);
 
       double? crecimientoUltimoTrimestreVsAnioAnterior = null;
@@ -307,12 +311,12 @@ namespace Services.Ventas
         crecimientoUltimoTrimestreVsAnioAnterior = null;
       }
 
-      var totalUltimoAnio = (ulong)ventasFiltro.Sum(v => (long)v.Cantidad);
+      var totalUltimoAnio = ventasFiltro.Sum(v => (long)v.Cantidad);
       double? incidenciaUltimoAnio = null;
       if (totalUltimoAnio > 0) incidenciaUltimoAnio = Math.Round((double)ventasUltimoAnio / totalUltimoAnio * 100.0, 2);
 
-      var totalUltimoTrimestre = (ulong)_repo.GetAllVentas()
-          .Where(v => v.Fecha >= lastQuarterStart && v.Fecha <= lastQuarterEndCalc && v.Cantidad > 0)
+      var totalUltimoTrimestre = _repo.GetAllVentas()
+          .Where(v => v.Fecha >= lastQuarterStart && v.Fecha <= lastQuarterEndCalc)
           .Sum(v => (long)v.Cantidad);
 
       double? incidenciaUltimoTrimestre = null;
@@ -320,7 +324,7 @@ namespace Services.Ventas
 
       var rankingRows = ventasFiltro
           .GroupBy(v => v.Sku)
-          .Select(g => new { Sku = g.Key, Total = (ulong)g.Sum(x => (long)x.Cantidad) })
+          .Select(g => new { Sku = g.Key, Total = g.Sum(x => (long)x.Cantidad) })
           .OrderByDescending(x => x.Total)
           .ThenBy(x => x.Sku)
           .ToList();

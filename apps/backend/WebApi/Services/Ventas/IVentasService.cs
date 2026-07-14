@@ -25,7 +25,7 @@ namespace Services.Ventas
     IReadOnlyList<string> DistinctSkus(string? filtro);
 
     // Métodos con lógica de negocio compleja
-    IReadOnlyList<(string Sku, ulong TotalCantidad, double PorcentajeVentas, int? PronosticoProximoTrimestre)> TopSkusByVentas(DateOnly fechaDesde, DateOnly fechaHasta, int take);
+    IReadOnlyList<(string Sku, long TotalCantidad, double PorcentajeVentas, int? PronosticoProximoTrimestre)> TopSkusByVentas(DateOnly fechaDesde, DateOnly fechaHasta, int take);
 
     VentaSkuResumen GetSkuResumen(string sku, DateOnly today);
   }
