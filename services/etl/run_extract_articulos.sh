@@ -6,6 +6,9 @@ set -euo pipefail
 : "${MYSQL_DB:?missing}"
 : "${MYSQL_USER:?missing}"
 : "${MYSQL_PASSWORD:?missing}"
+: "${CERT_PATH:?missing}"    # Issue #51: mTLS obligatorio, sin fallback a HTTP
+: "${CACERT_PATH:?missing}"
+: "${CERT_PASSWORD:?missing}"
 
 DATE_FMT="${DATE_FMT:-dmy}"
 WS_NS="${WS_NS:-http://tempuri.org/VSServicioWeb/SWNadWeb}"
@@ -177,6 +180,9 @@ XML
     -sS --http1.1
     --connect-timeout "${CURL_CONNECT_TIMEOUT}"
     --max-time "${CURL_MAX_TIME}"
+    --cert-type P12
+    --cert "${CERT_PATH}:${CERT_PASSWORD}"
+    --cacert "${CACERT_PATH}"
     -D "$TMP_HDR"
     -H "Content-Type: text/xml; charset=utf-8"
     -H "SOAPAction: \"${WS_SOAP_ACTION}\""

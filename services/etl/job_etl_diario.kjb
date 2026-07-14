@@ -5,6 +5,11 @@
 
   <parameters>
     <parameter><name>WS_URL</name><default_value>${WS_URL}</default_value></parameter>
+    <!-- Issue #51: mTLS con el Web Service. Se exponen como variables de entorno
+         a las entradas SHELL igual que WS_URL/MYSQL_*, sin plumbing adicional. -->
+    <parameter><name>CERT_PATH</name><default_value>${CERT_PATH}</default_value></parameter>
+    <parameter><name>CACERT_PATH</name><default_value>${CACERT_PATH}</default_value></parameter>
+    <parameter><name>CERT_PASSWORD</name><default_value>${CERT_PASSWORD}</default_value></parameter>
     <parameter><name>DATE_FMT</name><default_value>dmy</default_value></parameter>
     <parameter><name>ID_EMPRESA</name><default_value>1</default_value></parameter>
     <parameter><name>S_DEPOSITOS</name><default_value>1,5</default_value></parameter>
