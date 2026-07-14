@@ -1505,6 +1505,49 @@ El fix de código (`stock_resumen_365`, commit `1adafb3`) ya está commiteado y 
 
 > **Nota:** `#71` es deliberadamente acotado a schema + wiring de `get_skus_modelo.py` + seed de continuidad — la evaluación real sobre los ~5400 SKUs candidatos y la aplicación del criterio completo de `#70` quedan para `#72`/`#73`, que van a hacer `UPDATE`/`INSERT ... ON DUPLICATE KEY UPDATE` sobre esta misma tabla con los resultados reales del walk-forward.
 
+**Falla real encontrada y corregida antes de commitear:** el `CREATE INDEX` separado (fuera del `CREATE TABLE IF NOT EXISTS`) no es idempotente en MySQL — reventaba con `Duplicate key name` al re-ejecutar el script. Se movió el índice adentro del `CREATE TABLE` (como `KEY` inline) para que todo el archivo sea seguro de re-correr, dado el patrón ya visto en esta sesión de comandos de deploy repetidos por error (Ctrl+C, reintentos). Verificado localmente: 2 corridas seguidas, silenciosas, sin duplicar filas.
+
+**Deploy ejecutado y verificado en producción (2026-07-13, mismo día):**
+
+| Paso | Resultado |
+|------|-----------|
+| `git merge --ff-only origin/Develop` | Fast-forward `0743a22..1000185` — trajo también los commits de `#51` (mTLS), todavía no activados. |
+| **Riesgo detectado a tiempo:** rebuild/recreate de `etl` activaría `#51` de forma prematura | `get_skus_modelo.py` queda horneado en la imagen de `etl` (`COPY . /app` en el `Dockerfile`) — un rebuild para activar `#71` también activaría `WS_URL=https://...` de `#51`, todavía gateado por `#52` (IT no cortó a mTLS). Se decide aplicar **solo la migración SQL** ahora (segura, no toca código en ejecución) y posponer el rebuild/recreate de `etl` hasta que `#52` confirme el corte — momento en el que `#51` y `#71` se activan juntos en el mismo rebuild. |
+| Migración SQL aplicada | Sin errores. |
+| Checkpoint duro | `deberia_haber` (query real contra `grupos`) = **101**, `quedo_sembrado` (tabla nueva) = **101** — coinciden exactamente. (Producción tiene 101 SKUs en grupo 201 hoy, no 104 como el dump local usado para probar — la migración se adapta al dato real vía `INSERT...SELECT`, no una lista fija.) |
+| Estado actual | Migración aplicada y verificada; contenedor `etl` **sin recrear todavía** — sigue leyendo de `grupos` (código viejo), cero cambio de comportamiento. Pendiente: rebuild/recreate conjunto de `#51`+`#71` cuando `#52` lo habilite. |
+
+---
+
+### Hallazgo: ventas negativas (notas de crédito) se pierden en todo el pipeline — Issue #79 (sesión 2026-07-13)
+
+Rodrigo respondió por mail la pregunta bloqueante de `#61` ("Histórico" ya había sido aceptado antes; "Ticket" quedó definido ahora): *"la info que reciben ustedes si tienen las notas de crédito, son las ventas negativas que aparecen de vez en cuando... si pueden obtener la cantidad de días de un mes que hubo ventas (sean negativas o positivas), tengo todos los datos que necesito... para mí es mejor cerrarlo por día."*
+
+| Decisión | Definición |
+|----------|-----------|
+| **"Ticket" queda definido** | Un día del mes con al menos una fila de venta en `ventas_historicas` (positiva o negativa) — contado por día, no por transacción individual. Decisión explícita del cliente, no interpretación nuestra. |
+| **Bloqueo real encontrado antes de poder implementar `#61`** | El sistema hoy **descarta el signo de las ventas negativas antes de guardarlas** — `run_extract_sales_chunk.py` tiene `clamp_nonneg_int()` que hace `max(0, n)`, y 5 tablas (`ventas_historicas`, `ventas_historicas_stage`, `ventas_mensuales`, `planilla_ventas_calculada`, `stock_resumen_365`) son `UNSIGNED`/`CHECK >= 0`. Un día con solo una nota de crédito (sin venta positiva ese día) queda indistinguible de un día sin ninguna venta — para todo el histórico, no solo de ahora en más (afecta tanto la carga diaria como el backfill, mismo script). |
+| **Auditoría completa: 15-18 archivos en 4 capas interdependientes** | Esquema (3 SQL) + ETL (6 archivos, incluye `job_etl_diario.kjb` — el paso real que persiste en producción, no solo el script de staging) + ML (`ml/models.py`: `fit_prophet_insample` descarta filas de **entrenamiento** con `y<0`, sesgando el modelo — no es solo un problema de tipos) + Backend (6 archivos). Ninguna capa se puede tocar sola: migrar el esquema sin arreglar el backend primero generaría corrupción silenciosa. |
+| **Hallazgo más peligroso de la auditoría** | `VentaRepository.cs` hace `(uint)g.Sum(x => x.Cantidad)` — en C#, castear un negativo a `uint` sin `checked` no tira excepción, da wraparound (`-5` → `4294967291`). Hoy está "dormido" (cantidad nunca es negativa en la DB), pero se activa en cuanto se migre el esquema si no se arregla en el mismo esfuerzo — corrompería datos mostrados al cliente sin ningún error visible. |
+| **Estructura en GitHub: issue paraguas + 4 issues por capa** (decisión explícita del usuario, prefirió granular sobre un solo issue grande) | `#79` (paraguas, documenta el hallazgo completo) → `#80` [DB][ETL] esquema+pipeline (raíz, sin dependencias) → `#81` [ML] Prophet + heurísticas de primera venta (depende de `#80`) → `#82` [Backend] tipos signed + fix del cast wraparound + rediseño de `GetAbcClassification` (depende de `#80`) → `#83` [Frontend] UX de valores negativos, baja prioridad (depende de `#82`). |
+| **`#61` no se cierra** | La definición de "Ticket" queda registrada y aceptada (comentario en el issue), pero `#61` queda bloqueado por `#79` hasta que el pipeline pueda preservar el signo real. `#62`-`#67` (que dependen de `#61`) heredan el mismo bloqueo. |
+
+> **Nota:** `stock_diario`/`planilla_sugerencias` (stock físico) y `predicciones.cantidad_predicha` (pronóstico futuro) **no se tocan** — son conceptos distintos de "venta neta histórica" y sus `CHECK >= 0` son correctos (no tiene sentido un stock o un pronóstico futuro negativo).
+
+---
+
+### Diseño del fix de esquema+ETL — Issue #80 (sesión 2026-07-13)
+
+| Decisión | Definición |
+|----------|-----------|
+| **Alcance acotado: integridad de datos, no rediseño de negocio** | `#80` se limita a preservar el signo real de principio a fin sin romper nada (esquema + tipos + agregados numéricamente correctos). El rediseño de la lógica de "Ticket"/frecuencia (`meses_con_ventas`, `frecuencia_nivel` en `run_calc_planilla.py`) queda 100% para `#63` — no se toca en `#80`. Verificado que esto no genera un vacío: el clamp ocurre a nivel de fila diaria antes de cualquier agregación, así que corregirlo no cambia el resultado de la clasificación `vq > 0` existente (un mes cuya única venta fue una devolución da `0` hoy y daría un negativo con el fix — ambos casos fallan `> 0` igual). El efecto real es que los totales (`ventas_mensuales`, gráficos) pasan a ser netos reales en vez de brutos-con-clamp-silencioso. |
+| **Backfill histórico: fuera del alcance de `#80`, coordinado con `#63`/`#64`** | El clamp ocurre al insertar cada fila — todo el histórico ya guardado en `ventas_historicas` tiene el signo perdido para siempre; la única forma de recuperarlo es re-pedirle esos días al SOAP y re-correr `run_backfill_ventas.sh` con el fix aplicado. No se mete en el criterio de aceptación de `#80` (ya es grande: 15-18 archivos, 4 capas) — se agenda como parte de `#64` (QA de frecuencia contra datos reales), que de todos modos necesita datos reales para validar la fórmula. |
+| **Tipo de columna: `INT` signed, sin `CHECK` de reemplazo** | Se descarta poner un límite arbitrario (ej. `BETWEEN -999999 AND 999999`) — sería un número inventado sin caso real que lo justifique. El rango natural de `INT` (±2.147 mil millones) ya es más que suficiente; un valor corrupto real del SOAP se ataja en el manejo de errores del ETL, no con un CHECK en la tabla. |
+| **Migración idempotente con patrón defensivo** | La migración toca 5 tablas con `DROP CHECK` + `MODIFY COLUMN`. `DROP CHECK` sobre una constraint que ya no existe falla (a diferencia de `MODIFY COLUMN`, que sí es seguro de repetir) — se usa el mismo patrón ya existente en `04-etl-staging.sql` (chequear `information_schema` + SQL dinámico antes de alterar), dado el incidente real de comando repetido que ya tuvimos hoy mismo en `#71`. |
+| **Verificado: sin filtros de signo ocultos en `job_etl_diario.kjb`** | Los pasos `MERGE STAGING -> VENTAS` y `CALC_UPSERT_VENTAS_MENSUALES` son `SUM(...)` planos, sin `WHERE cantidad > 0` ni filtro similar — con el esquema signed funcionan sin tocar una sola línea de SQL del `.kjb`, el problema es 100% de tipos. |
+
+> **Nota:** `services/etl/run_extract_sales_chunk.py` necesita una función nueva (no reusar `clamp_nonneg_int`) para `cantidad` — el uso existente de esa función sobre `stock` (líneas ~122-124, 137 del mismo archivo) debe seguir clampeado a 0 sin cambios, es un concepto distinto (inventario físico, no venta neta).
+
 ---
 
 ## Issues conocidos / TODOs en código

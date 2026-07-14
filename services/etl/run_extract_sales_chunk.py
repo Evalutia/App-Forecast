@@ -30,6 +30,15 @@ def clamp_nonneg_int(x):
         n = 0
     return max(0, n)
 
+def clamp_signed_int(x):
+    # Issue #80: a diferencia de clamp_nonneg_int, preserva el signo -- una
+    # nota de credito (venta neta negativa) no debe aplastarse a 0.
+    try:
+        n = int(Decimal(str(x)).to_integral_value(rounding="ROUND_HALF_UP"))
+    except Exception:
+        n = 0
+    return n
+
 def trunc(s, maxlen):
     s = "" if s is None else str(s)
     return s[:maxlen]
@@ -116,7 +125,7 @@ with conn.cursor() as cur:
         if cantidad_is_decimal:
             cant_val = str(to_decimal(venta, "0"))
         else:
-            cant_val = clamp_nonneg_int(venta)
+            cant_val = clamp_signed_int(venta)
         if has_stock:
             if stock_is_decimal:
                 stk_val = str(to_decimal(stock, "0"))
