@@ -1693,6 +1693,25 @@ Revisados los 4 archivos identificados: `TablaVentas.tsx`, `PlanillaTable.tsx`, 
 
 ---
 
+### Migración SQL: columnas de frecuencia de venta por tickets — Issue #62 (sesión 2026-07-14)
+
+| Decisión | Definición |
+|----------|-----------|
+| **Hallazgo: ya existe un sistema de "frecuencia" distinto (`#27`)** | `frecuencia_nivel` (alta/media/baja) + `rotacion_ajustada` (`08-planilla-frecuencia-quiebre.sql`) clasifican el SKU a nivel **anual** (meses con ventas en los 12 meses) para elegir la fórmula de rotación en meses de quiebre. El nuevo sistema (`#61-67`) clasifica **cada mes individual** por cantidad de tickets (días con venta ese mes) para elegir el blending Histórico/Promedio/Real — concepto distinto, ya decidido que coexisten (confirmado en el propio `#65`: "no reemplaza el significado del color de quiebre ya validado — ambas señales conviven"). |
+| **Nombres sin colisión** | `tickets_mes`, `valor_historico`, `valor_ajustado`, `criterio_frecuencia` — deliberadamente distintos de `frecuencia_nivel`/`rotacion_ajustada` para que nadie confunda los dos sistemas al leer el código o una query suelta dentro de un año. |
+| **Esquema exacto** | `tickets_mes TINYINT UNSIGNED NOT NULL DEFAULT 0` (siempre calculable, 0-31 días, nunca falta). `valor_historico`/`valor_ajustado DECIMAL(10,2) NULL`, `criterio_frecuencia ENUM('historico','promedio','real_extrapolado') NULL` — nulos permitidos para un SKU sin ningún mes previo de historia (0 meses disponibles, promedio indefinido). Agregadas después de `rotacion_ajustada`, mismo patrón `ALTER TABLE` de `#27`. |
+| **Fuera de alcance de `#62`** | El modelo C# (`PlanillaVentasCalculada.cs`) no se toca en esta migración — es puro schema, el consumo backend/frontend llega con `#63`/`#65`/`#66` cuando la lógica de cálculo exista. |
+| **Migración idempotente con patrón defensivo** | `ALTER TABLE ADD COLUMN` no es idempotente (falla si la columna ya existe) — se guarda con chequeo previo vía `information_schema`, mismo patrón de `04-etl-staging.sql`, dado el incidente real de comando repetido que ya tuvimos en las migraciones de `#71`/`#80` esta misma sesión. Archivo: `infra/sql/15-planilla-frecuencia-tickets.sql`. |
+
+**Implementado y verificado en DB local (2026-07-14):**
+
+| Paso | Resultado |
+|------|-----------|
+| Migración aplicada 2 veces seguidas | Segunda corrida silenciosa, sin error — idempotente confirmado |
+| Esquema resultante | Las 4 columnas nuevas quedan justo después de `rotacion_ajustada`, tipos y nulabilidad exactos como se diseñó |
+
+---
+
 ## Issues conocidos / TODOs en código
 
 | Issue | Ubicación | Descripción |
