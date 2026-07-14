@@ -41,6 +41,7 @@ Single-context: todo el contexto de dominio vive en `.claude/CONTEXTO.md` (no ha
 | No sabés qué skill te sirve para lo que querés hacer | `/ask-matt` | Router — te pregunta la situación y te dice cuál usar |
 | Arrancás un repo nuevo o cambiás de tracker/labels/estructura de contexto | `/setup-matt-pocock-skills` | Re-configura lo de arriba (ya corrido una vez en este repo) |
 | Cierre de sesión larga, para retomar después sin releer todo | `/handoff` | Compacta la conversación en un documento de traspaso, sugiere qué skills cargar en la próxima |
+| Querés el review de dos ejes separados (Standards + Spec) además del `/code-review` de siempre | `/code-review-standards-spec` | 2 sub-agentes en paralelo que nunca se mezclan: uno chequea convenciones del repo + smells de Fowler, el otro si cumple el issue/spec original. Nunca fusiona los veredictos — uno puede pasar y el otro fallar |
 
 **Model-invoked** (puedo llegar solo, o las invocás igual si querés forzarlas):
 
@@ -57,9 +58,9 @@ Single-context: todo el contexto de dominio vive en `.claude/CONTEXTO.md` (no ha
 | Quiero que el código sea lo más simple/lazy posible, sin sobre-ingeniería | `/ponytail` | Modo de trabajo (no lee/escribe nada del repo): YAGNI, reusar antes que crear, el diff más chico que funcione. `lite`/`full`/`ultra` |
 | Preguntas sobre arquitectura, relaciones entre archivos, o "¿qué toca esto?" en el monorepo | `/graphify` | Construye un grafo de conocimiento del codebase (nodos, comunidades, BFS/DFS) — útil para navegar `apps/`+`services/` cruzados sin releer todo a mano |
 
-**Nota sobre `/code-review`**: el repo de origen trae su propia skill `code-review` (revisión en dos ejes, Standards + Spec, con sub-agentes paralelos). **No la copié** — este entorno ya tiene un `/code-review` propio (con modo `ultra` para review multi-agente en la nube vía `/code-review ultra`), y copiar la de mattpocock la taparía sin que lo pidas. Cuando `/implement` diga "usá `/code-review`", corre el que ya existe acá.
+**Nota sobre `/code-review`**: el repo de origen trae su propia skill `code-review` (revisión en dos ejes, Standards + Spec, con sub-agentes paralelos). No la copié con ese nombre — este entorno ya tiene un `/code-review` propio (con modo `ultra` para review multi-agente en la nube vía `/code-review ultra`), y copiarla igual la hubiera tapado. En vez de eso vive como **`/code-review-standards-spec`**, con `disable-model-invocation` — solo se dispara si la tipeás vos, nunca compite con el `/code-review` de siempre por auto-invocación. Cuando `/implement` diga "usá `/code-review`", sigue corriendo el que ya existe acá (no éste).
 
-Estas 18 son un subconjunto curado del total disponible — el resto de las skills personales del usuario (`premortem`, `grill-me`, `grill-with-docs`, etc.) siguen disponibles globalmente sin necesidad de copiarlas acá; se invocan igual con `/nombre-skill` aunque no vivan en este repo.
+Estas 19 son un subconjunto curado del total disponible — el resto de las skills personales del usuario (`premortem`, `grill-me`, `grill-with-docs`, etc.) siguen disponibles globalmente sin necesidad de copiarlas acá; se invocan igual con `/nombre-skill` aunque no vivan en este repo.
 
 ### Encadenar skills, no usarlas aisladas
 
