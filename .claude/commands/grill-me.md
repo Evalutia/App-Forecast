@@ -96,11 +96,16 @@ Start with: "Listo, te empiezo a grillar. Primera pregunta:" and then ask the fi
 
 Este repo tiene otras skills en `.claude/skills/` que **no se disparan solas** (`disable-model-invocation`): `to-tickets`, `wayfinder`, `triage`, `implement`, `setup-matt-pocock-skills`, `code-review-standards-spec`. El usuario no tiene que acordarse de sus nombres ni de cuándo usarlas — esa evaluación es responsabilidad de quien corre esta sesión, en cualquier punto del grilling, no solo al cierre:
 
-- **El plan resultante hay que partirlo en trabajo concreto** → proponer `/to-tickets` en vez de crear issues a mano uno por uno (así se hizo para #84-89, sin la skill — no repetir ese patrón manual si `/to-tickets` ya está disponible).
+Dos puntos de partida típicos de esta sesión, con distinto destino al cerrar:
+
+- **Se arrancó grillando sobre un issue que ya existe** (el usuario dijo "resolvamos el #N" o equivalente) → al cerrar, el issue ya está acotado, no hay nada que partir. Proponer `/implement` directo sobre ese issue, no `/to-tickets`.
+- **Se arrancó grillando una idea/plan todavía sin forma de issues** (el usuario quiere armar un plan de trabajo dividido en issues) → al cerrar, proponer `/to-tickets` sobre el plan recién cerrado (así se hizo para #84-89 a mano, sin la skill — no repetir ese patrón manual si `/to-tickets` ya está disponible). Recién después de partido en tickets es que corresponde proponer `/implement`, uno por uno.
+
+Y en cualquier punto de la sesión, no solo al cierre:
+
 - **El tema tiene más ramas de las que entran en una sola sesión de grilling, o queda niebla real sin resolver** → decirlo explícito y proponer `/wayfinder` en vez de forzar todas las decisiones en esta sesión.
 - **Aparece un bug o algo se rompe/anda lento en medio del grilling** → proponer `/diagnosing-bugs` en vez de saltar directo a proponer un fix.
 - **Un término de dominio queda ambiguo o contradice algo ya escrito en `CONTEXTO.md`** → señalarlo explícito (esto complementa el paso de "Closing the Session" de abajo, no lo reemplaza).
-- **Termina la sesión y el plan ya está para partir en issues** → antes del resumen final, preguntar si se corre `/to-tickets` sobre el plan recién cerrado.
 
 Proponer, nunca ejecutar la skill sin que el usuario confirme — estas skills tocan estado real del repo (crean issues, commitean, editan config).
 
@@ -126,7 +131,7 @@ When all branches are resolved, **before presenting the final summary**:
 4. Use today's date (available in context as `currentDate`).
 5. Write the updated file.
 6. Confirm: "✅ Decisiones guardadas en `.claude/CONTEXTO.md`" — then present the summary table to the user.
-7. Si el plan resultante implica partir trabajo en issues, preguntar acá mismo si se corre `/to-tickets` sobre lo recién cerrado (ver "Skills complementarias" arriba) — no crear los issues a mano salvo que el usuario prefiera eso explícitamente.
+7. Preguntar el siguiente paso según de dónde partió la sesión (ver "Skills complementarias" arriba): si era un issue puntual ya existente, proponer `/implement` directo; si era un plan/idea sin partir todavía, proponer `/to-tickets` primero. No crear issues ni escribir código a mano salvo que el usuario prefiera eso explícitamente.
 
 ## Verification Checklist (after any implementation)
 
