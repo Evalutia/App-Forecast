@@ -92,6 +92,18 @@ Ask **one question at a time**. For each question:
 
 Start with: "Listo, te empiezo a grillar. Primera pregunta:" and then ask the first question.
 
+## Skills complementarias (proponer, no ejecutar solo)
+
+Este repo tiene otras skills en `.claude/skills/` que **no se disparan solas** (`disable-model-invocation`): `to-tickets`, `wayfinder`, `triage`, `implement`, `setup-matt-pocock-skills`, `code-review-standards-spec`. El usuario no tiene que acordarse de sus nombres ni de cuándo usarlas — esa evaluación es responsabilidad de quien corre esta sesión, en cualquier punto del grilling, no solo al cierre:
+
+- **El plan resultante hay que partirlo en trabajo concreto** → proponer `/to-tickets` en vez de crear issues a mano uno por uno (así se hizo para #84-89, sin la skill — no repetir ese patrón manual si `/to-tickets` ya está disponible).
+- **El tema tiene más ramas de las que entran en una sola sesión de grilling, o queda niebla real sin resolver** → decirlo explícito y proponer `/wayfinder` en vez de forzar todas las decisiones en esta sesión.
+- **Aparece un bug o algo se rompe/anda lento en medio del grilling** → proponer `/diagnosing-bugs` en vez de saltar directo a proponer un fix.
+- **Un término de dominio queda ambiguo o contradice algo ya escrito en `CONTEXTO.md`** → señalarlo explícito (esto complementa el paso de "Closing the Session" de abajo, no lo reemplaza).
+- **Termina la sesión y el plan ya está para partir en issues** → antes del resumen final, preguntar si se corre `/to-tickets` sobre el plan recién cerrado.
+
+Proponer, nunca ejecutar la skill sin que el usuario confirme — estas skills tocan estado real del repo (crean issues, commitean, editan config).
+
 ## Closing the Session
 
 When all branches are resolved, **before presenting the final summary**:
@@ -114,6 +126,7 @@ When all branches are resolved, **before presenting the final summary**:
 4. Use today's date (available in context as `currentDate`).
 5. Write the updated file.
 6. Confirm: "✅ Decisiones guardadas en `.claude/CONTEXTO.md`" — then present the summary table to the user.
+7. Si el plan resultante implica partir trabajo en issues, preguntar acá mismo si se corre `/to-tickets` sobre lo recién cerrado (ver "Skills complementarias" arriba) — no crear los issues a mano salvo que el usuario prefiera eso explícitamente.
 
 ## Verification Checklist (after any implementation)
 
