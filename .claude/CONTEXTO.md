@@ -1782,6 +1782,21 @@ Revisados los 4 archivos identificados: `TablaVentas.tsx`, `PlanillaTable.tsx`, 
 
 ---
 
+### Deploy a producción — resize VM + tuning MySQL + backlog acumulado (Issue #60, sesión 2026-07-14)
+
+| Decisión | Definición |
+|----------|-----------|
+| **Diagnóstico confirmó #60 sin cambios** | RAM 1.9GiB (t3.small), `innodb_buffer_pool_size=128MB`, `tmp_table_size`/`max_heap_table_size=16MB` — idéntico a lo documentado semanas atrás. `stock_diario` con 25.3M filas (1.83GB datos + 4.62GB índices). |
+| **Resize t3.small → t3.medium (4GiB RAM)** | Hecho por el usuario desde la consola de AWS (stop → change instance type → start). Buffer pool subido a 2GB, tmp/heap table size a 256MB vía `command:` de MySQL en `docker-compose.yml`. |
+| **El `git pull` en la VM trajo mucho más que el tuning** | La VM estaba parada en el commit de #71 (previo a #80/#81/#82/#62/#63/#65/#66) — un solo `git pull` post-resize aplicó todo ese backlog de una vez. Se aplicaron a mano las migraciones `14-ventas-cantidad-signed.sql` y `15-planilla-frecuencia-tickets.sql` (no corren solas — `docker-entrypoint-initdb.d` solo se ejecuta en la creación inicial del volumen, no en un volumen ya existente), con backup previo (`mysqldump --no-tablespaces` de las 5 tablas afectadas, 372MB) y verificación de tipos de columna post-migración. Rebuild + recreate de `webapi`, `etl`, `python-worker`, `webapp` para tomar el código nuevo (todos usan `COPY . /app`, sin bind mount). |
+| **Resultado medido sobre `/api/resultados/charts/abc`** (el síntoma original de #59/#60) | Antes: timeout >120s. Después del resize+tuning: 30.0s en frío (cache recién arrancada) → **10.8-11.6s en caliente**, consistente en 2 corridas. Mejora real de ~10x. |
+| **Ajuste adicional: `Default Command Timeout=90` en el connection string** | La corrida en frío (30.024s) rozaba el default de MySqlConnector (30s) — un 500 real por `Command Timeout expired` durante la verificación, no un bug de código. Subir el timeout a 90s da margen para el caso de cache fría (justo después de cualquier restart) sin depender de que el cache ya esté tibia. |
+| **Login vía `curl` directo a `localhost:8080` falla con 307** | `UseHttpsRedirection()` solo se salta en `Development` (`Program.cs:191-193`) — en producción hay que pegarle a través de Caddy con `--resolve dominio:443:127.0.0.1` para simular el tráfico real sin depender de DNS/hairpin NAT. |
+
+> **Nota:** con este deploy, el código de #71/#80/#81/#82/#62/#63/#65/#66 pasa de "commiteado" a **realmente corriendo en producción** por primera vez — pendiente decidir si esto cierra también #79 (épica que se dejó abierta a propósito hasta confirmar el deploy).
+
+---
+
 ## Issues conocidos / TODOs en código
 
 | Issue | Ubicación | Descripción |
