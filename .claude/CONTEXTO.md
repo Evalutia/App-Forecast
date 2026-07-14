@@ -1712,6 +1712,38 @@ Revisados los 4 archivos identificados: `TablaVentas.tsx`, `PlanillaTable.tsx`, 
 
 ---
 
+### Fórmula de blending — Issue #63 (sesión 2026-07-14)
+
+**Mail original de Rodrigo recuperado** (no estaba preservado en `CONTEXTO.md`, solo referenciado — el usuario lo pegó completo en esta sesión):
+
+> SI hubo stock todo el mes: Tickets ≤2 → Histórico · Tickets 3-4 → (Histórico + VentaRealMes)/2 · Tickets ≥5 → VentaRealMes
+> SI hubo quiebre: Tickets ≤2 → Histórico · Tickets 3-4 → (Histórico + Extrapolación)/2 · Tickets ≥5 → Extrapolación
+
+4 ejemplos numéricos: Caso 1 (1 ticket, sin quiebre) → Histórico. Caso 2 (2 tickets, sin quiebre) → Histórico ("ídem anterior", confirma que el corte `≤2` es inclusivo). Caso 3 (3 tickets, sin quiebre, VentaRealMes=30) → (Histórico + 30)/2. Caso 4 (3 tickets, con quiebre, Histórico=50, Extrapolación=(30/12)×30.5=76.25) → (50+76.25)/2 = **63.125**.
+
+| Decisión | Definición |
+|----------|-----------|
+| **`sin_stock` entra a la rama "quiebre"** | El mail solo distingue dos estados ("stock todo el mes" vs. "quiebre"), no los 3 valores de `estado_mes`. `sin_stock` (0 días con stock) es un caso extremo de quiebre, no un tercer estado en la lógica del cliente — pero `Extrapolación = (VentaRealMes/días_con_stock)×días_naturales_mes` es indefinida con `días_con_stock=0` (división por cero). Cuando `Extrapolación` no se puede calcular, el criterio cae a `historico` como fallback, sin importar la cantidad de tickets — mismo patrón defensivo que ya usa `rotacion_diaria_real` (`None` cuando `ds==0`). |
+| **`días_naturales_mes` real, no `30.5` fijo — el ejemplo del mail no se reproduce bit a bit** | El mail usa `30.5` en el Caso 4 (da `63.125`), pero junio 2026 tiene 30 días naturales exactos (con `30` da `62.5`). El propio `#63` (escrito en sesión anterior tras leer este mail) ya describe la fórmula como "× días naturales del mes", no un promedio fijo — el `30.5` del mail es casi seguro un redondeo casual al armar el ejemplo a mano, no una especificación deliberada. Se usa el valor exacto ya calculado por `dias_naturales_mes()` en el código. Diferencia mínima (~1%), se documenta en `#64` como discrepancia menor conocida — no amerita repreguntarle a Rodrigo. |
+| **"Histórico" usa `fec_alta` para distinguir "no existía" de "existía sin vender"** | Promedio de los últimos 12 meses cerrados (o los disponibles si el SKU es más nuevo). Un mes sin fila en `ventas_historicas` puede ser "el SKU no existía todavía" (no cuenta, ni como disponible ni como cero) o "existía pero no vendió nada" (cuenta como `0`, baja el promedio). `articulos.fec_alta` es la señal para distinguir ambos casos — sin esto, un SKU con ventas intermitentes reales tendría su Histórico inflado artificialmente al excluir los meses de venta cero. |
+| **SKU sin ningún mes disponible (recién agregado): usar el componente disponible sin promediar, no `NULL`** | No todas las fórmulas necesitan Histórico por igual: `≤2 tickets` depende 100% de él, `3-4` promedia con él, `≥5` no lo usa en absoluto (solo VentaRealMes/Extrapolación). Cuando falta Histórico y la fórmula lo necesita, se usa directamente el otro componente disponible sin promediar, en vez de dejar `valor_ajustado`/`criterio_frecuencia` en `NULL` — un SKU nuevo sigue necesitando un valor utilizable en la planilla. |
+
+> **Nota:** `Extrapolación` es matemáticamente igual a `rotacion_diaria_real × dias_naturales_mes` (ambos ya se calculan hoy en `calcular_filas()`) — no es un concepto nuevo desde cero, solo una combinación de dos valores ya existentes en el código.
+
+**Corrección encontrada durante la implementación:** las funciones nuevas se habían escrito como funciones anidadas dentro de `calcular_filas()` (mismo patrón que `clasificar_frecuencia`/`rotacion_ajustada`, que tampoco son testeables) — pero el criterio de aceptación de `#63` pide explícitamente tests unitarios del blending, y una función anidada no se puede importar aislada. Se movieron `meses_disponibles_historico`, `calcular_historico` y `valor_ajustado_y_criterio` a nivel de módulo. También se eliminó `clasificar_tickets` (quedó sin uso — la función de blending ya aplica los umbrales directamente, y el esquema de `#62` no tiene columna para ese nivel por separado).
+
+**Implementado y verificado (2026-07-14):**
+
+| Paso | Resultado |
+|------|-----------|
+| Sintaxis (`py_compile`) | OK |
+| Tests existentes (regresión) | 14/14 sin cambios |
+| Tests nuevos (`test_run_calc_planilla.py`) | 15 nuevos: los 4 casos exactos del mail (Caso 4 con `62.5`, no el `63.125` literal — ver decisión de días naturales arriba), boundaries (4 tickets, 5 tickets con/sin quiebre), y los 3 fallbacks (sin_stock sin historico, SKU nuevo con tickets bajo/medio). Total 29/29. |
+| Corrida real contra DB local (grupo 201, 104 SKUs) | Sin errores, 824 filas. Distribución real: `sin_stock` → 80/80 filas usan `historico` (confirma el fallback funciona sin excepciones); `normal`/`quiebre_parcial` → todas usan `real_extrapolado` porque este dataset local vende casi todos los días (tickets_mes solo toma valores 25/30/31, nunca cae en el rango 3-4) — el caso "promedio" no aparece en la muestra real, pero está cubierto por tests aislados (Caso 3, Caso 4, boundary de 4 tickets). |
+| Verificación manual de `valor_historico` contra datos reales | SKU `C00184`: `SUM(cantidad)` en los 12 meses cerrados = 354, `354/12 = 29.5` — coincide exacto con el valor persistido, confirma que los meses sin venta (4 de los 12) se cuentan correctamente como `0`, no se excluyen del promedio. |
+
+---
+
 ## Issues conocidos / TODOs en código
 
 | Issue | Ubicación | Descripción |

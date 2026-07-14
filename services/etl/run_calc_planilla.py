@@ -41,6 +41,15 @@ FREQ_ALTA_MIN  = 9   # >= 9 meses con ventas → alta frecuencia
 FREQ_BAJA_MAX  = 3   # <= 3 meses con ventas → baja frecuencia
                      # 4–8 meses → media frecuencia
 
+# Umbrales de frecuencia de venta por tickets (Issue #61/#63, mail del cliente
+# 2026-06-XX). Distinto de FREQ_ALTA_MIN/FREQ_BAJA_MAX de arriba -- ese mide
+# meses con ventas en el año para elegir formula de rotacion en quiebre; esto
+# mide tickets (dias con venta) EN EL MES para elegir el blending
+# Historico/Promedio/Real de ese mes puntual.
+TICKETS_BAJO_MAX = 2   # <= 2 tickets → usa Historico
+TICKETS_ALTO_MIN = 5   # >= 5 tickets → usa VentaRealMes/Extrapolacion
+                       # 3-4 tickets → promedio de ambos
+
 # ── Conexión ───────────────────────────────────────────────────────────────────
 
 def db_connect() -> pymysql.Connection:
@@ -107,6 +116,91 @@ def clasificar_estado_mes(dias_stock: int, dias_naturales: int, es_mes_referenci
         return "normal" if dias_stock > 0 else "sin_stock"
     return clasificar_estado(dias_stock, dias_naturales)
 
+# ── Frecuencia de venta por tickets (Issue #61/#63) ─────────────────────────────
+# A nivel de modulo (no anidada en calcular_filas) para que sea testeable en
+# aislamiento -- criterio de aceptacion de #63 pide tests unitarios del blending.
+
+def meses_disponibles_historico(
+    fec_alta: dt.date | None, meses: list[tuple[int, int]]
+) -> list[tuple[int, int]]:
+    """
+    Filtra `meses` a los que el SKU ya existía según `fec_alta` (fin del mes
+    >= fec_alta). Sin fec_alta (dato faltante, ~1% de los casos) se asume
+    que el SKU ya existía en todos los meses -- mismo comportamiento que un
+    SKU antiguo, el caso ampliamente mayoritario.
+    """
+    if fec_alta is None:
+        return list(meses)
+    return [
+        (yr, mo) for (yr, mo) in meses
+        if fec_alta <= dt.date(yr, mo, dias_naturales_mes(yr, mo))
+    ]
+
+
+def calcular_historico(
+    sku: str,
+    fec_alta: dt.date | None,
+    meses_cerrados: list[tuple[int, int]],
+    ventas: dict[tuple, int],
+) -> float | None:
+    """
+    Promedio de ventas_cantidad en los meses cerrados disponibles para este
+    SKU. Un mes sin fila en ventas_historicas SI cuenta como "disponible con
+    0 ventas" (dato real) cuando el SKU ya existia ese mes -- solo se
+    excluyen los meses anteriores a fec_alta (no existia todavia).
+    Retorna None si no hay ningun mes disponible (SKU recien agregado).
+    """
+    disponibles = meses_disponibles_historico(fec_alta, meses_cerrados)
+    if not disponibles:
+        return None
+    total = sum(ventas.get((sku, yr, mo), 0) for (yr, mo) in disponibles)
+    return round(total / len(disponibles), 2)
+
+
+def valor_ajustado_y_criterio(
+    tickets: int,
+    ventas_real: int,
+    extrapolacion: float | None,
+    historico: float | None,
+    es_quiebre: bool,
+) -> tuple[float | None, str | None]:
+    """
+    Blending Historico/Promedio/Real-Extrapolado (mail del cliente,
+    2026-06-27, ver .claude/CONTEXTO.md sesion 2026-07-14):
+
+      Sin quiebre: tickets<=2 -> Historico | 3-4 -> (Historico+VentaRealMes)/2 | >=5 -> VentaRealMes
+      Con quiebre: tickets<=2 -> Historico | 3-4 -> (Historico+Extrapolacion)/2 | >=5 -> Extrapolacion
+
+    `es_quiebre` cubre estado_mes in (quiebre_parcial, sin_stock) -- el mail
+    solo distingue "stock todo el mes" de "quiebre", sin_stock es un caso
+    extremo de quiebre, no un tercer estado en su logica.
+
+    Fallbacks (no cubiertos por el mail, decididos en la sesion de grill-me):
+    - sin_stock (Extrapolacion indefinida, dias_con_stock=0): cae a Historico
+      sin importar la cantidad de tickets. Si tampoco hay Historico (SKU sin
+      meses disponibles), usa VentaRealMes como ultimo recurso.
+    - Historico faltante (SKU sin ningun mes disponible) en tickets<=4: usa
+      el componente disponible (VentaRealMes/Extrapolacion) sin promediar,
+      en vez de dejar el valor en None.
+    """
+    if es_quiebre and extrapolacion is None:
+        if historico is not None:
+            return (round(historico, 2), "historico")
+        return (round(float(ventas_real), 2), "real_extrapolado")
+
+    valor_no_historico = extrapolacion if es_quiebre else float(ventas_real)
+
+    if tickets >= TICKETS_ALTO_MIN:
+        return (round(valor_no_historico, 2), "real_extrapolado")
+
+    if historico is None:
+        return (round(valor_no_historico, 2), "real_extrapolado")
+
+    if tickets <= TICKETS_BAJO_MAX:
+        return (round(historico, 2), "historico")
+
+    return (round((historico + valor_no_historico) / 2, 2), "promedio")
+
 # ── jobs_historial ─────────────────────────────────────────────────────────────
 
 def job_start(conn: pymysql.Connection) -> int:
@@ -149,6 +243,15 @@ def cargar_factores(conn: pymysql.Connection) -> dict[str, dict[int, float | Non
     }
 
 
+def cargar_fec_alta(conn: pymysql.Connection) -> dict[str, dt.date | None]:
+    """Preload de fec_alta por SKU -- usado para acotar los 'meses disponibles'
+    del calculo de Historico (Issue #63) a los meses donde el SKU ya existia."""
+    with conn.cursor() as cur:
+        cur.execute("SELECT sku, fec_alta FROM articulos")
+        rows = cur.fetchall()
+    return {row[0]: (row[1].date() if row[1] else None) for row in rows}
+
+
 def calcular_filas(conn: pymysql.Connection) -> tuple[list[dict], int, int, int]:
     """
     Retorna (filas_para_insert, skus_omitidos, mes_referencia_normal, mes_referencia_sin_stock).
@@ -157,6 +260,7 @@ def calcular_filas(conn: pymysql.Connection) -> tuple[list[dict], int, int, int]
     del override de clasificar_estado_mes (observabilidad en jobs_historial).
     """
     factors = cargar_factores(conn)
+    fec_altas = cargar_fec_alta(conn)
     meses = ventana_meses(VENTANA_MESES)
     meses_set = set(meses)
 
@@ -191,6 +295,28 @@ def calcular_filas(conn: pymysql.Connection) -> tuple[list[dict], int, int, int]
     for sku, yr, mo, cant in ventas_raw:
         if (yr, mo) in meses_set:
             ventas[(sku, yr, mo)] = int(cant)
+
+    # ── Tickets por SKU×mes (Issue #61: dia con al menos una fila de venta en
+    # ventas_historicas, positiva o negativa -- no importa el signo, cuenta el dia) ──
+    sql_tickets = """
+        SELECT
+            vh.sku,
+            YEAR(vh.fecha)  AS yr,
+            MONTH(vh.fecha) AS mo,
+            COUNT(DISTINCT vh.fecha) AS tickets
+        FROM ventas_historicas vh
+        INNER JOIN articulos a ON a.sku = vh.sku
+        WHERE vh.fecha BETWEEN %s AND %s
+        GROUP BY vh.sku, YEAR(vh.fecha), MONTH(vh.fecha)
+    """
+    with conn.cursor() as cur:
+        cur.execute(sql_tickets, (fecha_desde, fecha_hasta))
+        tickets_raw = cur.fetchall()
+
+    tickets: dict[tuple, int] = {}
+    for sku, yr, mo, n in tickets_raw:
+        if (yr, mo) in meses_set:
+            tickets[(sku, yr, mo)] = int(n)
 
     # ── Días con stock por SKU×mes ─────────────────────────────────────────────
     # Un día "tiene stock" cuando el total de todos los depósitos supera stock_minimo.
@@ -265,6 +391,10 @@ def calcular_filas(conn: pymysql.Connection) -> tuple[list[dict], int, int, int]
             "estado_mes":                        clasificar_estado_mes(ds, dn, (yr, mo) == ultimo_mes),
             "frecuencia_nivel":                  None,  # se rellena en paso 2
             "rotacion_ajustada":                 None,  # se rellena en paso 2
+            "tickets_mes":                       tickets.get((sku, yr, mo), 0),
+            "valor_historico":                   None,  # se rellena en paso 2
+            "valor_ajustado":                    None,  # se rellena en paso 2
+            "criterio_frecuencia":               None,  # se rellena en paso 2
         })
 
     # ── Paso 2: frecuencia de quiebre por SKU ─────────────────────────────────
@@ -297,7 +427,12 @@ def calcular_filas(conn: pymysql.Connection) -> tuple[list[dict], int, int, int]
             return round(r_baja, 4)
         return round((r_alta + r_baja) / 2, 4)
 
-    # Anotar frecuencia_nivel y rotacion_ajustada en cada fila
+    # Historico por SKU (una sola vez, no varia mes a mes dentro de la misma corrida)
+    historicos: dict[str, float | None] = {}
+    for sku in {f["sku"] for f in filas}:
+        historicos[sku] = calcular_historico(sku, fec_altas.get(sku), meses_cerrados, ventas)
+
+    # Anotar frecuencia_nivel, rotacion_ajustada y frecuencia de tickets en cada fila
     for fila in filas:
         sku = fila["sku"]
         n   = meses_con_ventas.get(sku, 0)
@@ -311,6 +446,21 @@ def calcular_filas(conn: pymysql.Connection) -> tuple[list[dict], int, int, int]
                 fila["dias_naturales_mes"],
                 nivel,
             )
+
+        # Issue #61/#63: frecuencia de venta por tickets del mes
+        historico = historicos.get(sku)
+        rot_real  = fila["rotacion_diaria_real"]
+        extrapolacion = round(rot_real * fila["dias_naturales_mes"], 2) if rot_real is not None else None
+        es_quiebre = fila["estado_mes"] != "normal"
+
+        fila["valor_historico"] = round(historico, 2) if historico is not None else None
+        fila["valor_ajustado"], fila["criterio_frecuencia"] = valor_ajustado_y_criterio(
+            fila["tickets_mes"],
+            fila["ventas_cantidad"],
+            extrapolacion,
+            historico,
+            es_quiebre,
+        )
 
     skus_procesados = len({f["sku"] for f in filas})
     dist = {lvl: sum(1 for f in filas if f["frecuencia_nivel"] == lvl and f["month"] == meses[0][1] and f["year"] == meses[0][0]) for lvl in ("alta","media","baja")}
@@ -330,13 +480,15 @@ _SQL_INSERT = """
         (sku, year, month,
          ventas_cantidad, dias_con_stock, dias_naturales_mes,
          rotacion_diaria_real, rotacion_diaria_bruta, rotacion_diaria_desestacionalizada,
-         estado_mes, frecuencia_nivel, rotacion_ajustada, ts_carga)
+         estado_mes, frecuencia_nivel, rotacion_ajustada,
+         tickets_mes, valor_historico, valor_ajustado, criterio_frecuencia, ts_carga)
     VALUES
         (%(sku)s, %(year)s, %(month)s,
          %(ventas_cantidad)s, %(dias_con_stock)s, %(dias_naturales_mes)s,
          %(rotacion_diaria_real)s, %(rotacion_diaria_bruta)s,
          %(rotacion_diaria_desestacionalizada)s,
-         %(estado_mes)s, %(frecuencia_nivel)s, %(rotacion_ajustada)s, NOW(6))
+         %(estado_mes)s, %(frecuencia_nivel)s, %(rotacion_ajustada)s,
+         %(tickets_mes)s, %(valor_historico)s, %(valor_ajustado)s, %(criterio_frecuencia)s, NOW(6))
 """
 
 def escribir_planilla(conn: pymysql.Connection, filas: list[dict]) -> None:
