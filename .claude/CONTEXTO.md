@@ -1875,6 +1875,36 @@ El review (`medium`, 8 ángulos) encontró 7 hallazgos reales; se corrigieron 4 
 
 ---
 
+### `ml/eval_walkforward.py` — Issue #87, redefinido a dry-run (sesión 2026-07-15)
+
+**Hallazgo que reabre el alcance:** la DB local está completamente vacía (0 filas en `ventas_historicas`/`articulos` — no es una cobertura parcial de grupo 201 como se asumió al triagear, es cero datos). Sin acceso a la VM de producción, correr el análisis real de #87 hoy es imposible sin inventar datos — y usar datos sintéticos para el análisis real corrompería el insumo de la decisión de #88 con basura, no es un atajo válido.
+
+| Decisión | Definición |
+|----------|-----------|
+| **Alcance de HOY redefinido a dry-run mecánico, el análisis real queda bloqueado** | No se toca el objetivo real de #87 (el reporte que alimenta #88) — se deja explícitamente pendiente hasta tener datos reales (VM o #38 resuelto). Lo que sí se hizo hoy: validar que el pipeline corre de punta a punta sobre un lote de SKUs sintéticos y medir tiempo, dejando todo listo para correrlo de verdad apenas haya datos. |
+| **Sin query nueva de selección de universo** | `eval_walkforward.py` ya carga todos los SKUs de `ventas_historicas` sin filtro, y cada fit ya devuelve `None` silenciosamente si no alcanza la historia mínima — ese skip silencioso YA es el filtro de universo que pedía el alcance original de #87. No hace falta escribir SQL nuevo; #87 es una tarea operativa (correr un comando), no de código. |
+| **~15-20 SKUs sintéticos con historia variada** | Mezcla deliberada: SKUs con historia larga (36+ meses), SKUs justo en el límite mínimo (valida el skip silencioso en el borde), y series planas/degeneradas (estresa el manejo de NaN que ya se vio en #86). Un solo SKU (repetir el smoke test de #86) no da un promedio de tiempo confiable. |
+| **Persistencia real (`EVAL_PERSIST_CATALOG=true`), limpieza después** | Mide el costo de punta a punta (cómputo + escritura), no solo cómputo — mismo criterio que el smoke test de #86. Los SKUs sintéticos y sus filas se borran al final. |
+| **Documentar en comentario de #87 + esta sección** | El comentario en el issue aclara explícitamente que es un dry-run, no el análisis real, para que nadie lo confunda después con el insumo de #88. |
+
+> **Nota:** #87 sigue abierto — el análisis real queda bloqueado por #38 (sincronizar entorno local) o acceso a la VM de producción. El paso siguiente NO es `/implement` (no hay código nuevo) — es ejecución directa del dry-run.
+
+**Resultado del dry-run (mismo día).** 15 SKUs sintéticos (6 con 36 meses variados, 5 al límite mínimo 13-15 meses, 4 degenerados: constantes/mayormente-cero), `EVAL_PERSIST_CATALOG=true`, `EVAL_VERSION=dryrun-87`.
+
+| Métrica | Resultado |
+|---|---|
+| Tiempo total | 62s para 15 SKUs (~4.1s/SKU promedio, los 3 modelos juntos) |
+| Filas escritas | 40 (15 RF + 15 XGB + 10 PROPHET) |
+| Warnings/crashes | 0 — ninguno de los fixes del code-review de #86 se disparó (ni NaN, ni dispatch, ni excepción sin loguear) |
+| SKUs límite (13-15 meses) | Prophet se salteó solo en los 5, sin romper nada — comportamiento ya existente (`min_needed=12` para MS), validado bajo el caso borde real |
+| SKUs degenerados (constante/mayormente-cero) | Los 4 corrieron sin NaN en ningún campo — exactamente el escenario que motivó `_finite()`/`_json_safe()` en el review de #86 |
+
+**Nota sobre el tiempo:** 32 fits MCMC de Prophet reales en total (folds + fit de referencia de #86, no resuelto por #92 todavía). Es una cota inferior — series sintéticas cortas y simples corren más rápido que datos reales de producción con estacionalidad/ruido genuino. No sirve para proyectar el tiempo real de miles de SKUs, pero confirma que el pipeline no tiene ningún costo estructural inesperado más allá del fit duplicado ya conocido (#92).
+
+**Esto NO es el análisis de #87** (no hay distribución real de r2_test por algoritmo sobre datos reales) — sigue bloqueado por #38/VM.
+
+---
+
 ## Issues conocidos / TODOs en código
 
 | Issue | Ubicación | Descripción |
