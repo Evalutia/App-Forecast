@@ -1840,6 +1840,41 @@ Revisados los 4 archivos identificados: `TablaVentas.tsx`, `PlanillaTable.tsx`, 
 
 ---
 
+### `ml/eval_walkforward.py` — Issue #86 (sesión 2026-07-15)
+
+Grilling arrancó sobre el schema **real** ya commiteado en `infra/sql/16-catalogo-modelos.sql` (issue #84, implementado en otra sesión), no sobre el borrador original del issue — varias columnas nuevas (`version_modelo`, `rmse_test`, `n_arboles`/`profundidad_max` como columnas `GENERATED` desde `hiperparametros`) ya estaban decididas ahí y se toman como dato de entrada, no se re-discuten.
+
+| Decisión | Definición |
+|----------|-----------|
+| **`hiperparametros`/`features`: fit de referencia aparte sobre `full_series`, no threadear `WalkForwardResult`** | `_aggregate_walkforward` corre el fit por cada fold y descarta el `ModelResult` completo — no se modifica esa función para params/features (evita superficie de riesgo sobre lo que ya usan #72/#73 en producción). En su lugar, `eval_walkforward.py` hace un fit adicional (`fit_rf_insample`/`fit_xgb_insample`/`fit_prophet_insample`) sobre la serie completa, mismo patrón que ya usa `n_obs_total`/fechas (calculadas sobre `full_series`, no sobre folds). |
+| **`version_modelo` vía `EVAL_VERSION` + `resolve_version()`** | `eval_walkforward.py` no tenía ningún concepto de versión hasta ahora. Se agrega el env var `EVAL_VERSION` y se resuelve con `utils.versioning.resolve_version()` — misma función y mismo patrón que ya usa `predict.py`. |
+| **`n_obs_test = horizon`, directo** | Confirmado en `ml/evaluate.py:walk_forward_split` — cada fold testea exactamente `horizon` puntos, fijo entre folds. Sin ambigüedad, no requiere agregación. |
+| **`n_obs_train = n_train_rows_mean`, no el mínimo** | `WalkForwardResult` ya calcula ambos. Se usa el promedio (tamaño "típico" de entrenamiento, comparable entre SKUs/algoritmos); la fragilidad de folds con poca historia ya la señala la columna `estable`, no hace falta que `n_obs_train` duplique esa señal con el mínimo. |
+| **`rmse_test_median`: campo nuevo en `_aggregate_walkforward`/`WalkForwardResult`** | Hallazgo de la sesión: `rmse_test` no lo daba nada — ni el fit de referencia (sin test held-out) ni `WalkForwardResult` (que hoy solo agrega `r2_test`/`mae_test`/`rmse_train`, nunca RMSE del lado de test). Es la única métrica que sí obliga a tocar `_aggregate_walkforward`, pero es un cambio aditivo chico (una lista + un campo más, mismo patrón que `r2_tests`/`mae_tests` ya existentes) — no restructura nada. |
+| **`mae_train`: calculado inline en `eval_walkforward.py`, sin tocar `models.py`** | `ModelResult` no tiene campo `mae` y `WalkForwardResult` tampoco tiene `mae_train`. Se calcula directo en `eval_walkforward.py` comparando `reference_fit.holdout_pred` contra `full_series` (mismo tipo de cálculo que `_mae` en `models.py`, pero sin necesidad de exportarla — es una línea de numpy). |
+| **Persistencia gateada por `EVAL_PERSIST_CATALOG`, flag nuevo y separado de `EVAL_PERSIST`** | `EVAL_PERSIST` ya gatea la escritura a `articulos_elegibilidad_econometrico`, que afecta routing real de producción (qué SKU recibe modelo econométrico). `catalogo_modelos` es puro registro histórico, no lo lee nada en producción — perfil de riesgo distinto, así que se desacopla: se puede construir historial del catálogo sin tocar la tabla de elegibilidad, y viceversa. Mismo default conservador (`false`) que ya usa `EVAL_PERSIST`. |
+| **Persistencia: INSERT simple, no upsert** | Ya implícito en el schema de #84 (índice compuesto `(sku, modelo, fecha_estimacion)`, sin `UNIQUE`) — la tabla acumula histórico, cada corrida es una fila nueva. |
+
+> **Nota:** sesión arrancó sobre un issue puntual ya existente — el paso siguiente es `/implement` directo sobre #86, no `/to-tickets`.
+
+**Implementación + `/code-review` (mismo día).** Smoke test real contra DB local (Docker levantado, SKU sintético `TEST0001`, datos limpiados después) encontró un bug real antes de que lo hiciera el review: `XGBRegressor.get_params()` trae `missing: float('nan')` por default — `json.dumps` lo serializa como el literal `NaN`, que MySQL rechaza (confirmado también empíricamente: pymysql tira `"nan can not be used with MySQL"` antes de llegar a la DB). Se agregó `_json_safe()` para sanear recursivamente NaN/Infinity antes de serializar a JSON.
+
+El review (`medium`, 8 ángulos) encontró 7 hallazgos reales; se corrigieron 4 antes de commitear:
+
+| Hallazgo | Fix |
+|----------|-----|
+| `insert_catalogo_modelos()` sin try/except — una fila mala aborta toda la corrida | Try/except por fila dentro de la función (mismo espíritu de "no perder progreso" que ya tenía el commit-por-fila, extendido a tolerancia a fallos) |
+| `r2_train`/`rmse_train`/`mae_train` sin sanear NaN (solo `hiperparametros`/`features` pasaban por `_json_safe`) | Nuevo helper `_finite()` aplicado a los 6 campos numéricos de la fila |
+| Dispatch por modelo (`if/elif` sobre strings) podía desincronizarse en silencio del `name=` real y degradar a NULL sin aviso | Dict `_REFERENCE_FITTERS` + warning explícito si el nombre no matchea |
+| Doble capa de `except Exception: pass` sin logging | `print("[WARN] ...")` en los 3 puntos de falla (fit de referencia, construcción de fila, insert) |
+
+**No se corrigieron 3 hallazgos** (quedan documentados en el PR/review, no en un issue aparte salvo el primero):
+- El fit de referencia duplica cómputo que el walk-forward ya hizo (costoso para Prophet — confirmado en el smoke test: 4 corridas MCMC para 1 SKU) → **issue #92**, requiere tocar `_aggregate_walkforward`/`WalkForwardResult`, fuera de alcance de esta sesión.
+- `mae_train` reimplementa `_mae` de `models.py` en vez de reusarla (cleanup menor).
+- `insert_catalogo_modelos` duplica el loop de `upsert_elegibilidad_metrics` (cleanup menor, mismo patrón ya usado en el repo).
+
+---
+
 ## Issues conocidos / TODOs en código
 
 | Issue | Ubicación | Descripción |

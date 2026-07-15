@@ -205,6 +205,7 @@ class WalkForwardResult:
     r2_test_median: Optional[float]
     r2_test_iqr: Optional[float]
     rmse_train_median: Optional[float]
+    rmse_test_median: Optional[float]
     mae_test_median: Optional[float]
     n_train_rows_mean: Optional[float]
     n_train_rows_min: Optional[int]
@@ -674,6 +675,7 @@ def _aggregate_walkforward(
 ) -> Optional[WalkForwardResult]:
     r2_tests: List[float] = []
     rmse_trains: List[Optional[float]] = []
+    rmse_tests: List[Optional[float]] = []
     mae_tests: List[Optional[float]] = []
     n_train_rows_list: List[int] = []
 
@@ -693,11 +695,16 @@ def _aggregate_walkforward(
             mae_te = _mae(test.values, fc_test)
         except Exception:
             mae_te = None
+        try:
+            rmse_te = _rmse(test.values, fc_test)
+        except Exception:
+            rmse_te = None
 
         eff_lags = min(lags, max(1, len(train) - 1))
         n_train_rows_list.append(len(train) - eff_lags)
         r2_tests.append(r2_te)
         rmse_trains.append(base.rmse)
+        rmse_tests.append(rmse_te)
         mae_tests.append(mae_te)
 
     if not r2_tests:
@@ -705,6 +712,7 @@ def _aggregate_walkforward(
 
     r2_arr = np.asarray(r2_tests, dtype="float64")
     rmse_valid = [v for v in rmse_trains if v is not None and np.isfinite(v)]
+    rmse_test_valid = [v for v in rmse_tests if v is not None and np.isfinite(v)]
     mae_valid = [v for v in mae_tests if v is not None and np.isfinite(v)]
     n_folds = len(r2_tests)
 
@@ -714,6 +722,7 @@ def _aggregate_walkforward(
         r2_test_median=float(np.median(r2_arr)),
         r2_test_iqr=float(np.percentile(r2_arr, 75) - np.percentile(r2_arr, 25)) if n_folds > 1 else 0.0,
         rmse_train_median=float(np.median(rmse_valid)) if rmse_valid else None,
+        rmse_test_median=float(np.median(rmse_test_valid)) if rmse_test_valid else None,
         mae_test_median=float(np.median(mae_valid)) if mae_valid else None,
         n_train_rows_mean=float(np.mean(n_train_rows_list)),
         n_train_rows_min=int(np.min(n_train_rows_list)),

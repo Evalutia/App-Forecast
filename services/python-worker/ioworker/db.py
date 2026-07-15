@@ -109,3 +109,41 @@ def upsert_elegibilidad_metrics(engine: Engine, rows: List[Dict]) -> int:
             conn.execute(sql, r)
         n += 1
     return n
+
+
+def insert_catalogo_modelos(engine: Engine, rows: List[Dict]) -> int:
+    """
+    Issue #86: catalogo_modelos acumula historico (una fila por
+    re-estimacion, sin UNIQUE en (sku, modelo, fecha_estimacion)) --
+    INSERT simple, no upsert. Commit incremental (una transaccion por
+    fila), mismo motivo que upsert_elegibilidad_metrics: una corrida larga
+    sobre muchos SKUs no debe perder todo el progreso si se corta a mitad
+    de camino. n_arboles/profundidad_max son columnas GENERATED desde
+    hiperparametros -- no se insertan aparte.
+
+    A diferencia de upsert_elegibilidad_metrics, cada fila se inserta en su
+    propio try/except (code review de #86): una fila que viole un CHECK o
+    traiga un valor no finito se descarta con un aviso en vez de abortar
+    toda la corrida y perder las filas ya insertadas de otros SKUs.
+    """
+    sql = text(
+        """
+        INSERT INTO catalogo_modelos
+            (sku, modelo, version_modelo, freq, fecha_primera_obs, fecha_ultima_obs,
+             n_obs_total, n_obs_train, n_obs_test, r2_train, r2_test, rmse_train,
+             rmse_test, mae_train, mae_test, n_folds, estable, hiperparametros, features)
+        VALUES
+            (:sku, :modelo, :version_modelo, :freq, :fecha_primera_obs, :fecha_ultima_obs,
+             :n_obs_total, :n_obs_train, :n_obs_test, :r2_train, :r2_test, :rmse_train,
+             :rmse_test, :mae_train, :mae_test, :n_folds, :estable, :hiperparametros, :features)
+        """
+    )
+    n = 0
+    for r in rows:
+        try:
+            with engine.begin() as conn:
+                conn.execute(sql, r)
+            n += 1
+        except Exception as e:
+            print(f"[WARN] catalogo_modelos: fila descartada (sku={r.get('sku')}, modelo={r.get('modelo')}): {e}")
+    return n

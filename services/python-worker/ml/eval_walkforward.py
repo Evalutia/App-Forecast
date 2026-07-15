@@ -1,3 +1,4 @@
+import json
 import os
 import numpy as np
 import pandas as pd
@@ -6,9 +7,13 @@ from ml.models import (
     fit_rf_with_walkforward,
     fit_xgb_with_walkforward,
     fit_prophet_with_walkforward,
+    fit_rf_insample,
+    fit_xgb_insample,
+    fit_prophet_insample,
 )
-from ioworker.db import DBConfig, get_engine, upsert_elegibilidad_metrics
+from ioworker.db import DBConfig, get_engine, upsert_elegibilidad_metrics, insert_catalogo_modelos
 from ioworker.data import load_series_by_sku_mysql
+from utils.versioning import resolve_version
 
 
 FREQ = os.getenv("EVAL_FREQ", "QS")
@@ -26,6 +31,18 @@ OUTPUT_CSV = os.getenv("EVAL_OUTPUT_CSV", "").strip() or None
 # Default off para no cambiar el comportamiento de diagnostico puro que ya
 # usaban #69/#78 contra DB local.
 PERSIST = os.getenv("EVAL_PERSIST", "").strip().lower() in ("1", "true", "yes")
+
+# Issue #86: flag separado de EVAL_PERSIST -- catalogo_modelos es puro
+# registro historico (nada en produccion lo lee), a diferencia de
+# articulos_elegibilidad_econometrico (afecta que modelo recibe cada SKU).
+# Perfil de riesgo distinto, se puede construir historial del catalogo sin
+# tocar la tabla de elegibilidad y viceversa. Mismo default conservador.
+PERSIST_CATALOG = os.getenv("EVAL_PERSIST_CATALOG", "").strip().lower() in ("1", "true", "yes")
+
+# Issue #86: eval_walkforward.py no tenia ningun concepto de version hasta
+# ahora -- mismo patron que predict.py (resolve_version), para poder
+# filtrar corridas de catalogo_modelos por version de codigo especifica.
+EVAL_VERSION = os.getenv("EVAL_VERSION", "eval-catalogo")
 
 
 def _load_meses_historia(engine, only_skus) -> dict:
@@ -48,6 +65,97 @@ def _load_meses_historia(engine, only_skus) -> dict:
     return dict(zip(df["sku"], df["meses_historia"].astype(int)))
 
 
+def _json_safe(obj):
+    """
+    Issue #86: XGBRegressor.get_params() trae 'missing': float('nan') por
+    default -- json.dumps lo serializa como el literal NaN, que no es JSON
+    valido (MySQL rechaza la insercion). Reemplaza NaN/Infinity por None
+    recursivamente antes de serializar.
+    """
+    if isinstance(obj, float):
+        return obj if np.isfinite(obj) else None
+    if isinstance(obj, dict):
+        return {k: _json_safe(v) for k, v in obj.items()}
+    if isinstance(obj, (list, tuple)):
+        return [_json_safe(v) for v in obj]
+    return obj
+
+
+def _finite(x):
+    """Issue #86 (code review): mismo saneo de _json_safe pero para floats
+    escalares que van directo a columnas DOUBLE (no a JSON) -- pymysql
+    rechaza NaN/Infinity con 'nan can not be used with MySQL', confirmado
+    empiricamente contra la DB local."""
+    try:
+        return float(x) if x is not None and np.isfinite(x) else None
+    except Exception:
+        return None
+
+
+# Issue #86 (code review): dict en vez de if/elif -- una sola fuente de
+# verdad para el nombre de modelo -> fit de referencia, en vez de un
+# segundo if/elif que puede desincronizarse en silencio del `name=` que
+# usan fit_rf_with_walkforward/fit_xgb_with_walkforward/fit_prophet_with_walkforward.
+_REFERENCE_FITTERS = {
+    "RF": lambda sku, s: fit_rf_insample(s, steps_forecast=1, lags=LAGS, freq=FREQ),
+    "XGB": lambda sku, s: fit_xgb_insample(s, steps_forecast=1, lags=LAGS, freq=FREQ),
+    "PROPHET": lambda sku, s: fit_prophet_insample(sku=sku, train=s, steps_forecast=1, lags=LAGS, freq=FREQ),
+}
+
+
+def _build_catalog_row(sku: str, s: pd.Series, wf_result, version: str) -> dict:
+    """
+    Issue #86: fit de referencia sobre la serie completa (no sobre los folds
+    del walk-forward) para obtener hiperparametros/features limpios -- no se
+    threadea WalkForwardResult/_aggregate_walkforward para esto, evita tocar
+    lo que ya usan #72/#73 en produccion.
+    """
+    name = wf_result.name
+    ref = None
+    fitter = _REFERENCE_FITTERS.get(name)
+    if fitter is None:
+        print(f"[WARN] catalogo_modelos: modelo '{name}' sin fit de referencia mapeado (sku={sku}) -- fila queda con campos in-sample en NULL.")
+    else:
+        try:
+            ref = fitter(sku, s)
+        except Exception as e:
+            print(f"[WARN] catalogo_modelos: fit de referencia fallo para sku={sku} modelo={name}: {e}")
+            ref = None
+
+    # mae_train: ni ModelResult ni WalkForwardResult lo calculan -- se arma
+    # aca mismo comparando el ajuste in-sample del fit de referencia contra
+    # la serie completa (mismo tipo de calculo que _mae en ml/models.py).
+    mae_train = None
+    if ref is not None and ref.holdout_pred is not None:
+        try:
+            fitted = ref.holdout_pred.reindex(s.index).values.astype("float64")
+            mae_train = float(np.mean(np.abs(s.values.astype("float64") - fitted)))
+        except Exception:
+            mae_train = None
+
+    return {
+        "sku": sku,
+        "modelo": name,
+        "version_modelo": version,
+        "freq": FREQ,
+        "fecha_primera_obs": s.index.min().date(),
+        "fecha_ultima_obs": s.index.max().date(),
+        "n_obs_total": int(len(s)),
+        "n_obs_train": int(round(wf_result.n_train_rows_mean)),
+        "n_obs_test": int(HORIZON),
+        "r2_train": _finite(ref.r2) if ref is not None else None,
+        "r2_test": _finite(wf_result.r2_test_median),
+        "rmse_train": _finite(ref.rmse) if ref is not None else None,
+        "rmse_test": _finite(wf_result.rmse_test_median),
+        "mae_train": _finite(mae_train),
+        "mae_test": _finite(wf_result.mae_test_median),
+        "n_folds": int(wf_result.n_folds),
+        "estable": wf_result.stable,
+        "hiperparametros": json.dumps(_json_safe(ref.params), default=str) if ref is not None and ref.params else None,
+        "features": json.dumps(ref.features) if ref is not None and ref.features else None,
+    }
+
+
 def main() -> None:
     db_cfg = DBConfig(
         host=os.getenv("MYSQL_HOST", "mysql"),
@@ -57,12 +165,14 @@ def main() -> None:
         password=os.getenv("MYSQL_PASS", ""),
     )
     engine = get_engine(db_cfg)
+    version = resolve_version(EVAL_VERSION)
 
     series_by_sku = load_series_by_sku_mysql(
         engine, table="ventas_historicas", freq=FREQ, only_skus=ONLY_SKUS, top_n=None
     )
 
     rows = []  # una fila por (sku, modelo)
+    catalog_rows = []  # issue #86: una fila por (sku, modelo) para catalogo_modelos
     for sku, s in series_by_sku.items():
         for fit_wf, kwargs in (
             (fit_rf_with_walkforward, {}),
@@ -89,6 +199,16 @@ def main() -> None:
                     "stable": res.stable,
                 }
             )
+
+            if PERSIST_CATALOG:
+                try:
+                    catalog_rows.append(_build_catalog_row(sku, s, res, version))
+                except Exception as e:
+                    print(f"[WARN] catalogo_modelos: no se pudo construir la fila para sku={sku} modelo={res.name}: {e}")
+
+    if PERSIST_CATALOG and catalog_rows:
+        n_cat = insert_catalogo_modelos(engine, catalog_rows)
+        print(f"\n[PERSIST_CATALOG] {n_cat} filas escritas en catalogo_modelos (version={version}).")
 
     df = pd.DataFrame(rows)
     if df.empty:
