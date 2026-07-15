@@ -17,8 +17,8 @@ Se dividen en dos tipos (mismo criterio que usa el repo de origen):
 
 **El usuario no tiene que acordarse de los 19 nombres — esa es mi responsabilidad, no la suya.** En concreto:
 
-- Para las **model-invoked** (`diagnosing-bugs`, `domain-modeling`, `improve-codebase-architecture`, `codebase-design`, `tdd`, `research`, `resolving-merge-conflicts`, `graphify`, `grilling`), reach for them yo solo cuando la situación calza — no hace falta que el usuario las pida ni las nombre.
-- Para las **user-invoked** (`to-spec`, `to-tickets`, `triage`, `wayfinder`, `implement`, `setup-matt-pocock-skills`, `code-review-standards-spec`) no puedo dispararlas solo (crean issues, tocan config, commitean) — pero sí puedo y debo **proponerlas proactivamente** cuando algo tiene esa forma ("esto es del tamaño de un `/wayfinder`, ¿lo armo así?") en vez de esperar a que el usuario piense en el nombre correcto.
+- Para las **model-invoked** (`diagnosing-bugs`, `domain-modeling`, `improve-codebase-architecture`, `codebase-design`, `tdd`, `research`, `resolving-merge-conflicts`, `grilling`), reach for them yo solo cuando la situación calza — no hace falta que el usuario las pida ni las nombre.
+- Para las **user-invoked** (`to-spec`, `to-tickets`, `triage`, `wayfinder`, `implement`, `setup-matt-pocock-skills`, `code-review-standards-spec`, `graphify`) no puedo dispararlas solo — pero sí puedo y debo **proponerlas proactivamente** cuando algo tiene esa forma ("esto es del tamaño de un `/wayfinder`, ¿lo armo así?") en vez de esperar a que el usuario piense en el nombre correcto. `graphify` se movió acá el 2026-07-15 (antes model-invoked): una corrida completa desde cero cuesta ~1.2M tokens (medido en este repo) — disparo accidental por "cualquier pregunta de arquitectura" era demasiado caro para dejarlo automático.
 - `/ponytail` no es una skill que se "dispara" para una tarea puntual — es un modo de trabajo por defecto (YAGNI, diff más chico que funcione) que aplico salvo que se pida explícitamente lo contrario.
 
 ### Issue tracker
@@ -48,6 +48,7 @@ Single-context: todo el contexto de dominio vive en `.claude/CONTEXTO.md` (no ha
 | Arrancás un repo nuevo o cambiás de tracker/labels/estructura de contexto | `/setup-matt-pocock-skills` | Re-configura lo de arriba (ya corrido una vez en este repo) |
 | Cierre de sesión larga, para retomar después sin releer todo | `/handoff` | Compacta la conversación en un documento de traspaso, sugiere qué skills cargar en la próxima |
 | Querés el review de dos ejes separados (Standards + Spec) además del `/code-review` de siempre | `/code-review-standards-spec` | 2 sub-agentes en paralelo que nunca se mezclan: uno chequea convenciones del repo + smells de Fowler, el otro si cumple el issue/spec original. Nunca fusiona los veredictos — uno puede pasar y el otro fallar |
+| Preguntas sobre arquitectura, relaciones entre archivos, o "¿qué toca esto?" en el monorepo | `/graphify` | Construye un grafo de conocimiento del codebase (nodos, comunidades, BFS/DFS) — útil para navegar `apps/`+`services/` cruzados sin releer todo a mano. **`disable-model-invocation`**: una corrida completa cuesta ~1.2M tokens, solo se dispara si la tipeás vos |
 
 **Model-invoked** (puedo llegar solo, o las invocás igual si querés forzarlas):
 
@@ -62,7 +63,6 @@ Single-context: todo el contexto de dominio vive en `.claude/CONTEXTO.md` (no ha
 | Conflicto de merge/rebase en curso | `/resolving-merge-conflicts` | Resuelve hunk por hunk según la intención de cada lado, nunca `--abort` |
 | Vas a correr un comando de git que preocupa (push --force, reset --hard, etc.) | `git-guardrails-claude-code` | Hook que bloquea esos comandos automáticamente — se configura una vez, no se invoca a mano |
 | Quiero que el código sea lo más simple/lazy posible, sin sobre-ingeniería | `/ponytail` | Modo de trabajo (no lee/escribe nada del repo): YAGNI, reusar antes que crear, el diff más chico que funcione. `lite`/`full`/`ultra` |
-| Preguntas sobre arquitectura, relaciones entre archivos, o "¿qué toca esto?" en el monorepo | `/graphify` | Construye un grafo de conocimiento del codebase (nodos, comunidades, BFS/DFS) — útil para navegar `apps/`+`services/` cruzados sin releer todo a mano |
 
 **Nota sobre `/code-review`**: el repo de origen trae su propia skill `code-review` (revisión en dos ejes, Standards + Spec, con sub-agentes paralelos). No la copié con ese nombre — este entorno ya tiene un `/code-review` propio (con modo `ultra` para review multi-agente en la nube vía `/code-review ultra`), y copiarla igual la hubiera tapado. En vez de eso vive como **`/code-review-standards-spec`**, con `disable-model-invocation` — solo se dispara si la tipeás vos, nunca compite con el `/code-review` de siempre por auto-invocación. Cuando `/implement` diga "usá `/code-review`", sigue corriendo el que ya existe acá (no éste).
 
@@ -79,7 +79,7 @@ Ninguna de estas skills vive en un silo — cuando la salida de una alimenta nat
 - **`/diagnosing-bugs` → `/domain-modeling`**: si el diagnóstico revela un concepto de dominio nuevo o contradice una decisión ya documentada en `.claude/CONTEXTO.md` (como pasó con #59/#60), registrar eso explícitamente en vez de dejarlo solo en el comentario del issue.
 - **`/improve-codebase-architecture` → `/codebase-design` → `/to-tickets`**: el escaneo prioriza por hot-spots, el vocabulario de módulos deep ayuda a definir la costura, y el refactor aceptado se formaliza como ticket accionable.
 - **Cierre de sesión larga → `/handoff`**: si se tocaron varias skills en la misma sesión, el handoff debe listar cuáles se usaron y qué decisiones quedaron, no solo el resumen de código.
-- **`/graphify` → `/improve-codebase-architecture` o `/domain-modeling`**: cuando la pregunta es "qué toca esto" en el monorepo (backend/frontend/etl/python-worker cruzados), el grafo da el mapa de relaciones antes de decidir dónde escanear o qué término formalizar.
+- **`/graphify` → `/improve-codebase-architecture` o `/domain-modeling`**: cuando la pregunta es "qué toca esto" en el monorepo (backend/frontend/etl/python-worker cruzados) y ya se invocó `/graphify` explícitamente, el grafo da el mapa de relaciones antes de decidir dónde escanear o qué término formalizar.
 - **`/ponytail` no encadena, se superpone**: es un modificador de estilo que corre en paralelo a cualquier otra skill de esta lista (`/implement`, `/tdd`, un fix suelto) — no es un paso de una cadena, es cómo se hace cada paso.
 
 Esto es sobre **combinar el pensamiento de las skills**, no sobre disparar acciones sin que las pidas — las user-invoked (`/to-tickets`, `/triage`, `/wayfinder`, `/implement`, `/setup-matt-pocock-skills`) siguen requiriendo que vos las invoques, porque crean issues, tocan config, o commitean código. La cadena se sigue cuando ya estás dentro de una de estas skills y el siguiente paso es obvio, no antes.

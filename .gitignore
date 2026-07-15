@@ -46,3 +46,6 @@ services/etl/pdi-ce-9.4.0.0-343.zip
 *.p12
 *.crt
 *.pem
+
+## Salida generada de /graphify — regenerable, no se commitea (7MB+: graph.html/json, cache)
+graphify-out/
