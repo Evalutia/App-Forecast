@@ -1810,13 +1810,21 @@ Revisados los 4 archivos identificados: `TablaVentas.tsx`, `PlanillaTable.tsx`, 
 
 | Decisión | Definición |
 |----------|-----------|
-| **FK `sku` → `articulos(sku)` con `ON DELETE CASCADE`** | Mismo patrón que `articulos_elegibilidad_econometrico` — `articulos` prácticamente nunca borra filas (usa el enum `estado`), así que el `CASCADE` es seguro y en la práctica no dispara nunca. |
 | **Se agrega `rmse_test`, ausente en el alcance original del issue** | #89 (última de la cadena, la que aplica el criterio en `predict.py`) dice textualmente que el criterio de selección pasa a ser "r2_test/rmse_test real" — sin esta columna, #89 no tendría de dónde leerlo. `r2_test` y `rmse_test` miden cosas distintas (varianza explicada relativa vs. error absoluto en unidades de venta), se necesitan los dos. |
 | **Índice compuesto `(sku, modelo, fecha_estimacion)`, sin `UNIQUE`** | Cubre tanto el historial ordenado de un SKU+modelo (para el análisis de #87) como la fila más reciente por `(sku, modelo)` (para la selección de #89, vía `MAX(fecha_estimacion)` agrupado). Sin `UNIQUE` porque el issue es explícito: no es upsert, puede haber más de una fila por `(sku, modelo, fecha_estimacion)` si el job corre dos veces el mismo día. |
-| **`fecha_estimacion` es `DATETIME`, no `DATE`** | Con solo `DATE`, dos corridas el mismo día quedan indistinguibles en el tiempo para el análisis de evolución de performance de #87 (el `id` autoincremental preserva orden de inserción, pero no la hora real). |
 | **Se agrega `version_modelo VARCHAR`, mismo concepto que ya usa `predicciones`** | `predicciones` ya distingue corridas de código distinto vía `version_modelo` en su índice único `(sku, modelo, version_modelo, fecha_predicha)` (ver `db.py`). `catalogo_modelos` acumula historia mientras `eval_walkforward.py` (que #86 extiende) sigue evolucionando — sin esta columna, no hay forma de filtrar "solo corridas post-cambio de lógica" al analizar en #87 sin inspeccionar el JSON de `hiperparametros`/`features` fila por fila. |
 
-> **Nota:** sin política de retención por ahora (ya decidido en el issue original) — se revisa una vez que #87 dé una idea real de volumen. Columnas `n_arboles`/`profundidad_max` quedan `NULL` para filas de PROPHET (no aplican).
+**Revisado por `/code-review` (mismo día) — 5 hallazgos, los 5 aplicados:**
+
+| Decisión | Definición |
+|----------|-----------|
+| **FK cambiado de `ON DELETE CASCADE` a `ON DELETE RESTRICT`** | La recomendación original del grilling copiaba el patrón de `articulos_elegibilidad_econometrico` (upsert de estado actual, barato de perder) sin notar que `catalogo_modelos` es historial acumulativo — perder en cascada el historial completo de un SKU es justo lo que la tabla existe para evitar. `RESTRICT` tiene costo cero si `articulos` nunca borra de verdad (la premisa original se mantiene), pero protege si alguna vez se viola. Verificado: `DELETE FROM articulos` con fila referenciada queda rechazado, no cascadea. |
+| **`fecha_estimacion` cambia de `DATETIME` a `TIMESTAMP(6)`** | Con precisión de segundo, dos corridas del mismo `(sku, modelo)` en el mismo segundo (retry rápido, loop de `predict.py`) quedaban indistinguibles — justo lo que la columna dice existir para evitar. Mismo patrón que `evaluado_en`/`ts_carga` en el resto del repo. `DEFAULT CURRENT_TIMESTAMP(6)` agregado para no depender de que el código futuro (#86) la setee a mano. |
+| **`n_arboles`/`profundidad_max` pasan a columnas `GENERATED ALWAYS AS ... STORED`** | Como columnas propias duplicaban `hiperparametros` JSON sin ninguna garantía de consistencia (dos fuentes de verdad, nada detecta si se desincronizan). Derivarlas del JSON (`$.n_estimators`, `$.max_depth`) deja una sola fuente de verdad, mantiene las columnas tipadas/consultables que pedía el issue original, y de paso quedan `NULL` para PROPHET automáticamente (su JSON no tiene esas claves) — verificado con INSERT real de XGB y PROPHET. |
+| **`CHECK chk_catalogo_fechas_obs (fecha_primera_obs <= fecha_ultima_obs)`** | El resto del repo ya tiene la convención de `CHECK` para invariantes de dominio (`chk_pred_cantidad`, `chk_stockresumen_dias`) — esta tabla no tenía ninguna para una invariante obvia. Verificado: INSERT con fechas invertidas rechazado. |
+| **`CHECK chk_catalogo_n_obs (n_obs_train + n_obs_test <= n_obs_total)`** | Mismo motivo — `stock_resumen_365` ya tiene el precedente casi exacto (`dias_con_stock + dias_sin_stock = total_dias`). Verificado: INSERT con conteos inconsistentes rechazado. |
+
+> **Nota:** sin política de retención por ahora (ya decidido en el issue original) — se revisa una vez que #87 dé una idea real de volumen.
 
 ---
 
