@@ -1905,6 +1905,34 @@ El review (`medium`, 8 ángulos) encontró 7 hallazgos reales; se corrigieron 4 
 
 ---
 
+### `ml/eval_walkforward.py` — Issue #87, análisis real completado (sesión 2026-07-15)
+
+**Corrección al hallazgo de la sesión anterior:** el "0 filas" que motivó el dry-run de arriba era sobre la base local del Mac de Santiago, no una verdad general del proyecto — el volumen Docker de MySQL es local a cada máquina. La base local de esta PC (Windows) sí tenía datos reales de grupo 201 desde sesiones de backfill anteriores (104 `articulos`, 353.599 filas de `ventas_historicas`, 2016-2026). #87 no estaba bloqueado acá.
+
+| Decisión | Definición |
+|----------|-----------|
+| **Universo: grupo 201 (real, pero parcial), no el catálogo completo** | La base local solo tiene grupo 201, no los ~5500 SKUs de producción (bloqueado por #38, sin resolver). Se corre igual sobre datos reales — mejor un análisis real acotado que uno sintético completo, que corrompería el insumo de #88 con basura. |
+| **Piloto de 10 SKUs antes de la corrida completa** | Dado que #74 (performance con volumen) sigue sin resolver, se midió tiempo real antes de comprometerse: 124s para 10 SKUs de alta historia (9 años) — no representativo del universo completo, ver nota abajo. |
+| **Corrida completa: 348s (~5.8 min) para 85-104 SKUs** | Mucho más rápido que la extrapolación ingenua del piloto (que había sobreestimado ~21 min, porque los 10 SKUs del piloto eran los de mayor historia/volumen del catálogo, no representativos del promedio real). Insumo directo para #74. |
+| **Filas del piloto borradas después de medir tiempo** | Quedaban mezcladas en `catalogo_modelos` con `version_modelo` distinto (`grupo201-pilot-87` vs `grupo201-real-87`) — se borran las del piloto para dejar solo la corrida real como fuente de verdad. |
+
+**Resultado real (223 filas en `catalogo_modelos`, `version_modelo=grupo201-real-87`):**
+
+| Modelo | SKUs evaluados | `median_r2_test` | Estable / Volátil / Sin evaluar (1 fold) |
+|--------|---------------|-------------------|-------------------------------------------|
+| PROPHET | 53 | **0.3234** | 23 / 24 / 6 |
+| RF | 85 | 0.0000 | 68 / 10 / 7 |
+| XGB | 85 | 0.0000 | 63 / 15 / 7 |
+
+- Selección real de producción (criterio actual, menor RMSE in-sample): PROPHET 50, RF 33, XGB 2.
+- **Mediana de `r2_test` (walk-forward) del modelo elegido: 0.0769** — bastante menor que en el piloto (0.3375), porque el piloto cherry-pickeaba los SKUs de mayor historia.
+- 30.6% de los SKUs elegidos son volátiles entre folds; 15.3% no tiene folds suficientes para evaluar estabilidad.
+- 0% con `r2_test` negativo.
+
+> **Veredicto textual del script (reemplaza el de #69/#78, ahora sobre datos reales):** "ZONA GRIS — no es claramente aceptable ni claramente roto. Documentar y decidir con el cliente." Insumo directo para #88 — la pregunta de #88 (mix por SKU vs. algoritmo único, y si el criterio de selección debería cambiar de RMSE in-sample a r2_test/holdout real) no tiene una respuesta obvia con este resultado: PROPHET domina en mediana pero con alta volatilidad, RF/XGB rinden peor en mediana pero son más estables. Vale la pena mostrarle este resultado al cliente antes de decidir #88, tal como sugiere el propio veredicto.
+
+---
+
 ## Issues conocidos / TODOs en código
 
 | Issue | Ubicación | Descripción |
