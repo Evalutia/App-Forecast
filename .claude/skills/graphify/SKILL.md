@@ -1,11 +1,15 @@
 ---
 name: graphify
-description: "any input (code, docs, papers, images) → knowledge graph → clustered communities → HTML + JSON + audit report. Use when user asks any question about a codebase, project content, architecture, or file relationships — especially if graphify-out/ exists. Provides persistent graph with god nodes, community detection, and BFS/DFS query tools."
+description: "Build a persistent knowledge graph (HTML + JSON + report) from a folder of files. Invoke explicitly with /graphify only. Requires Windows/PowerShell and the graphify Python package."
 trigger: /graphify
 disable-model-invocation: true
 ---
 
 # /graphify
+
+> **Requisito de plataforma:** los pasos de este skill están escritos en **PowerShell (Windows)**
+> y necesitan el paquete Python `graphify` instalado vía `uv` o `pipx`. En macOS/Linux el Step 1
+> falla. No auto-invocable: solo corre si escribís `/graphify` a mano.
 
 Turn any folder of files into a navigable knowledge graph with community detection, an honest audit trail, and three outputs: interactive HTML, GraphRAG-ready JSON, and a plain-language GRAPH_REPORT.md.
 
