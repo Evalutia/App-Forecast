@@ -5,7 +5,7 @@ import { saveAuth } from '../utils/authStorage';
 
 export function useLogin() {
   const qc = useQueryClient();
-  return useMutation<LoginResponse, any, LoginRequest>({
+  return useMutation<LoginResponse, Error, LoginRequest>({
     mutationFn: (payload) => login(payload),
     onSuccess: (data) => {
       saveAuth(data.token, data.user);

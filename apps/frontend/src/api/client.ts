@@ -9,6 +9,12 @@ const api = axios.create({
   withCredentials: false,
 });
 
+/** Forma del error una vez que pasa por el interceptor de abajo (status/mensaje ya normalizados). */
+export interface ApiError extends Error {
+  status?: number;
+  normalizedMessage?: string;
+}
+
 api.interceptors.request.use((config) => {
   const token = localStorage.getItem('auth.token');
   if (token) {
@@ -53,7 +59,7 @@ api.interceptors.response.use(
     const errs = data?.errores || data?.errors;
     if (errs && typeof errs === 'object') {
       const detalles = Object.entries(errs)
-        .flatMap(([k, arr]) => (Array.isArray(arr) ? arr : [arr]).map((x: any) => `${k}: ${String(x)}`))
+        .flatMap(([k, arr]) => (Array.isArray(arr) ? arr : [arr]).map((x: unknown) => `${k}: ${String(x)}`))
         .join(' · ');
       if (detalles) msg = `${msg}\n${detalles}`;
     }

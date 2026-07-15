@@ -15,7 +15,9 @@ export default function AddAdminModal({ onClose }: { onClose: () => void }) {
       await crear.mutateAsync({ correo, contrasena });
       toast.success('Administrador creado.');
       onClose();
-    } catch {}
+    } catch {
+      // el interceptor de axios ya muestra el toast de error; acá solo evitamos que se propague
+    }
   };
 
   return (

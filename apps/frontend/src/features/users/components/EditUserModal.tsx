@@ -24,7 +24,9 @@ export default function EditUserModal({ userId, onClose }: { userId: number; onC
       });
       toast.success('Usuario actualizado.');
       onClose();
-    } catch {}
+    } catch {
+      // el interceptor de axios ya muestra el toast de error; acá solo evitamos que se propague
+    }
   };
 
   return (

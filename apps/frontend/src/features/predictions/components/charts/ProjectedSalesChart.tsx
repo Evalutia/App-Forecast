@@ -1,6 +1,8 @@
 import './ChartSetup';
 import { useState } from 'react';
 import { Line } from 'react-chartjs-2';
+import type { ChartDataset } from 'chart.js';
+import type { AnnotationOptions } from 'chartjs-plugin-annotation';
 import type { Prediccion } from '../../types/predicciones';
 import { getSkuBase, pickQuarterlyProjection, formatNumber } from '../../utils/format';
 import { useVentasAgregadas } from '../../../sales/hooks/useVentas';
@@ -37,9 +39,9 @@ export default function ProjectedSalesChart({ data, sku }: Props) {
     { enabled: true }
   );
 
-  const ventasRows = (ventasAg?.items ?? []).map((r: any) => ({
-    label: r.periodo as string,
-    value: r.totalCantidad as number,
+  const ventasRows = (ventasAg?.items ?? []).map((r) => ({
+    label: r.periodo,
+    value: r.totalCantidad,
   }));
 
   // Unión de labels (histórico + predicciones)
@@ -100,7 +102,7 @@ export default function ProjectedSalesChart({ data, sku }: Props) {
   const noVentasHistoricas = ventasRows.length === 0;
 
   // ── Datasets ──
-  const datasets: any[] = [];
+  const datasets: ChartDataset<'line', (number | null)[]>[] = [];
   if (!noVentasHistoricas) {
     datasets.push({
       label: `Ventas históricas (Q) ${skuBase}`,
@@ -142,7 +144,7 @@ export default function ProjectedSalesChart({ data, sku }: Props) {
   const ds = { labels: allLabels, datasets };
 
   // ── Annotation: línea vertical en el trimestre actual ──
-  const annotations: Record<string, any> = {};
+  const annotations: Record<string, AnnotationOptions> = {};
   if (curQIdx >= 0) {
     annotations.currentQuarter = {
       type: 'line' as const,
@@ -205,7 +207,7 @@ export default function ProjectedSalesChart({ data, sku }: Props) {
                 label(ctx) {
                   const dsLabel = ctx.dataset.label ?? '';
                   const val = ctx.parsed.y;
-                  if (dsLabel.startsWith('Banda')) return null as any;
+                  if (dsLabel.startsWith('Banda')) return;
                   const prefix = dsLabel.includes('Predicción') ? 'Predicción' : 'Ventas';
                   return `${prefix}: ${formatNumber(val)} unidades`;
                 },
