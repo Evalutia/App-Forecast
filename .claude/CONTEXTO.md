@@ -1806,6 +1806,32 @@ Revisados los 4 archivos identificados: `TablaVentas.tsx`, `PlanillaTable.tsx`, 
 
 ---
 
+### `infra/sql/16-catalogo-modelos.sql` — Issue #84 (sesión 2026-07-15)
+
+| Decisión | Definición |
+|----------|-----------|
+| **FK `sku` → `articulos(sku)` con `ON DELETE CASCADE`** | Mismo patrón que `articulos_elegibilidad_econometrico` — `articulos` prácticamente nunca borra filas (usa el enum `estado`), así que el `CASCADE` es seguro y en la práctica no dispara nunca. |
+| **Se agrega `rmse_test`, ausente en el alcance original del issue** | #89 (última de la cadena, la que aplica el criterio en `predict.py`) dice textualmente que el criterio de selección pasa a ser "r2_test/rmse_test real" — sin esta columna, #89 no tendría de dónde leerlo. `r2_test` y `rmse_test` miden cosas distintas (varianza explicada relativa vs. error absoluto en unidades de venta), se necesitan los dos. |
+| **Índice compuesto `(sku, modelo, fecha_estimacion)`, sin `UNIQUE`** | Cubre tanto el historial ordenado de un SKU+modelo (para el análisis de #87) como la fila más reciente por `(sku, modelo)` (para la selección de #89, vía `MAX(fecha_estimacion)` agrupado). Sin `UNIQUE` porque el issue es explícito: no es upsert, puede haber más de una fila por `(sku, modelo, fecha_estimacion)` si el job corre dos veces el mismo día. |
+| **`fecha_estimacion` es `DATETIME`, no `DATE`** | Con solo `DATE`, dos corridas el mismo día quedan indistinguibles en el tiempo para el análisis de evolución de performance de #87 (el `id` autoincremental preserva orden de inserción, pero no la hora real). |
+| **Se agrega `version_modelo VARCHAR`, mismo concepto que ya usa `predicciones`** | `predicciones` ya distingue corridas de código distinto vía `version_modelo` en su índice único `(sku, modelo, version_modelo, fecha_predicha)` (ver `db.py`). `catalogo_modelos` acumula historia mientras `eval_walkforward.py` (que #86 extiende) sigue evolucionando — sin esta columna, no hay forma de filtrar "solo corridas post-cambio de lógica" al analizar en #87 sin inspeccionar el JSON de `hiperparametros`/`features` fila por fila. |
+
+> **Nota:** sin política de retención por ahora (ya decidido en el issue original) — se revisa una vez que #87 dé una idea real de volumen. Columnas `n_arboles`/`profundidad_max` quedan `NULL` para filas de PROPHET (no aplican).
+
+---
+
+### `docs/catalogo-modelos-diccionario.md` — Issue #85 (sesión 2026-07-15)
+
+| Decisión | Definición |
+|----------|-----------|
+| **"Creá un agente" → correr `/implement` sobre el issue, no un subagente suelto ni un cron** | El issue ya estaba `ready-for-agent`, acotado y sin dependencias — es el caso exacto que este repo definió para `/implement`. Un subagente aislado se saltea el checklist de verificación y el registro de decisiones que `/implement` trae de fábrica; un agente programado (`/schedule`) es sobre-ingeniería para un documento de una sola vez. |
+| **Archivo separado `docs/catalogo-modelos-diccionario.md`, no sección nueva en `CONTEXTO.md`** | El issue dejaba la ubicación abierta. Se prefiere archivo satélite (mismo patrón que `docs/agents/issue-tracker.md`, `triage-labels.md`, `domain.md`) porque `CONTEXTO.md` ya pesa 273.8KB y sigue creciendo — agregar más contenido inline lo hace más caro de cargar en cada sesión. El criterio de aceptación ("referenciado desde #84 y desde `CONTEXTO.md`") se cumple igual con un link. |
+| **Contenido del issue verificado contra `services/python-worker/ml/models.py` antes de implementar** | El texto de triage (`lag_N`, `period`, `trend`, `eff_lags`, inputs de Prophet) se confirmó línea por línea contra `_build_lag_month_trend` (líneas 245-254) y `fit_xgb_insample`/`fit_rf_insample` (líneas 261-386) — coincide exactamente, no hacía falta corregir el brief. |
+
+> **Nota:** sesión corta, arrancó sobre un issue puntual ya existente (no un plan sin partir) — el paso siguiente es `/implement` directo sobre #85, no `/to-tickets`.
+
+---
+
 ## Issues conocidos / TODOs en código
 
 | Issue | Ubicación | Descripción |
@@ -1860,4 +1886,5 @@ npm run dev       # http://localhost:5173
 |---------|-----------|
 | `docs/arquitectura-mysql.md` | Diseño de BD, relaciones, índices, patrones de consulta |
 | `docs/script-de-prediccion.md` | Detalles de predict.py, modelos ML, ensemble |
+| `docs/catalogo-modelos-diccionario.md` | Diccionario de variables de entrada (`lag_N`, `period`, `trend`, `ds`/`y`) de RF/XGB/Prophet — issue #85 |
 | `services/etl/README_ETL_Diario_actualizado.md` | Flujo ETL completo, variables, backfills |
