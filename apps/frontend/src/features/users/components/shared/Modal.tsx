@@ -1,4 +1,11 @@
-export default function Modal({ title, onClose, children, maxWidth = '28rem' }: any) {
+interface ModalProps {
+  title: string;
+  onClose: () => void;
+  children: React.ReactNode;
+  maxWidth?: string;
+}
+
+export default function Modal({ title, onClose, children, maxWidth = '28rem' }: ModalProps) {
   return (
     <div
       style={{

@@ -1,6 +1,7 @@
 import { useMemo } from "react";
 import type { VentasQuery, VentaAgregada } from "../types/ventas";
 import { useVentasAgregadas, selectAgregadoRows, getPaging } from "../hooks/useVentas";
+import type { ApiError } from "../../../api/client";
 
 type Props = {
   query: VentasQuery & { agregado: string };
@@ -23,7 +24,7 @@ export default function TablaVentasAgregadas({ query, onPageChange, onRowClick }
   if (isError) {
     return (
       <div className="rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-700">
-        Ocurrió un error al cargar ventas agregadas. {(error as any)?.message ?? ""}
+        Ocurrió un error al cargar ventas agregadas. {(error as ApiError)?.message ?? ""}
       </div>
     );
   }

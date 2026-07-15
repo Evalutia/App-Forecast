@@ -48,13 +48,13 @@ export default function UserTable({
   );
 }
 
-function Th({ children, className = '' }: any) {
+function Th({ children, className = '' }: { children: React.ReactNode; className?: string }) {
   return (
     <th className={`px-4 py-2 text-left text-xs font-semibold uppercase tracking-wide text-white/70 ${className}`}>
       {children}
     </th>
   );
 }
-function Td({ children, className = '' }: any) {
+function Td({ children, className = '' }: { children: React.ReactNode; className?: string }) {
   return <td className={`px-4 py-3 text-sm text-white ${className}`}>{children}</td>;
 }

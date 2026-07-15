@@ -2,6 +2,7 @@ import { useMemo } from "react";
 import type { VentasQuery } from "../types/ventas";
 import type { Venta } from "../types/ventas";
 import { useVentasDetalle, selectDetalleRows, getPaging } from "../hooks/useVentas";
+import type { ApiError } from "../../../api/client";
 
 type Props = {
   query: VentasQuery;
@@ -23,7 +24,7 @@ export default function TablaVentas({ query, onPageChange, onPageSizeChange, onR
   );
 
   if (isError) {
-    return <div className="alert">Ocurrió un error al cargar ventas. {(error as any)?.message ?? ""}</div>;
+    return <div className="alert">Ocurrió un error al cargar ventas. {(error as ApiError)?.message ?? ""}</div>;
   }
 
   return (

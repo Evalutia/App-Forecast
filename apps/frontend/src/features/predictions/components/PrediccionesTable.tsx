@@ -49,7 +49,7 @@ export default function PrediccionesTable({ className }: Props) {
   };
 
   if (isError) {
-    return <div className="alert">Ocurrió un error al cargar el historial. {(error as any)?.message ?? ''}</div>;
+    return <div className="alert">Ocurrió un error al cargar el historial. {error?.message ?? ''}</div>;
   }
 
   const handleExport = async () => {

@@ -1,6 +1,7 @@
 import { toast } from 'sonner';
 import type { UsuarioRow } from '../types/users';
 import { useBorrarAdministradorPorCorreo } from '../hooks/useUsers';
+import type { ApiError } from '../../../api/client';
 
 export default function RowActions({
   user,
@@ -18,9 +19,9 @@ export default function RowActions({
     try {
       await borrarAdmin.mutateAsync(user.correo);
       toast.success('Administrador eliminado.');
-    } catch (e: any) {
+    } catch (e) {
       // el interceptor ya muestra el error; opcionalmente:
-      if (!e?.normalizedMessage) toast.error('No se pudo eliminar.');
+      if (!(e as ApiError)?.normalizedMessage) toast.error('No se pudo eliminar.');
     }
   };
 

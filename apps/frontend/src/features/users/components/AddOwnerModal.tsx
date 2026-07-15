@@ -15,7 +15,9 @@ export default function AddOwnerModal({ onClose }: { onClose: () => void }) {
       await crear.mutateAsync({ correo, contrasena });
       toast.success('Dueño de Empresa creado.');
       onClose();
-    } catch {}
+    } catch {
+      // el interceptor de axios ya muestra el toast de error; acá solo evitamos que se propague
+    }
   };
 
   return (
