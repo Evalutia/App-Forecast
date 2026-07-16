@@ -1957,7 +1957,9 @@ Retomado tras conseguir acceso real a la cuenta de AWS (bloqueo original desde 2
 | `grupos` | 66 | 66 (sin cambio) |
 | `catalogo_modelos` | 223 (análisis de #87) | 223 (intacto — no está en la lista de tablas que sincroniza el script) |
 
-> **Nota — #38 no se cierra todavía:** el criterio de aceptación agregado en la sesión de grilling de 2026-06-17 pide además identificar un SKU con `quiebre_parcial` real en un mes cerrado (post-sync) y confirmar visualmente que la celda se pinta con el color correcto según `frecuenciaNivel` — eso todavía no se hizo esta sesión, queda como siguiente paso antes de cerrar el issue.
+**Criterio de aceptación adicional (2026-06-17) cumplido, mismo día:** con el catálogo completo ya local, se identificó `O00550` (BOTELLA DE TINTA BROTHER BT-5001 MG) con `estado_mes='quiebre_parcial'` real en junio/2026 (mes cerrado) y `frecuencia_nivel='alta'`. Verificado con Playwright, leyendo el `background-color` computado de la celda `VTA.JUN/26` directamente (no solo captura visual): `rgba(234, 179, 8, 0.18)` — coincide exacto con la rama "alta" (amarillo) de `estadoMesBg()`. La misma captura de pantalla mostró de paso `O00489` en rojo y `O00514` en naranja, confirmando visualmente los 3 niveles de color en una sola pantalla. Hasta ahora solo se había validado el caso `'normal'` (sin quiebre) — este es el primer caso real de `quiebre_parcial` coloreado, cerrando el gap que dejaba #34/#35 sin verificar al 100%.
+
+**#38 cerrado.**
 
 ---
 
