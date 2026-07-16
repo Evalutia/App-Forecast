@@ -35,10 +35,16 @@ TABLAS=(articulos grupos ventas_historicas ventas_mensuales stock_diario
 SELF_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "${SELF_DIR}"
 
-TMP_DUMP="$(mktemp -t evalutia_sync_XXXXXX).sql.gz"
+
+# Ojo: NO usar mktemp -t (genera rutas estilo /tmp/...) ni una ruta absoluta
+# construida a mano -- aws.exe en Windows es un binario nativo, no MSYS, y no
+# resuelve bien un path con "/" (termina buscando "..\..\..\..\c\Users\...").
+# Un nombre de archivo relativo (ya estamos parados en SELF_DIR) no tiene
+# ninguna barra que traducir, evita el problema por completo.
+TMP_DUMP=".sync_tmp_dump.sql.gz"
 
 echo "[SYNC] Bajando dump desde s3://${BUCKET_NAME}/latest.sql.gz"
-aws s3 cp "s3://${BUCKET_NAME}/latest.sql.gz" "${TMP_DUMP}" --profile "${AWS_PROFILE}"
+aws s3 cp "s3://${BUCKET_NAME}/latest.sql.gz" "${TMP_DUMP}" --profile "${AWS_PROFILE}" --no-progress
 echo "[SYNC] Dump bajado: $(du -h "${TMP_DUMP}" | cut -f1)"
 
 echo "[SYNC] Vaciando tablas locales: ${TABLAS[*]}"

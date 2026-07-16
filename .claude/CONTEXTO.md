@@ -1933,6 +1933,34 @@ El review (`medium`, 8 ángulos) encontró 7 hallazgos reales; se corrigieron 4 
 
 ---
 
+### Sincronización local↔producción vía S3, ejecutada — Issue #38 (sesión 2026-07-15)
+
+Retomado tras conseguir acceso real a la cuenta de AWS (bloqueo original desde 2026-07-13). Se ejecutó el plan ya diseñado (S3, usuario IAM `evalutia-sync`), sin rediseñar nada.
+
+| Decisión | Definición |
+|----------|-----------|
+| **Infra AWS creada**: bucket `evalutia-sync-dumps` (región `us-east-2`, misma que la VM), política `evalutia-sync-s3-policy` (`ListBucket` sobre el bucket + `GetObject`/`PutObject`/`DeleteObject` sobre su contenido), usuario IAM `evalutia-sync` con esa política adjunta directamente (sin acceso a consola). | Mismo diseño documentado en la sesión de 2026-07-13, ahora ejecutado. |
+| **Misma credencial reusada en PC y VM, a propósito** | Decisión explícita del usuario: no crear un segundo usuario IAM por máquina/persona (aunque sería más prolijo si Santiago usa su propia Mac) — simplicidad sobre separación de credenciales para este caso. |
+| **Scripts nunca commiteados, encontrados sin trackear** | `scripts/prod_dump_to_s3.sh` (nuevo) y el rediseño S3 de `scripts/sync_local_from_prod.sh` (el commiteado seguía en el diseño viejo de conexión directa) llevaban desde el 2026-07-13 solo en el disco local del usuario. Se completó el commit pendiente (`7274679`) antes de poder correrlos en la VM. |
+| **Bug real encontrado: permisos de escritura en el directorio de arranque de Session Manager** | La sesión de SSM arranca en `/var/snap/amazon-ssm-agent/<id>` (propiedad de `root`, no escribible por `ssm-user`) — cualquier script que asuma que puede escribir en el directorio actual falla ahí. Se resuelve haciendo `cd /opt/evalutia` (o `/tmp`) antes de correr nada, no es un bug del script en sí. |
+| **Bug real encontrado y corregido: `mktemp -t` + ruta absoluta con `/` rompen `aws.exe` en Windows** | `aws.exe` es un binario nativo de Windows, no MSYS — cuando recibe una ruta estilo `/c/Users/...` (la que produce `pwd`/`mktemp` en Git Bash), la resuelve mal y termina buscando `..\..\..\..\c\Users\...`. Ni `mktemp -t` ni construir la ruta absoluta a mano funcionan. Fix: `TMP_DUMP` pasa a ser un nombre de archivo **relativo** (`.sync_tmp_dump.sql.gz`, sin ninguna barra) ya que el script hace `cd` a `SELF_DIR` antes — sin barras, no hay nada que MSYS pueda traducir mal. Se probaron dos fixes intermedios que NO funcionaron (`MSYS_NO_PATHCONV=0` inline, y `unset` en subshell) antes de llegar a este — para MSYS alcanza con que la variable *exista* en el entorno (cualquier valor) para desactivar la conversión, así que ninguno de los dos evitaba el problema real (la ruta absoluta con `/`), solo la ruta relativa lo resuelve de raíz. |
+| **Progreso de `aws s3 cp` genera miles de líneas sin salto de línea real** | Sin terminal interactiva, la barra de progreso de `aws s3 cp` imprime una línea nueva por cada actualización en vez de sobreescribir — se agrega `--no-progress` al comando para evitar inundar cualquier log/captura futura. |
+
+**Resultado (verificado con `SELECT COUNT(*)` antes/después):**
+
+| Tabla | Antes (solo grupo 201) | Después (catálogo completo) |
+|-------|------------------------|------------------------------|
+| `articulos` | 104 | **5.550** |
+| `ventas_historicas` | 353.599 | **4.442.089** |
+| `ventas_mensuales` | 11.639 | **153.404** |
+| `stock_diario` | (no medido) | **26.652.534** |
+| `grupos` | 66 | 66 (sin cambio) |
+| `catalogo_modelos` | 223 (análisis de #87) | 223 (intacto — no está en la lista de tablas que sincroniza el script) |
+
+> **Nota — #38 no se cierra todavía:** el criterio de aceptación agregado en la sesión de grilling de 2026-06-17 pide además identificar un SKU con `quiebre_parcial` real en un mes cerrado (post-sync) y confirmar visualmente que la celda se pinta con el color correcto según `frecuenciaNivel` — eso todavía no se hizo esta sesión, queda como siguiente paso antes de cerrar el issue.
+
+---
+
 ## Issues conocidos / TODOs en código
 
 | Issue | Ubicación | Descripción |

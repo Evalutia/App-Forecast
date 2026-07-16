@@ -49,3 +49,7 @@ services/etl/pdi-ce-9.4.0.0-343.zip
 
 ## Salida generada de /graphify — regenerable, no se commitea (7MB+: graph.html/json, cache)
 graphify-out/
+
+## Dump temporal de sync_local_from_prod.sh (issue #38) — se borra solo al terminar,
+## esto es red de seguridad por si el script corta antes de la limpieza.
+scripts/.sync_tmp_dump.sql.gz
