@@ -1,8 +1,10 @@
 import datetime as dt
+import os
 
 import pytest
 
 from run_calc_planilla import (
+    cargar_tickets,
     calcular_historico,
     clasificar_estado,
     clasificar_estado_mes,
@@ -10,6 +12,35 @@ from run_calc_planilla import (
     valor_ajustado_y_criterio,
     ventana_meses,
 )
+
+
+def _try_connect():
+    """
+    Conexion real a MySQL para el test de integracion de cargar_tickets --
+    se salta con pytest.skip si no hay DB disponible (CI no levanta MySQL
+    para services/etl/tests, ver .github/workflows/ci.yml). Usa las mismas
+    env vars que db_connect(), con defaults para correr local contra el
+    docker-compose del repo (MySQL expuesto en localhost:3307).
+    """
+    import pymysql
+
+    try:
+        port = int(os.environ.get("MYSQL_PORT", "3307"))
+    except ValueError as e:
+        pytest.fail(f"MYSQL_PORT invalido: {e}")
+
+    try:
+        return pymysql.connect(
+            host=os.environ.get("MYSQL_HOST", "localhost"),
+            port=port,
+            user=os.environ.get("MYSQL_USER", "evalutia"),
+            password=os.environ.get("MYSQL_PASSWORD", "evalutia"),
+            database=os.environ.get("MYSQL_DB", "evalutia"),
+            autocommit=False,
+            charset="utf8mb4",
+        )
+    except pymysql.err.OperationalError:
+        pytest.skip("Sin conexion a MySQL disponible -- test de integracion se salta.")
 
 
 # ── ventana_meses() ──────────────────────────────────────────────────────────
@@ -201,3 +232,48 @@ def test_calcular_historico_sin_meses_disponibles_devuelve_none():
     # SKU dado de alta despues del ultimo mes cerrado
     historico = calcular_historico("C002", dt.date(2026, 6, 1), [(2026, 5), (2026, 4)], {})
     assert historico is None
+
+
+# ── cargar_tickets() -- regresion del bug de #64 (dias con cantidad=0 inflaban tickets) ──
+
+def test_cargar_tickets_excluye_filas_con_cantidad_cero():
+    conn = _try_connect()
+    sku = "TESTTICKETS01"
+    try:
+        with conn.cursor() as cur:
+            # Idempotente: limpia un fixture residual de una corrida anterior
+            # cortada a mitad de camino (kill/timeout entre el commit y el
+            # finally) antes de insertar, en vez de fallar con PK duplicada.
+            cur.execute("DELETE FROM ventas_historicas WHERE sku = %s", (sku,))
+            cur.execute("DELETE FROM articulos WHERE sku = %s", (sku,))
+            cur.execute(
+                "INSERT INTO articulos (sku, descripcion, grupo_id) VALUES (%s, %s, %s)",
+                (sku, "SKU de prueba -- regresion tickets #64", 201),
+            )
+            # 5 dias con venta real (cantidad != 0), 3 dias "sin venta" que
+            # igual tienen fila con cantidad=0 -- mismo patron que produccion.
+            rows = [(sku, dt.date(2026, 6, d), 3, "test") for d in range(1, 6)]
+            rows += [(sku, dt.date(2026, 6, d), 0, "test") for d in range(6, 9)]
+            cur.executemany(
+                "INSERT INTO ventas_historicas (sku, fecha, cantidad, fuente) VALUES (%s, %s, %s, %s)",
+                rows,
+            )
+        conn.commit()
+
+        tickets = cargar_tickets(
+            conn,
+            fecha_desde=dt.date(2026, 6, 1),
+            fecha_hasta=dt.date(2026, 6, 30),
+            meses_set={(2026, 6)},
+        )
+
+        assert tickets.get((sku, 2026, 6)) == 5, (
+            f"esperaba 5 tickets (dias con venta real), dio {tickets.get((sku, 2026, 6))} "
+            "-- si da 30, volvio el bug de contar dias con cantidad=0"
+        )
+    finally:
+        with conn.cursor() as cur:
+            cur.execute("DELETE FROM ventas_historicas WHERE sku = %s", (sku,))
+            cur.execute("DELETE FROM articulos WHERE sku = %s", (sku,))
+        conn.commit()
+        conn.close()

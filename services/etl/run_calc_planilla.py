@@ -35,6 +35,14 @@ VENTANA_MESES        = 13     # mes actual + 12 anteriores completos
 # cliente: cualquier día de quiebre cuenta, sin piso. Issue #36/#37, sesión 2026-06-17.
 ESTADO_UMBRAL_NORMAL = 1.00
 
+# INVARIANTE de ventas_historicas (issue #64): la tabla guarda una fila por
+# SKU por dia calendario, tenga o no venta real -- cantidad=0 es "sin venta
+# ese dia", no ausencia de fila. SUM(cantidad) es seguro (los ceros no
+# afectan la suma), pero cualquier COUNT/COUNT(DISTINCT fecha) sobre esta
+# tabla necesita filtrar `cantidad != 0` explicitamente o termina contando
+# dias del mes en vez de eventos reales. FREQ_ALTA_MIN/FREQ_BAJA_MAX de abajo
+# escapan a esto hoy porque se calculan via SUM > 0, no via conteo de filas.
+
 # Umbrales de frecuencia de quiebre (Issue #27)
 # Medida: cantidad de meses cerrados (de 12) con ventas_cantidad > 0
 FREQ_ALTA_MIN  = 9   # >= 9 meses con ventas → alta frecuencia
@@ -252,6 +260,39 @@ def cargar_fec_alta(conn: pymysql.Connection) -> dict[str, dt.date | None]:
     return {row[0]: (row[1].date() if row[1] else None) for row in rows}
 
 
+def cargar_tickets(
+    conn: pymysql.Connection, fecha_desde: dt.date, fecha_hasta: dt.date, meses_set: set[tuple[int, int]]
+) -> dict[tuple, int]:
+    """
+    Tickets por SKU×mes (Issue #61: dia con al menos una fila de VENTA real,
+    cantidad != 0). `ventas_historicas` guarda una fila por SKU por dia
+    calendario aunque no haya venta -- el filtro `cantidad != 0` evita
+    contar dias del mes en vez de tickets reales (bug de #64, ver
+    CONTEXTO.md para el detalle de como se detecto).
+    """
+    sql_tickets = """
+        SELECT
+            vh.sku,
+            YEAR(vh.fecha)  AS yr,
+            MONTH(vh.fecha) AS mo,
+            COUNT(DISTINCT vh.fecha) AS tickets
+        FROM ventas_historicas vh
+        INNER JOIN articulos a ON a.sku = vh.sku
+        WHERE vh.fecha BETWEEN %s AND %s
+          AND vh.cantidad != 0
+        GROUP BY vh.sku, YEAR(vh.fecha), MONTH(vh.fecha)
+    """
+    with conn.cursor() as cur:
+        cur.execute(sql_tickets, (fecha_desde, fecha_hasta))
+        tickets_raw = cur.fetchall()
+
+    tickets: dict[tuple, int] = {}
+    for sku, yr, mo, n in tickets_raw:
+        if (yr, mo) in meses_set:
+            tickets[(sku, yr, mo)] = int(n)
+    return tickets
+
+
 def calcular_filas(conn: pymysql.Connection) -> tuple[list[dict], int, int, int]:
     """
     Retorna (filas_para_insert, skus_omitidos, mes_referencia_normal, mes_referencia_sin_stock).
@@ -296,27 +337,8 @@ def calcular_filas(conn: pymysql.Connection) -> tuple[list[dict], int, int, int]
         if (yr, mo) in meses_set:
             ventas[(sku, yr, mo)] = int(cant)
 
-    # ── Tickets por SKU×mes (Issue #61: dia con al menos una fila de venta en
-    # ventas_historicas, positiva o negativa -- no importa el signo, cuenta el dia) ──
-    sql_tickets = """
-        SELECT
-            vh.sku,
-            YEAR(vh.fecha)  AS yr,
-            MONTH(vh.fecha) AS mo,
-            COUNT(DISTINCT vh.fecha) AS tickets
-        FROM ventas_historicas vh
-        INNER JOIN articulos a ON a.sku = vh.sku
-        WHERE vh.fecha BETWEEN %s AND %s
-        GROUP BY vh.sku, YEAR(vh.fecha), MONTH(vh.fecha)
-    """
-    with conn.cursor() as cur:
-        cur.execute(sql_tickets, (fecha_desde, fecha_hasta))
-        tickets_raw = cur.fetchall()
-
-    tickets: dict[tuple, int] = {}
-    for sku, yr, mo, n in tickets_raw:
-        if (yr, mo) in meses_set:
-            tickets[(sku, yr, mo)] = int(n)
+    # ── Tickets por SKU×mes (Issue #61, fix #64: ver cargar_tickets) ───────────
+    tickets = cargar_tickets(conn, fecha_desde, fecha_hasta, meses_set)
 
     # ── Días con stock por SKU×mes ─────────────────────────────────────────────
     # Un día "tiene stock" cuando el total de todos los depósitos supera stock_minimo.
