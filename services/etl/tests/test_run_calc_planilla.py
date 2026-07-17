@@ -4,6 +4,9 @@ import os
 import pytest
 
 from run_calc_planilla import (
+    TICKETS_ALTO_MIN,
+    TICKETS_BAJO_MAX,
+    cargar_configuracion,
     cargar_tickets,
     calcular_historico,
     clasificar_estado,
@@ -275,5 +278,66 @@ def test_cargar_tickets_excluye_filas_con_cantidad_cero():
         with conn.cursor() as cur:
             cur.execute("DELETE FROM ventas_historicas WHERE sku = %s", (sku,))
             cur.execute("DELETE FROM articulos WHERE sku = %s", (sku,))
+        conn.commit()
+        conn.close()
+
+
+# ── cargar_configuracion() -- Issue #67 (umbrales editables por el admin) ──
+
+def test_cargar_configuracion_lee_valores_reales_de_la_tabla():
+    # No hardcodea 2/5 -- son las claves reales que un admin puede editar
+    # desde la UI (#67), asumir un valor fijo haria este test fragil ante
+    # cualquier cambio legitimo. Compara contra lo que la tabla dice AHORA.
+    conn = _try_connect()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT clave, valor FROM configuracion_sistema "
+                "WHERE clave IN ('tickets_bajo_max', 'tickets_alto_min')"
+            )
+            esperado = {clave: int(valor) for clave, valor in cur.fetchall()}
+
+        config = cargar_configuracion(conn)
+
+        assert config["tickets_bajo_max"] == esperado["tickets_bajo_max"]
+        assert config["tickets_alto_min"] == esperado["tickets_alto_min"]
+    finally:
+        conn.close()
+
+
+def test_cargar_configuracion_usa_default_si_falta_la_clave():
+    conn = _try_connect()
+    try:
+        with conn.cursor() as cur:
+            # Guarda la fila completa (no solo valor) para restaurarla igual
+            # a como estaba -- una restauracion parcial deja la tabla real
+            # distinta a como la encontro (ej. perdiendo la descripcion).
+            cur.execute(
+                "SELECT valor, descripcion, actualizado_por FROM configuracion_sistema "
+                "WHERE clave = 'tickets_alto_min'"
+            )
+            fila_original = cur.fetchone()
+            assert fila_original is not None, (
+                "falta seed de tickets_alto_min -- aplicar infra/sql/17-configuracion-sistema.sql"
+            )
+            valor_original, descripcion_original, actualizado_por_original = fila_original
+            cur.execute("DELETE FROM configuracion_sistema WHERE clave = 'tickets_alto_min'")
+        conn.commit()
+
+        config = cargar_configuracion(conn)
+
+        assert config["tickets_alto_min"] == TICKETS_ALTO_MIN, (
+            "sin la clave en la tabla, tiene que caer al default del modulo"
+        )
+        assert config["tickets_bajo_max"] == TICKETS_BAJO_MAX
+    finally:
+        with conn.cursor() as cur:
+            cur.execute(
+                "INSERT INTO configuracion_sistema (clave, valor, descripcion, actualizado_por) "
+                "VALUES ('tickets_alto_min', %s, %s, %s) "
+                "ON DUPLICATE KEY UPDATE valor = VALUES(valor), descripcion = VALUES(descripcion), "
+                "actualizado_por = VALUES(actualizado_por)",
+                (valor_original, descripcion_original, actualizado_por_original),
+            )
         conn.commit()
         conn.close()

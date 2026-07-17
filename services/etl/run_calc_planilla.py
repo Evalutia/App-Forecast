@@ -54,6 +54,12 @@ FREQ_BAJA_MAX  = 3   # <= 3 meses con ventas → baja frecuencia
 # meses con ventas en el año para elegir formula de rotacion en quiebre; esto
 # mide tickets (dias con venta) EN EL MES para elegir el blending
 # Historico/Promedio/Real de ese mes puntual.
+#
+# Issue #67: son los defaults -- main() los sobreescribe con lo que haya en
+# configuracion_sistema (editable por el admin) antes de calcular. Quedan
+# como constantes de modulo (no parametros de funcion) para no tocar la
+# firma de valor_ajustado_y_criterio() ni los 14 tests que ya la llaman sin
+# pasarlos explicitamente.
 TICKETS_BAJO_MAX = 2   # <= 2 tickets → usa Historico
 TICKETS_ALTO_MIN = 5   # >= 5 tickets → usa VentaRealMes/Extrapolacion
                        # 3-4 tickets → promedio de ambos
@@ -249,6 +255,38 @@ def cargar_factores(conn: pymysql.Connection) -> dict[str, dict[int, float | Non
         row[0]: {i + 1: (float(row[i + 1]) if row[i + 1] is not None else None) for i in range(12)}
         for row in rows
     }
+
+
+def cargar_configuracion(conn: pymysql.Connection) -> dict[str, int]:
+    """
+    Issue #67: umbrales de tickets editables por el admin via
+    configuracion_sistema. Si la tabla esta vacia o falta una clave (no
+    debería pasar -- la migracion la siembra -- pero no confiar en eso en
+    tiempo de ejecucion), cae al default hardcodeado en vez de romper el
+    calculo de toda la noche por un dato de configuracion faltante.
+    """
+    defaults = {"tickets_bajo_max": TICKETS_BAJO_MAX, "tickets_alto_min": TICKETS_ALTO_MIN}
+    with conn.cursor() as cur:
+        cur.execute(
+            "SELECT clave, valor FROM configuracion_sistema WHERE clave IN (%s, %s)",
+            (*defaults.keys(),),
+        )
+        rows = cur.fetchall()
+    valores = dict(defaults)
+    for clave, valor in rows:
+        try:
+            valores[clave] = int(valor)
+        except (TypeError, ValueError):
+            print(f"[PLANILLA] Config '{clave}' invalida ({valor!r}), uso default {defaults[clave]}")
+
+    if valores["tickets_bajo_max"] >= valores["tickets_alto_min"]:
+        print(
+            f"[PLANILLA] Config invalida: tickets_bajo_max ({valores['tickets_bajo_max']}) "
+            f">= tickets_alto_min ({valores['tickets_alto_min']}), uso defaults"
+        )
+        valores = dict(defaults)
+
+    return valores
 
 
 def cargar_fec_alta(conn: pymysql.Connection) -> dict[str, dt.date | None]:
@@ -529,12 +567,19 @@ def escribir_planilla(conn: pymysql.Connection, filas: list[dict]) -> None:
 # ── Main ───────────────────────────────────────────────────────────────────────
 
 def main() -> None:
+    global TICKETS_BAJO_MAX, TICKETS_ALTO_MIN
+
     t0 = time.time()
     conn = db_connect()
     job_id = job_start(conn)
     print(f"[PLANILLA] Job id={job_id} iniciado")
 
     try:
+        config = cargar_configuracion(conn)
+        TICKETS_BAJO_MAX = config["tickets_bajo_max"]
+        TICKETS_ALTO_MIN = config["tickets_alto_min"]
+        print(f"[PLANILLA] Umbrales de tickets: bajo<={TICKETS_BAJO_MAX} alto>={TICKETS_ALTO_MIN}")
+
         filas, skus_omitidos, mes_ref_normal, mes_ref_sin_stock = calcular_filas(conn)
         escribir_planilla(conn, filas)
 

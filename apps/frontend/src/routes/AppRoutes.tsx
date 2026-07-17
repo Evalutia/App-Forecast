@@ -13,6 +13,7 @@ import ResultadosPage from '../features/resultados/pages/ResultadosPage';
 import PlanillaPage from '../features/planilla/pages/PlanillaPage';
 import JobDetailPage from '../features/jobs/pages/JobDetailPage';
 import DashboardPage from '../features/home/pages/DashboardPage';
+import ConfiguracionPage from '../features/configuracion/pages/ConfiguracionPage';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { Toaster } from 'sonner';
 
@@ -41,6 +42,7 @@ export default function AppRoutes() {
               <Route path="/ventas" element={<VentasPage />} />
               <Route path="/jobs" element={<JobsPage />} />
               <Route path="/jobs/:id" element={<JobDetailPage />} />
+              <Route path="/configuracion" element={<ConfiguracionPage />} />
             </Route>
           </Route>
           {/* fallback */}

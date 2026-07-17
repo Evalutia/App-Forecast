@@ -2001,6 +2001,26 @@ Coordinado en vivo con Martín García (MG Soluciones IT) vía WhatsApp, dentro 
 
 **#64 cerrado** (bug real encontrado, corregido, testeado, verificado contra datos reales — el criterio de aceptación original ya no aplicaba tal cual, pero el espíritu de la QA se cumplió con creces).
 
+**Actualización, mismo día — deploy a producción completado.** `docker compose build etl` + `up -d --force-recreate etl` en la VM, seguido de `run_calc_planilla.py` manual contra el catálogo real: `5559 SKUs · 71982 filas · frecuencia: alta=707 media=486 baja=4365` en 668s — casi idéntico a lo validado localmente (707/486/4356). El cliente ya ve los valores corregidos en la Planilla real, no solo en el repo.
+
+---
+
+### `configuracion_sistema` — Issue #67, diseño (sesión 2026-07-17)
+
+**Reencuadre de alcance:** el issue original esperaba una conversación con el cliente antes de construir esto ("evaluar... si en el futuro se pide"). Decisión explícita del usuario: no se le pregunta al cliente — se construye, se le muestra hecho, y se ajusta después si no le sirve. El bloqueo deja de ser una decisión de negocio externa y pasa a ser puro diseño técnico, resuelto en esta sesión de `/grill-me`.
+
+| Decisión | Definición |
+|----------|-----------|
+| **Tabla genérica clave-valor `configuracion_sistema`**, no columnas dedicadas | Extensible sin migrar de nuevo si en el futuro se configuran también `ESTADO_UMBRAL_NORMAL`/`FREQ_ALTA_MIN`/`FREQ_BAJA_MAX` — mismo principio que ya se usó para `catalogo_modelos` (JSON genérico) vs. columnas puntuales. |
+| **Alcance de la UI: solo los 2 umbrales de tickets pedidos** (`tickets_bajo_max`, `tickets_alto_min`) | La tabla soporta más a futuro, pero no se construye UI para umbrales que nadie pidió todavía (`ESTADO_UMBRAL_NORMAL`, `FREQ_ALTA_MIN`/`BAJA_MAX` siguen como constantes Python). |
+| **Validación `bajo < alto` en el backend**, no solo en el frontend | La banda "promedio" (3-4 tickets) desaparece o se invierte si se editan mal — el endpoint rechaza con 422 (mismo patrón `InvalidOperationException` que `UsuarioService`/`VentasService`) si no se cumple, no confía en que el formulario lo prevenga (alguien podría pegarle directo al endpoint). |
+| **Cambios aplican en el próximo cron nocturno, no al instante** | `run_calc_planilla.py` ya recalcula toda la ventana de 13 meses desde cero cada noche (DELETE+INSERT atómico) — no hace falta un botón de "recalcular ahora", el próximo cron simplemente lee el valor nuevo. La UI debe avisar esto explícitamente para que el cliente no espere verlo reflejado al toque en la Planilla. |
+| **`actualizado_por` (FK a `usuarios`), no solo `actualizado_en`** | Es un valor de negocio crítico que afecta lo que ve el cliente — si algo sale raro después de un cambio, poder decir "lo cambió Fulano el martes" vale el costo mínimo de una columna FK más. |
+| **Acceso solo `administrador`**, mismo patrón `RequireAdmin` que `UsersPage`/`VentasPage`/`JobsPage` | Es configuración de sistema, no un dato operativo de solo-lectura que vea `duenoDeEmpresa`. |
+| **Migración siembra la tabla con los valores actuales (2, 5)** | Cero cambio de comportamiento hasta que un admin edite algo activamente — mismo principio que el seed de `grupo_id`/`aplica_modelo_econometrico` en `10-grupos.sql`. Sin esto, la tabla vacía dejaría al ETL sin valor que leer. |
+
+**Próximo paso:** `/implement` directo sobre #67 (arrancó como issue puntual, no un plan sin partir).
+
 ---
 
 ## Issues conocidos / TODOs en código
