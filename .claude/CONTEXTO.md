@@ -1963,6 +1963,23 @@ Retomado tras conseguir acceso real a la cuenta de AWS (bloqueo original desde 2
 
 ---
 
+### Corte mTLS ejecutado en vivo con IT — Issues #51/#52 (sesión 2026-07-17)
+
+Coordinado en vivo con Martín García (MG Soluciones IT) vía WhatsApp, dentro de la ventana ya acordada (viernes 9-12hs).
+
+| Decisión | Definición |
+|----------|-----------|
+| **Setup replicado en Mac**: AWS CLI instalado (instalador oficial `.pkg`, Homebrew no estaba disponible), perfil `evalutia-sync` configurado y verificado (`Account: 597055632942`) | Mismo perfil reusado entre PC Windows, VM y esta Mac (decisión ya tomada). |
+| **Migraciones locales atrasadas, aplicadas antes del sync**: 08 (planilla-frecuencia-quiebre), 09 (factores mensuales), 10 (grupos), 11 (stock_resumen_365), 12 (fix encoding), 13 (elegibilidad econométrico), 14 (ventas cantidad signed), 15 (frecuencia tickets) | El script de sync hace `TRUNCATE` + restore sobre tablas que no existían localmente (`grupos`, `stock_resumen_365`, `articulos_elegibilidad_econometrico`) — habría fallado a mitad de camino. Además `ventas_historicas.cantidad` seguía `UNSIGNED` (migración 14 no aplicada): restaurar notas de crédito reales de producción sin este fix habría corrompido datos por wraparound, mismo bug que ya documentó #82. |
+| **Sync ejecutado**: 5.550 artículos, 4.44M ventas_historicas, 26.6M stock_diario — mismos números que la sesión de Santiago | Corrió ~35 min en background (dump 282M desde S3, restore de 26M+ filas sin batchear). |
+| **3 pasos del corte, todos confirmados en vivo**: (1) rechazo sin certificado, (2) `200 OK` con certificado + WSDL completo, (3) `WS_URL` vuelto a `https://` (commit `399086f`) + rebuild/recreate de `etl` en producción + corrida manual de `run_ofelia.sh` contra datos reales — 3 jobs `exitoso` en `jobs_historial`, sin fallos | Activa juntos `#51` (mTLS), `#71` (elegibilidad SKU) y `#80` (ventas negativas) en el mismo rebuild, tal como estaba planeado. |
+| **No se esperó el cron automático de las 3 AM antes de cerrar** | La corrida manual usó el mismo script (`run_ofelia.sh`) que invoca Ofelia — el pipeline completo (extracción SOAP vía mTLS, merge, predicciones, planilla) quedó probado con datos reales. El riesgo restante (¿dispara Ofelia sola?) es de un tipo distinto y menor al ya validado. |
+| **Hallazgo sin resolver, no es nuestro**: tráfico de un sistema llamado "IntegraMerica" al puerto 81, rechazado tras el corte por falta de certificado | Sin registro en este repo ni conocimiento del usuario — Martín queda con la pregunta, es un tema de coordinación con el cliente/IT, no de ingeniería de este proyecto. |
+
+**#51 y #52 cerrados.**
+
+---
+
 ## Issues conocidos / TODOs en código
 
 | Issue | Ubicación | Descripción |
