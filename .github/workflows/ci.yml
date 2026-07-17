@@ -19,6 +19,8 @@ jobs:
         run: dotnet restore apps/backend/WebApi/WebApi.sln
       - name: Build
         run: dotnet build apps/backend/WebApi/WebApi.sln --configuration Release --no-restore
+      - name: Test
+        run: dotnet test apps/backend/WebApi/WebApi.sln --configuration Release --no-build
 
   frontend:
     name: Frontend (lint + build)

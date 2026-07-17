@@ -8,6 +8,7 @@ COPY ./apps/backend/WebApi/WebApi/WebApi.csproj ./WebApi/
 COPY ./apps/backend/WebApi/DataAccess/DataAccess.csproj ./DataAccess/
 COPY ./apps/backend/WebApi/Models/Models.csproj ./Models/
 COPY ./apps/backend/WebApi/Services/Services.csproj ./Services/
+COPY ./apps/backend/WebApi/Tests/Tests.csproj ./Tests/
 
 # 2) Restore sobre la solución (trae NuGet de EF Core / Pomelo, etc.)
 RUN dotnet restore ./WebApi.sln
