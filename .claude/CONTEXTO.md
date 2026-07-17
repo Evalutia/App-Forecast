@@ -2021,6 +2021,58 @@ Coordinado en vivo con Martín García (MG Soluciones IT) vía WhatsApp, dentro 
 
 **Próximo paso:** `/implement` directo sobre #67 (arrancó como issue puntual, no un plan sin partir).
 
+**Actualización, mismo día — implementado, revisado y cerrado.** 4 capas (SQL/ETL/backend/frontend) completas. `/code-review` (8 ángulos en paralelo) encontró 5 findings reales, todos corregidos antes de commitear: el upsert de los dos umbrales no era atómico (dos `SaveChanges()` separados dejaban una ventana donde un lector concurrente —otro admin, o la ETL— podía ver un par `bajo`/`alto` inválido a medio escribir; se unificó en un solo `UpsertMuchas`/`SaveChanges`), la ETL no validaba el invariante `bajo < alto` como defensa adicional (se agregó, mismo tipo de invariante silenciosa que causó el bug de #64), un método de repositorio sin ningún caller (`GetPorClave`, eliminado), un test frágil con `fetchone()` sin chequeo de `None`, y un typo de status code (400→422) en esta misma documentación. Verificado end-to-end con Playwright real (login → guardar → reload → persistencia confirmada) y curl contra GET/PUT/validación/auditoría. **#67 cerrado.**
+
+---
+
+### Tests.csproj — Issue #91 (sesión 2026-07-17)
+
+Triage encontró `net10.0` en `Tests.csproj` (vs. `net8.0` del resto del backend), sin ningún test real dentro, no incluido en `WebApi.sln`. Investigado antes de preguntar: el archivo apareció en un commit sobre gráficos de frontend (`7e2fb3e`), sin relación con testing — confirmado con el usuario como scaffold accidental, no migración intencional.
+
+Delegado a un subagente en worktree aislado (para no pisar el trabajo simultáneo de #72 en la rama principal): alineado a `net8.0`, sumado al `.sln`, 12 tests reales (`ConfiguracionService`, `AuthService`) cubriendo casos de éxito y validación, `dotnet test` agregado a CI. El propio subagente encontró y corrigió un bug real en el `Dockerfile` del backend (el `.sln` ahora referencia `Tests.csproj`, pero el `COPY` por capas no lo traía antes del `restore` — hubiera roto el build). Revisado independientemente (build limpio, tests leídos línea por línea) antes de mergear. **#91 cerrado.**
+
+---
+
+### Extender evaluación holdout a todo el catálogo — Issue #72, ejecución real (sesión 2026-07-17)
+
+El diseño de la sesión anterior (2026-07-13, ver arriba) seguía vigente casi entero, con una excepción real: decía "correr contra producción, vía VM" porque en ese momento la base local solo tenía el grupo 201 (#38 bloqueado). Ese bloqueo se resolvió *ese mismo día* (sync completo vía S3, ver sesión de mTLS más abajo) — se re-grilló ese punto puntual antes de ejecutar.
+
+| Decisión (re-grilling puntual) | Definición |
+|----------|-----------|
+| **Local en vez de VM de producción** | La base local ya tiene los 5.550 SKUs reales (sync de hoy) — mismos datos, cero riesgo sobre la base que sirve al cliente. Se aplica a producción después, ya validado. |
+| **El tiempo medido localmente no es insumo válido para #74** | Hardware distinto a la VM del cron real. Se mide igual como referencia de orden de magnitud (detecta problemas graves temprano), pero #74 tiene que medir de nuevo en la VM antes de cerrar. |
+| **Piloto estratificado antes de la corrida completa** | Mismo patrón que #87, pero corrigiendo su sesgo conocido: el piloto de #87 sobre-representaba SKUs de historia larga (cherry-picking involuntario) y sobre-estimó el tiempo real. Este piloto (30 SKUs) se armó con muestreo aleatorio estratificado por bucket de meses de historia. |
+| **Sin filtro de historia mínima (24 meses) en #72** | Ese piso es un criterio de *elegibilidad* (#73), no de *medición* (#72) — la separación "medir vs. decidir" ya está en el diseño original. Filtrar ahora le sacaría datos a #76, que explícitamente audita el caso borde "SKUs con menos de 12 meses de historia". |
+| **`EVAL_PERSIST` + `EVAL_PERSIST_CATALOG` juntos** | Mismo costo de cómputo (el walk-forward ya se paga igual); persistir también en `catalogo_modelos` le da a #88 el catálogo completo real como insumo, no solo el grupo 201 de #87. |
+
+**Bug real encontrado antes de comprometerse a una corrida de horas:** el código de `eval_walkforward.py` (escrito en la sesión de #86) no persistía incrementalmente pese a que el diseño original de #72 lo exigía explícitamente ("commits por SKU/lote... reanudable"). En realidad acumulaba todo en memoria y escribía en un solo batch al final del loop completo — confirmado empíricamente (0 filas nuevas en `catalogo_modelos` tras ~10 min de corrida real). Con Docker Desktop ya inestable esa misma noche (se cayó una vez durante la sesión), una corrida de varias horas sin persistencia incremental real arriesgaba perder el 100% del progreso ante cualquier corte.
+
+**Fix aplicado** (`services/python-worker/ml/eval_walkforward.py`): el cálculo del "ganador" por SKU (antes hecho una sola vez al final, sobre el DataFrame completo vía `groupby`) se movió a ocurrir apenas termina el loop interno de los 3 modelos de cada SKU — matemáticamente idéntico (el ganador de un SKU no depende de ningún otro SKU), pero permite flushear a la DB cada `EVAL_PERSIST_BATCH_SIZE` SKUs (default 100) en vez de al final. Verificado con un test de 5 SKUs y batch size 2: los checkpoints de progreso y los conteos de filas persistidas coinciden exactamente con lo esperado.
+
+**Corrida completa lanzada en background** (`EVAL_VERSION=catalogo-completo-72`) sobre las ~5.550 SKUs del catálogo, con persistencia incremental real. Pendiente: resultado final, análisis, y decisión de deploy a producción — se documenta en esta misma sección cuando termine.
+
+---
+
+### Criterio de selección de modelo por SKU en `predict.py` — Issue #88 (sesión 2026-07-17)
+
+**Reencuadre de proceso, confirmado con el usuario:** el veredicto textual del propio script de #87 sugiere "documentar y decidir con el cliente". Se decidió igual resolverlo internamente, mismo patrón que #64/#67 — es una decisión técnica sobre calidad de generalización de modelos, con datos concretos ya generados, no una preferencia de producto donde el cliente tenga un criterio propio que aportar (mismo tipo de llamada que #70 ya tomó al fijar `r2_test ≥ 0` sin threshold arbitrario).
+
+**Datos usados** (agregados ya documentados de la sesión de #87 — el detalle crudo por SKU no está en la base local, `catalogo_modelos` no forma parte del sync de #38):
+
+| Modelo | SKUs evaluados | `median_r2_test` | Estable/Volátil/1-fold |
+|--------|-----------------|-------------------|--------------------------|
+| PROPHET | 53 | 0.3234 | 23/24/6 (45% volátil) |
+| RF | 85 | 0.0000 | 68/10/7 |
+| XGB | 85 | 0.0000 | 63/15/7 |
+
+| Decisión | Definición |
+|----------|-----------|
+| **Se confirma la hipótesis del issue: mix por SKU se mantiene, cambia el criterio** | De "menor RMSE in-sample" (ya demostrado propenso a sobreajuste — motivo original de #68/#78) a "mejor `r2_test` walk-forward real" — misma métrica que #70 ya usa para elegibilidad, una sola fuente de verdad para "qué tan bien generaliza este modelo". No se abandona el mix: ya viene naturalmente segmentado por disponibilidad de datos (Prophet solo es candidato cuando hay ≥8 trimestres de historia). |
+| **Volatilidad entre folds: informativa, no descalifica al ganador** | Aunque el 45% de los casos donde PROPHET gana son "volátiles", no se agrega una regla de desempate por estabilidad — mismo principio de transparencia que #70 (se persiste `estable` junto con `r2_test` para que la UI lo muestre, no se oculta detrás de un flag). Evita una regla adicional cuya interacción con `r2_test` habría que validar aparte, y es consistente: un caso de 1-solo-fold (aún menos confianza que "volátil") tampoco descalifica, por la misma lógica. |
+| **Mecánica de selección** | Reemplaza `rmse_train_median` por `r2_test_median` como criterio de `idxmin`/`idxmax` por SKU en `predict.py` — traducción mecánica directa, sin cambiar la forma del código. Implementación queda para #89. |
+
+**#88 cerrado**, listo para implementar en #89.
+
 ---
 
 ## Issues conocidos / TODOs en código

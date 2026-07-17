@@ -44,6 +44,13 @@ PERSIST_CATALOG = os.getenv("EVAL_PERSIST_CATALOG", "").strip().lower() in ("1",
 # filtrar corridas de catalogo_modelos por version de codigo especifica.
 EVAL_VERSION = os.getenv("EVAL_VERSION", "eval-catalogo")
 
+# Issue #72 (corrida real sobre el catalogo completo): sin esto, PERSIST/
+# PERSIST_CATALOG escriben todo en un solo batch al final del loop -- una
+# corrida de horas sobre ~5500 SKUs pierde el 100% del progreso si el
+# proceso se corta a mitad de camino. Se flushea cada N SKUs procesados en
+# vez de al final.
+PERSIST_BATCH_SIZE = int(os.getenv("EVAL_PERSIST_BATCH_SIZE", "100"))
+
 
 def _load_meses_historia(engine, only_skus) -> dict:
     """
@@ -171,9 +178,30 @@ def main() -> None:
         engine, table="ventas_historicas", freq=FREQ, only_skus=ONLY_SKUS, top_n=None
     )
 
-    rows = []  # una fila por (sku, modelo)
-    catalog_rows = []  # issue #86: una fila por (sku, modelo) para catalogo_modelos
+    meses_historia_map = _load_meses_historia(engine, ONLY_SKUS) if PERSIST else {}
+
+    rows = []  # una fila por (sku, modelo) -- se mantiene completo en memoria para el resumen final
+    catalog_rows = []  # issue #86: idem, para el resumen/no se re-lee de DB
+    catalog_pending = []  # buffer que se vacia en cada flush
+    elegibilidad_pending = []  # buffer que se vacia en cada flush
+    n_skus_procesados = 0
+    n_cat_total = 0
+    n_elegibilidad_total = 0
+
+    def _flush():
+        nonlocal catalog_pending, elegibilidad_pending, n_cat_total, n_elegibilidad_total
+        if PERSIST_CATALOG and catalog_pending:
+            n_cat_total += insert_catalogo_modelos(engine, catalog_pending)
+            catalog_pending = []
+        if PERSIST and elegibilidad_pending:
+            n_elegibilidad_total += upsert_elegibilidad_metrics(engine, elegibilidad_pending)
+            elegibilidad_pending = []
+        if PERSIST_CATALOG or PERSIST:
+            print(f"[PROGRESS] {n_skus_procesados}/{len(series_by_sku)} SKUs -- "
+                  f"catalogo_modelos={n_cat_total} elegibilidad={n_elegibilidad_total}")
+
     for sku, s in series_by_sku.items():
+        sku_results = []  # resultados de este SKU (hasta 3, uno por modelo)
         for fit_wf, kwargs in (
             (fit_rf_with_walkforward, {}),
             (fit_xgb_with_walkforward, {}),
@@ -185,30 +213,55 @@ def main() -> None:
                 continue
             if res is None:
                 continue
-            rows.append(
-                {
-                    "sku": sku,
-                    "model": res.name,
-                    "n_folds": res.n_folds,
-                    "r2_test_median": res.r2_test_median,
-                    "r2_test_iqr": res.r2_test_iqr,
-                    "rmse_train_median": res.rmse_train_median,
-                    "mae_test_median": res.mae_test_median,
-                    "n_train_rows_mean": res.n_train_rows_mean,
-                    "n_train_rows_min": res.n_train_rows_min,
-                    "stable": res.stable,
-                }
-            )
+            row = {
+                "sku": sku,
+                "model": res.name,
+                "n_folds": res.n_folds,
+                "r2_test_median": res.r2_test_median,
+                "r2_test_iqr": res.r2_test_iqr,
+                "rmse_train_median": res.rmse_train_median,
+                "mae_test_median": res.mae_test_median,
+                "n_train_rows_mean": res.n_train_rows_mean,
+                "n_train_rows_min": res.n_train_rows_min,
+                "stable": res.stable,
+            }
+            rows.append(row)
+            sku_results.append(row)
 
             if PERSIST_CATALOG:
                 try:
-                    catalog_rows.append(_build_catalog_row(sku, s, res, version))
+                    catalog_row = _build_catalog_row(sku, s, res, version)
+                    catalog_rows.append(catalog_row)
+                    catalog_pending.append(catalog_row)
                 except Exception as e:
                     print(f"[WARN] catalogo_modelos: no se pudo construir la fila para sku={sku} modelo={res.name}: {e}")
 
-    if PERSIST_CATALOG and catalog_rows:
-        n_cat = insert_catalogo_modelos(engine, catalog_rows)
-        print(f"\n[PERSIST_CATALOG] {n_cat} filas escritas en catalogo_modelos (version={version}).")
+        if PERSIST and sku_results:
+            valid_sku = [r for r in sku_results if r["rmse_train_median"] is not None and np.isfinite(r["rmse_train_median"])]
+            if valid_sku:
+                winner = min(valid_sku, key=lambda r: r["rmse_train_median"])
+                r2_test = winner["r2_test_median"]
+                elegibilidad_pending.append(
+                    {
+                        "sku": sku,
+                        "r2_test": float(r2_test) if pd.notna(r2_test) and np.isfinite(r2_test) else None,
+                        "estable": (bool(winner["stable"]) if winner["stable"] is not None else None),
+                        "n_folds": int(winner["n_folds"]),
+                        "meses_historia": meses_historia_map.get(sku),
+                    }
+                )
+
+        n_skus_procesados += 1
+        if n_skus_procesados % PERSIST_BATCH_SIZE == 0:
+            _flush()
+
+    _flush()  # cola final, menor a PERSIST_BATCH_SIZE
+
+    if PERSIST_CATALOG and n_cat_total:
+        print(f"\n[PERSIST_CATALOG] {n_cat_total} filas escritas en catalogo_modelos (version={version}).")
+    if PERSIST and n_elegibilidad_total:
+        print(f"\n[PERSIST] {n_elegibilidad_total} filas escritas en articulos_elegibilidad_econometrico "
+              f"(r2_test/estable/n_folds/meses_historia; 'elegible' sin tocar, ver #73).")
 
     df = pd.DataFrame(rows)
     if df.empty:
@@ -272,23 +325,6 @@ def main() -> None:
     else:
         veredicto = "ZONA GRIS - no es claramente aceptable ni claramente roto. Documentar y decidir con el cliente."
     print(f"\nVeredicto (walk-forward, reemplaza el de #69, issue #78): {veredicto}")
-
-    if PERSIST:
-        meses_historia_map = _load_meses_historia(engine, ONLY_SKUS)
-        rows_to_persist = []
-        for _, row in winners.iterrows():
-            r2_test = row["r2_test_median"]
-            rows_to_persist.append(
-                {
-                    "sku": row["sku"],
-                    "r2_test": float(r2_test) if pd.notna(r2_test) and np.isfinite(r2_test) else None,
-                    "estable": (bool(row["stable"]) if row["stable"] is not None else None),
-                    "n_folds": int(row["n_folds"]),
-                    "meses_historia": meses_historia_map.get(row["sku"]),
-                }
-            )
-        n_persisted = upsert_elegibilidad_metrics(engine, rows_to_persist)
-        print(f"\n[PERSIST] {n_persisted} filas escritas en articulos_elegibilidad_econometrico (r2_test/estable/n_folds/meses_historia; 'elegible' sin tocar, ver #73).")
 
 
 if __name__ == "__main__":
