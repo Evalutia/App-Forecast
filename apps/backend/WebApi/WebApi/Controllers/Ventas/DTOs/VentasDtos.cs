@@ -22,9 +22,9 @@ namespace WebApi.Controllers.Ventas.DTOs
   {
     public string Periodo { get; init; } = string.Empty;
     public string Sku { get; init; } = string.Empty;
-    public uint TotalCantidad { get; init; }
+    public long TotalCantidad { get; init; }
 
-    public VentaAgregadaOutDto(string periodo, string sku, uint totalCantidad)
+    public VentaAgregadaOutDto(string periodo, string sku, long totalCantidad)
     {
       Periodo = periodo;
       Sku = sku;

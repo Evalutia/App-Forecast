@@ -135,36 +135,46 @@
 
 /* ---------- Filtros (centrado de títulos + campos) ---------- */
 
-/* Grid base: mantiene 4 columnas, centra cada columna */
-.filters-grid{
+/* ---- Centrar filtros de ventas (idéntico a predicciones-filtros) ---- */
+.ventas-filtros .filters-grid {
   display: grid;
-  grid-template-columns: 1fr 1fr 2fr 1fr;
-  gap: .9rem;
-  align-items: start;          /* evita que el input empuje el label */
-  justify-items: center;       /* centra cada columna dentro del grid */
+  grid-template-columns: repeat(3, 1fr);
+  gap: 1.25rem;
+  justify-content: center;
+  padding: 0 0.5rem;
+  max-width: 1050px;
+  margin: 0 auto;
 }
 
-/* Tu “estirado” especial del grid dentro de la tarjeta */
-.filters-card .filters-grid{
-  width: 1510px;
-  width: 125.5%;
-  margin-left: auto;
-  margin-right: auto;
+.ventas-filtros .form-row {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
 }
 
-/* Cada bloque (label + control) en columna y centrado */
+.ventas-filtros .input {
+  width: 100%;
+  text-align: center;
+  padding: 0.8rem 1rem;
+  font-size: 0.95rem;
+}
+
+.ventas-filtros .filters-actions {
+  justify-content: center;
+}
+
+/* Cada bloque (label + control) en columna */
 .form-row{
   display: flex;
   flex-direction: column;
-  align-items: center;         /* centra el label respecto al control */
   width: 100%;
 }
 
-/* Label centrado */
+/* Label */
 .label{
   display: block;
   width: 100%;
-  text-align: center;          /* <<< centrado del texto */
   font-size: .8rem;
   font-weight: 800;
   text-transform: uppercase;
@@ -180,9 +190,6 @@
 }
 
 /* ---------- Responsivo ---------- */
-@media (max-width: 1200px){
-  .filters-grid{ grid-template-columns: 1fr 1fr 1fr 1fr; }
-}
 @media (max-width: 900px){
   .filters-grid{ grid-template-columns: 1fr 1fr; }
 }

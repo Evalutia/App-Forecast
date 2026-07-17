@@ -7,18 +7,18 @@ namespace WebApi.Models
     public DateOnly? FechaUltimaObservacion { get; set; }
     public int CantidadObservaciones { get; set; }
 
-    public ulong MinimoVentasTrimestral { get; set; }
+    public long MinimoVentasTrimestral { get; set; }
     public string? TrimestreMinimoVentas { get; set; }
 
-    public ulong MaximoVentasTrimestral { get; set; }
+    public long MaximoVentasTrimestral { get; set; }
     public string? TrimestreMaximoVentas { get; set; }
 
     public double PromedioVentasTrimestral { get; set; }
 
-    public ulong VentasUltimoTrimestre { get; set; }
+    public long VentasUltimoTrimestre { get; set; }
     public string? UltimoTrimestre { get; set; }
 
-    public ulong VentasUltimoAnioCalendario { get; set; }
+    public long VentasUltimoAnioCalendario { get; set; }
     public double? CrecimientoVentasUltimoAnio { get; set; }
     public double? CrecimientoVentasUltimoTrimestreVsMismoTrimestreAnioAnterior { get; set; }
 

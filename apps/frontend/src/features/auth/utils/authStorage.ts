@@ -22,6 +22,7 @@ export function clearAuth() {
   localStorage.removeItem(`${KEY}.user`);
 }
 
+// eslint-disable-next-line @typescript-eslint/no-unused-vars -- stub: parámetro reservado para la futura validación de expiración
 export function isTokenExpired(_token?: string | null): boolean {
   // Si después querés, decodificamos y validamos exp; por ahora simple.
   return false;

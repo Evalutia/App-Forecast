@@ -5,7 +5,16 @@ function mapLoginBody(payload: LoginRequest) {
   return { correo: payload.email, contrasena: payload.password };
 }
 
-function fromRawLogin(raw: any): LoginResponse {
+interface RawLoginResponse {
+  token?: string;
+  usuario?: {
+    id?: number | string | null;
+    correo?: string | null;
+    rol?: string | null;
+  };
+}
+
+function fromRawLogin(raw: RawLoginResponse): LoginResponse {
   // backend: { token, usuario: { id, correo, rol } }
   const userRaw = raw?.usuario ?? {};
   const user = {

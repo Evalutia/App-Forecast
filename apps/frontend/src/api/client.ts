@@ -2,10 +2,18 @@ import axios from 'axios';
 import { toast } from 'sonner';
 import { clearAuth } from '../features/auth/utils/authStorage';
 
+const resolvedBase = (import.meta.env.VITE_API_BASE_URL && String(import.meta.env.VITE_API_BASE_URL).trim()) || 'http://localhost:8080';
+
 const api = axios.create({
-  baseURL: import.meta.env.VITE_API_BASE_URL?.replace(/\/+$/, '') ?? 'http://localhost:8081',
+  baseURL: resolvedBase.replace(/\/+$/, ''),
   withCredentials: false,
 });
+
+/** Forma del error una vez que pasa por el interceptor de abajo (status/mensaje ya normalizados). */
+export interface ApiError extends Error {
+  status?: number;
+  normalizedMessage?: string;
+}
 
 api.interceptors.request.use((config) => {
   const token = localStorage.getItem('auth.token');
@@ -51,7 +59,7 @@ api.interceptors.response.use(
     const errs = data?.errores || data?.errors;
     if (errs && typeof errs === 'object') {
       const detalles = Object.entries(errs)
-        .flatMap(([k, arr]) => (Array.isArray(arr) ? arr : [arr]).map((x: any) => `${k}: ${String(x)}`))
+        .flatMap(([k, arr]) => (Array.isArray(arr) ? arr : [arr]).map((x: unknown) => `${k}: ${String(x)}`))
         .join(' · ');
       if (detalles) msg = `${msg}\n${detalles}`;
     }
@@ -64,10 +72,9 @@ api.interceptors.response.use(
       lastAt = now;
     }
 
-    // manejar 401 (opcional): limpiar sesión y mandar a /login
     if (status === 401) {
       clearAuth();
-      // si querés: window.location.assign('/login');
+      window.location.assign('/login');
     }
 
     error.status = status;

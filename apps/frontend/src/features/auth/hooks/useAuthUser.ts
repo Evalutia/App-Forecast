@@ -2,18 +2,22 @@ import { useMemo } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import type { User } from '../types/auth';
 import { me } from '../../../api/auth';
+import type { ApiError } from '../../../api/client';
 import { getUser, getToken, clearAuth } from '../utils/authStorage';
+
+/** localStorage puede tener datos guardados con el shape crudo del backend (correo/rol) de antes del refactor. */
+type StoredUser = Partial<User> & { correo?: string | null; rol?: string | null };
 
 export function useAuthUser(): { user: User | null; isLoading: boolean; isError: boolean } {
   const token = getToken();
 
   const localUser = useMemo<User | null>(() => {
-    const raw = getUser();
+    const raw = getUser() as StoredUser | null;
     if (!raw) return null;
     return {
-      id: (raw as any).id ?? null,
-      email: (raw as any).email ?? (raw as any).correo ?? null,
-      role: (raw as any).role ?? (raw as any).rol ?? null,
+      id: raw.id ?? null,
+      email: raw.email ?? raw.correo ?? null,
+      role: raw.role ?? raw.rol ?? null,
     };
   }, []);
 
@@ -25,7 +29,7 @@ export function useAuthUser(): { user: User | null; isLoading: boolean; isError:
     retry: false,
   });
 
-  if (q.isError && (q.error as any)?.status === 401) {
+  if (q.isError && (q.error as ApiError)?.status === 401) {
     clearAuth();
   }
 

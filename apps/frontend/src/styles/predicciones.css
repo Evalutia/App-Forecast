@@ -90,6 +90,24 @@
   gap: 1rem;
 }
 
+/* === Grid de gráficos de análisis (mismo ancho que section.card / table-card) === */
+.predicciones-container .charts-grid{
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1.25rem;
+  width: 100% !important;
+  align-self: stretch !important;
+  box-sizing: border-box;
+  align-items: stretch;
+  margin-bottom: 1.25rem;
+}
+.predicciones-container .charts-grid > .card{
+  min-width: 0;
+  max-width: none;
+  width: 100%;
+  box-sizing: border-box;
+}
+
 /* === MATCH EXACTO con Jobs/Ventas (clave para el ancho de la tabla) === */
 .predicciones-container section.card{
   width: 100%;
@@ -209,6 +227,12 @@
   padding: 0 0.5rem;
   max-width: 1050px;
   margin: 0 auto;
+}
+
+/* Variante para un solo filtro: centrado con ancho acotado */
+.predicciones-filtros .filters-grid--single {
+  grid-template-columns: 1fr;
+  max-width: 400px;
 }
 
 .predicciones-filtros .form-row {
@@ -449,16 +473,7 @@
   border-bottom: 1px dashed rgba(16,185,129,.25);
 }
 
-/* Grilla de gráficos: mismo alto para ambas tarjetas */
-.charts-grid{
-  display: grid;
-  grid-template-columns: 1fr;
-  gap: 1rem;
-  align-items: stretch; /* ← garantiza misma altura */
-}
-@media (min-width: 768px){
-  .charts-grid{ grid-template-columns: 1fr 1fr; }
-}
+/* (charts-grid ya definido arriba en .predicciones-container .charts-grid) */
 
 /* Tarjeta/slot para cada gráfico: alto fijo y layout columna */
 .chart-card{
@@ -626,6 +641,38 @@
   font-weight: 700;
   text-align: center;
   font-size: 1.1rem;
+}
+
+/* =================== Scroll to top button =================== */
+.scroll-to-top-btn {
+  position: fixed;
+  bottom: 2rem;
+  right: 2rem;
+  z-index: 999;
+  width: 3rem;
+  height: 3rem;
+  border-radius: 999px;
+  border: none;
+  background: linear-gradient(135deg, #059669, #065f46);
+  color: #fff;
+  font-size: 1.4rem;
+  font-weight: 700;
+  line-height: 1;
+  cursor: pointer;
+  box-shadow: 0 4px 14px rgba(2,44,34,.35);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: opacity .2s, transform .2s;
+}
+.scroll-to-top-btn:hover {
+  opacity: .9;
+  transform: translateY(-3px);
+  box-shadow: 0 8px 20px rgba(2,44,34,.45);
+}
+.scroll-to-top-btn:active {
+  transform: translateY(0);
+  opacity: 1;
 }
 
 .table tbody tr:hover td.ranking-column,

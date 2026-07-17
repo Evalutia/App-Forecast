@@ -22,6 +22,7 @@ const buildQuery = (q: VentasQuery = {}) => {
 export const fetchVentasDetalle = async (
   query: VentasQuery
 ): Promise<VentasDetalleResponse> => {
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars -- se descarta "agregado"; el detalle no lo acepta como filtro
   const { agregado, ...rest } = query || {};
   const params = buildQuery(rest);
 

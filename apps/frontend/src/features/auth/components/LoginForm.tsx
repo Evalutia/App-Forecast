@@ -7,7 +7,7 @@ import { useNavigate } from 'react-router-dom';
 import { toast } from 'sonner';
 
 const schema = z.object({
-  email: z.string().email('Correo inválido'),
+  email:    z.string().email('Correo inválido'),
   password: z.string().min(8, 'Mínimo 8 caracteres'),
 });
 type FormValues = z.infer<typeof schema>;
@@ -24,45 +24,39 @@ export default function LoginForm() {
       await mutateAsync(values as LoginRequest);
       toast.success('Sesión iniciada');
       navigate('/');
-    } catch (err: any) {
-      toast.error(err?.normalizedMessage ?? 'No se pudo iniciar sesión');
+    } catch (err: unknown) {
+      const msg = (err as { normalizedMessage?: string })?.normalizedMessage;
+      toast.error(msg ?? 'No se pudo iniciar sesión');
     }
   };
 
   return (
-    <div className="card">
-      <div className="card-header">
-        <h2 className="card-title">Inicia sesión</h2>
-        <p className="card-subtitle">Accede con tus credenciales corporativas.</p>
+    <form onSubmit={handleSubmit(onSubmit)}>
+      <div className="login-form-group">
+        <label className="login-label">Correo</label>
+        <input
+          type="email"
+          className="login-input"
+          placeholder="tucorreo@dominio.com"
+          {...register('email')}
+        />
+        {errors.email && <p className="login-error">{errors.email.message}</p>}
       </div>
 
-      <form onSubmit={handleSubmit(onSubmit)}>
-        <div className="form-group">
-          <label className="label">Correo</label>
-          <input
-            type="email"
-            className="input"
-            placeholder="tucorreo@dominio.com"
-            {...register('email')}
-          />
-          {errors.email && <p className="error">{errors.email.message}</p>}
-        </div>
+      <div className="login-form-group">
+        <label className="login-label">Contraseña</label>
+        <input
+          type="password"
+          className="login-input"
+          placeholder="••••••••"
+          {...register('password')}
+        />
+        {errors.password && <p className="login-error">{errors.password.message}</p>}
+      </div>
 
-        <div className="form-group">
-          <label className="label">Contraseña</label>
-          <input
-            type="password"
-            className="input"
-            placeholder="••••••••"
-            {...register('password')}
-          />
-          {errors.password && <p className="error">{errors.password.message}</p>}
-        </div>
-
-        <button type="submit" disabled={isPending} className="button">
-          {isPending ? 'Ingresando…' : 'Ingresar'}
-        </button>
-      </form>
-    </div>
+      <button type="submit" disabled={isPending} className="login-btn">
+        {isPending ? 'Ingresando…' : 'Ingresar'}
+      </button>
+    </form>
   );
 }

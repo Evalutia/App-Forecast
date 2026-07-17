@@ -288,9 +288,13 @@ def main() -> None:
                         continue
                     train = train_full.iloc[:-1].copy()
                     if args.resample_rule.upper().startswith("Q"):
-                        last_sale = train_full[train_full > 0].last_valid_index()
+                        # Issue #81: sin filtro de signo -- si el ultimo periodo real es
+                        # neto negativo (nota de credito), igual es el punto de corte
+                        # correcto. Filtrar por > 0 saltaba hacia atras al ultimo periodo
+                        # positivo y corria mal la ventana de pronostico.
+                        last_sale = train_full.last_valid_index()
                         if last_sale is None:
-                            warnings_list.append(f"SKU {sku} omitido: sin ventas efectivas para calcular inicio trimestral")
+                            warnings_list.append(f"SKU {sku} omitido: sin historia real para calcular inicio trimestral")
                             continue
                         day_after = last_sale + pd.Timedelta(days=1)
                         fidx_start = day_after.to_period("Q").to_timestamp()
@@ -310,9 +314,13 @@ def main() -> None:
                     # entrenamos con la serie completa y predecimos a partir del periodo siguiente al último observado
                     train = train_full.copy()
                     if args.resample_rule.upper().startswith("Q"):
-                        last_sale = train_full[train_full > 0].last_valid_index()
+                        # Issue #81: sin filtro de signo -- si el ultimo periodo real es
+                        # neto negativo (nota de credito), igual es el punto de corte
+                        # correcto. Filtrar por > 0 saltaba hacia atras al ultimo periodo
+                        # positivo y corria mal la ventana de pronostico.
+                        last_sale = train_full.last_valid_index()
                         if last_sale is None:
-                            warnings_list.append(f"SKU {sku} omitido: sin ventas efectivas para calcular inicio trimestral")
+                            warnings_list.append(f"SKU {sku} omitido: sin historia real para calcular inicio trimestral")
                             continue
                         day_after = last_sale + pd.Timedelta(days=1)
                         fidx_start = day_after.to_period("Q").to_timestamp()

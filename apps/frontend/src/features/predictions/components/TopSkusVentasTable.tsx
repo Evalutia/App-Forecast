@@ -63,7 +63,7 @@ export default function TopSkusVentasTable({ className, take = 20 }: Props) {
                   <tr className="total-row">
                     <td colSpan={5} className="total-cell">
                       <div className="total-content">
-                        <span className="total-label">Cantidad total de productos vendidos los últimos 12 meses:</span>
+                        <span className="total-label">Cantidad total de unidades vendidas los últimos 12 meses:</span>
                         <span className="total-number">{formatNumber((data ?? []).find(r => r.sku === 'TOTAL')?.ventasTotales || 0)}</span>
                       </div>
                     </td>

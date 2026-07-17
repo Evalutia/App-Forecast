@@ -4,8 +4,6 @@ import { useSearchParams } from 'react-router-dom';
 type Props = {
   onChange?: (filtros: {
     sku?: string;
-    desde?: string;
-    hasta?: string;
   }) => void;
   className?: string;
 };
@@ -21,26 +19,20 @@ export default function PrediccionesFilters({ onChange }: Props) {
   const initial = useMemo(
     () => ({
       sku: getParam(sp, 'sku') ?? '',
-      desde: getParam(sp, 'desde') ?? '',
-      hasta: getParam(sp, 'hasta') ?? '',
     }),
     [sp]
   );
 
   const [sku, setSku] = useState(initial.sku);
-  const [desde, setDesde] = useState(initial.desde);
-  const [hasta, setHasta] = useState(initial.hasta);
 
   useEffect(() => {
     const t = setTimeout(() => {
       onChange?.({
         sku: sku || undefined,
-        desde: desde || undefined,
-        hasta: hasta || undefined,
       });
     }, 200);
     return () => clearTimeout(t);
-  }, [sku, desde, hasta, onChange]);
+  }, [sku, onChange]);
 
   const applyToUrl = useCallback(() => {
     const next = new URLSearchParams(sp);
@@ -49,16 +41,14 @@ export default function PrediccionesFilters({ onChange }: Props) {
       else next.delete(k);
     };
     setOrDel('sku', sku);
-    setOrDel('desde', desde);
-    setOrDel('hasta', hasta);
+    next.delete('desde');
+    next.delete('hasta');
     next.set('page', '1');
     setSp(next, { replace: true });
-  }, [sp, setSp, sku, desde, hasta]);
+  }, [sp, setSp, sku]);
 
   const reset = useCallback(() => {
     setSku('');
-    setDesde('');
-    setHasta('');
     const next = new URLSearchParams(sp);
     ['sku', 'desde', 'hasta', 'page'].forEach((k) => next.delete(k));
     next.set('page', '1');
@@ -67,8 +57,8 @@ export default function PrediccionesFilters({ onChange }: Props) {
 
   return (
     <section className="card filters-card predicciones-filtros">
-      {/* === grilla idéntica a Jobs === */}
-      <div className="filters-grid">
+      {/* === grilla centrada (un solo filtro) === */}
+      <div className="filters-grid filters-grid--single">
         <div className="form-row">
           <label className="label">SKU</label>
           <input
@@ -78,29 +68,9 @@ export default function PrediccionesFilters({ onChange }: Props) {
             placeholder="p.ej. I01497"
           />
         </div>
-
-        <div className="form-row">
-          <label className="label">Desde</label>
-          <input
-            type="date"
-            className="input"
-            value={desde}
-            onChange={(e) => setDesde(e.target.value)}
-          />
-        </div>
-
-        <div className="form-row">
-          <label className="label">Hasta</label>
-          <input
-            type="date"
-            className="input"
-            value={hasta}
-            onChange={(e) => setHasta(e.target.value)}
-          />
-        </div>
       </div>
 
-      {/* === acciones abajo, exacto a Jobs === */}
+      {/* === acciones abajo === */}
       <div className="filters-actions">
         <button type="button" className="button" onClick={applyToUrl}>
           Aplicar filtros

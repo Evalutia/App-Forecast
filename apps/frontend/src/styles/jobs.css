@@ -62,6 +62,96 @@
 }
 .jobs-container section.card{ width:100%; max-width:var(--content-max); margin:0 auto; }
 
+/* ---- Filtros de artículos (SKU + Familia + Género en fila) ---- */
+.articulos-filtros .filters-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 1.25rem;
+  padding: 0 0.5rem;
+}
+
+.articulos-filtros .form-row {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+}
+
+.articulos-filtros .input {
+  width: 100%;
+  text-align: center;
+}
+
+.articulos-filtros .input {
+  width: 100%;
+  text-align: center;
+  padding: 0.8rem 1rem;
+  font-size: 0.95rem;
+}
+
+.articulos-filtros .filters-actions {
+  justify-content: center;
+}
+
+/* ---- Filtros de resultados (SKU + Ordenar por en fila) ---- */
+.resultados-filtros .filters-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1.25rem;
+  padding: 0 0.5rem;
+  max-width: 700px;
+  margin: 0 auto;
+}
+
+.resultados-filtros .form-row {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+}
+
+.resultados-filtros .input,
+.resultados-filtros select.input {
+  width: 100%;
+  text-align: center;
+  padding: 0.8rem 1rem;
+  font-size: 0.95rem;
+}
+
+.resultados-filtros .filters-actions {
+  justify-content: center;
+}
+
+/* ---- Centrar filtros de jobs (idéntico a predicciones-filtros) ---- */
+.jobs-filtros .filters-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 1.25rem;
+  justify-content: center;
+  padding: 0 0.5rem;
+  max-width: 1050px;
+  margin: 0 auto;
+}
+
+.jobs-filtros .form-row {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+}
+
+.jobs-filtros .input,
+.jobs-filtros .select {
+  width: 100%;
+  text-align: center;
+  padding: 0.8rem 1rem;
+  font-size: 0.95rem;
+}
+
+.jobs-filtros-actions {
+  justify-content: center;
+}
+
 /* ===== Filtros ===== */
 .filters-card{ padding:1.25rem; }
 .filters-grid{

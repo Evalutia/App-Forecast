@@ -1,0 +1,55 @@
+name: CI
+
+on:
+  push:
+    branches: [Develop]
+  pull_request:
+    branches: [Develop]
+
+jobs:
+  backend:
+    name: Backend (.NET build)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "8.0.x"
+      - name: Restore
+        run: dotnet restore apps/backend/WebApi/WebApi.sln
+      - name: Build
+        run: dotnet build apps/backend/WebApi/WebApi.sln --configuration Release --no-restore
+
+  frontend:
+    name: Frontend (lint + build)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "18"
+          cache: "npm"
+          cache-dependency-path: apps/frontend/package-lock.json
+      - name: Install dependencies
+        run: npm ci
+      - name: Lint
+        run: npm run lint
+      - name: Build
+        run: npm run build
+
+  etl:
+    name: ETL (pytest)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install dependencies
+        run: pip install pytest PyMySQL
+      - name: Run tests
+        working-directory: services/etl
+        run: python -m pytest tests/ -v

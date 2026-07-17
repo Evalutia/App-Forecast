@@ -1,0 +1,16 @@
+using System.Collections.Generic;
+using WebApi.Models;
+
+namespace DataAccess.Repositories.ArticuloDataAccess
+{
+  public interface IArticuloRepository
+  {
+    Articulo? FindBySku(string sku);
+    Articulo Upsert(Articulo articulo);
+    IEnumerable<Articulo> FindByFamilyOrGenre(int? familyId, int? genreId, int page, int pageSize);
+    int CountByFamilyOrGenre(int? familyId, int? genreId);
+    (IReadOnlyList<Articulo> Items, int Total) Search(string? sku, string? familiaNombre, string? generoDescripcion, int page, int pageSize);
+    IReadOnlyList<string> DistinctFamilias();
+    IReadOnlyList<string> DistinctGeneros(string? familiaNombre = null);
+  }
+}

@@ -14,6 +14,7 @@ public  class AuthController : ControllerBase
   public AuthController(IAuthService auth) { _auth = auth; }
 
   [HttpPost("login")]
+  [AllowAnonymous]
   public ActionResult<object> Login([FromBody] LoginDto dto)
   {
     var cred = new Usuario { Correo = dto.Correo, HashPassword = dto.Contrasena };
@@ -25,6 +26,7 @@ public  class AuthController : ControllerBase
   }
 
   [HttpGet("me")]
+  [Authorize]
   public ActionResult<UsuarioOutDto> Me()
   {
     var idStr = User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;

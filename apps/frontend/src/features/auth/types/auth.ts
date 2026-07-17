@@ -16,4 +16,4 @@ export interface LoginResponse {
   user: User;
 }
 
-export interface MeResponse extends User {}
+export type MeResponse = User;

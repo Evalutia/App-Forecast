@@ -1,3 +1,4 @@
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Services.Predicciones;
 using WebApi.Models;
@@ -6,6 +7,7 @@ namespace WebApi.Controllers.Predicciones
 {
   [ApiController]
   [Route("api/[controller]")]
+  [Authorize]
   public class PrediccionesController : ControllerBase
   {
     private readonly IPrediccionService _svc;

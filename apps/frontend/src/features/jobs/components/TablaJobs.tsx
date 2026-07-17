@@ -106,6 +106,15 @@ export default function TablaJobs({ query, onQueryChange }: { query: JobsQuery; 
           <button className="pager-btn" disabled={!canNext} onClick={() => goPage(page + 1)}>Siguiente</button>
         </div>
       </div>
+      <div style={{ marginTop: '.5rem' }} className="muted">
+        Filas por página:&nbsp;
+        <select
+          value={pageSize}
+          onChange={(e) => onQueryChange({ ...query, pageSize: Number(e.target.value), page: 1 })}
+        >
+          {[10, 20, 50, 100].map(n => <option key={n} value={n}>{n}</option>)}
+        </select>
+      </div>
     </section>
   );
 }

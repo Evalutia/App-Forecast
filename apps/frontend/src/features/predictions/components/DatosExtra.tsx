@@ -93,7 +93,7 @@ export default function DatosExtra() {
     <section className="extra-card">
       <p className="extra-subtitle">
         Seleccione un SKU para ver un resumen de las ventas y la proyección trimestral 
-        o esriba el nombre del SKU en el filtro de la sección "Historial de predicciones".
+        o escriba el nombre del SKU en el filtro de la sección "Historial de predicciones".
       </p>
 
       {isLoading ? (
@@ -142,11 +142,11 @@ export default function DatosExtra() {
                     </thead>
                     <tbody>
                       <tr>
-                        <td>Fecha de la primera primera observación para predecir</td>
+                        <td>Fecha de la primera observación</td>
                         <td className="mono">{resumenSku.fechaPrimerObservacion ?? '—'}</td>
                       </tr>
                       <tr>
-                        <td>Fecha de la última observación para predecir</td>
+                        <td>Fecha de la última observación</td>
                         <td className="mono">{resumenSku.fechaUltimaObservacion ?? '—'}</td>
                       </tr>
                       <tr>
@@ -179,15 +179,15 @@ export default function DatosExtra() {
                         </td>
                       </tr>
                       <tr>
-                        <td>Ventas del último año (12m) móvil</td>
+                        <td>Ventas del último año móvil</td>
                         <td>{fmtNum(resumenSku.ventasUltimoAnioCalendario)}</td>
                       </tr>
                       <tr>
-                        <td>Crecimiento de ventas en el último año móvil</td>
+                        <td>Crecimiento de las ventas del último año móvil respecto al mismo período anterior</td>
                         <td>{fmtPct(resumenSku.crecimientoVentasUltimoAnio)}</td>
                       </tr>
                       <tr>
-                        <td>Crecimiento de ventas en el último trimestre vs mismo trimestre del año móvil anterior</td>
+                        <td>Crecimiento de las ventas del último trimestre respecto al mismo período del año anterior</td>
                         <td>{fmtPct(resumenSku.crecimientoVentasUltimoTrimestreVsMismoTrimestreAnioAnterior)}</td>
                       </tr>
                       <tr>
