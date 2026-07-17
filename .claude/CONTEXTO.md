@@ -1978,6 +1978,10 @@ Coordinado en vivo con Martín García (MG Soluciones IT) vía WhatsApp, dentro 
 
 **#51 y #52 cerrados.**
 
+**Post-cierre, mismo día:**
+- **`#53` cerrado como no prioritario.** El runbook de prueba manual desde PC/Mac (`cotech-dev.p12`) quedó redundante: la VM ya cubre cualquier diagnóstico manual (mismos comandos `curl` usados hoy), y en un incidente real el camino natural es entrar por la VM, no pegarle al webservice directo desde una oficina. No se le preguntó a Martín sobre las IPs dinámicas de oficina (pregunta que quedaba pendiente) porque dejó de ser necesaria.
+- **`#55` (vigencia del certificado): fecha real confirmada**, `openssl pkcs12` contra `cotech-prod.p12` en la VM (sin exponer la contraseña, vía `-passin env:CERT_PASSWORD`) → vence **26 de septiembre de 2028**. Con más de 2 años de margen, queda en `needs-triage` en vez de cerrado — el *proceso* de rotación (quién lo gestiona, con cuánto preaviso) sigue sin documentar, a retomar más cerca de la fecha.
+
 ---
 
 ## Issues conocidos / TODOs en código
