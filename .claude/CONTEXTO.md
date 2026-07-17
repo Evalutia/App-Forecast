@@ -1984,6 +1984,25 @@ Coordinado en vivo con Martín García (MG Soluciones IT) vía WhatsApp, dentro 
 
 ---
 
+### `run_calc_planilla.py` — Bug real encontrado y corregido, Issue #64 (sesión 2026-07-17)
+
+**Replanteo del alcance original:** #64 pedía comparar contra una "planilla de referencia del cliente" — no existe, porque frecuencia de venta es una métrica **nueva** que pidió el cliente (#61), no algo que él ya clasifique por su cuenta (a diferencia de `estado_mes`, #36-#39, donde sí había un Excel de referencia). Se descartó también la validación final con el cliente (paso que #64 sugería) — decisión del usuario: la verificación de que el cálculo sea lógico y razonable la hacemos nosotros, no hace falta su visto bueno.
+
+**Bug encontrado corriendo la QA contra datos reales** (posible gracias al sync completo del día): `ventas_historicas` guarda una fila por SKU por día calendario, tenga o no venta real (`cantidad=0` en ~97% de las filas). El conteo de "tickets" (`COUNT(DISTINCT vh.fecha)`) no filtraba por `cantidad`, así que contaba días del mes, no días con venta — `tickets_mes` salía 28-31 para casi todo el catálogo. Señal que lo delató: **0 filas cayeron en la banda "3-4 tickets" (`criterio_frecuencia='promedio'`) sobre 71.973 filas reales**, estadísticamente imposible con un conteo real.
+
+| Decisión | Definición |
+|----------|-----------|
+| **Por qué los 33 tests unitarios no lo agarraron** | Testean `valor_ajustado_y_criterio()` con `tickets` ya calculado a mano — nunca la query SQL que produce ese número contra datos reales. El bug vivía justo en la parte que ningún test unitario podía cubrir sin datos reales. |
+| **Fix**: agrega `AND vh.cantidad != 0`, extrae la query a `cargar_tickets()` (mismo patrón que `cargar_factores`/`cargar_fec_alta`) para que sea testeable en aislamiento | Nuevo test de integración (`test_cargar_tickets_excluye_filas_con_cantidad_cero`) contra MySQL real, con `pytest.skip` si no hay DB (CI no levanta MySQL para `services/etl/tests`). |
+| **Verificado contra datos reales sincronizados**: `criterio_frecuencia` pasó de `(historico=52617, promedio=0, real_extrapolado=19356)` a `(historico=65360, promedio=2824, real_extrapolado=3789)` | Distribución de `tickets_mes` también cambió de mayormente 28-31 a mayormente 0-2 (65.341 filas) — coherente con un catálogo amplio donde la mayoría de los SKUs no venden todos los días. |
+| **Spot-check manual de 2 SKUs** (`C00015`, `C00027`) contra `ventas_historicas` cruda | Tickets reales = 4 en ambos (coincide). Blending: `(19.25+55)/2=37.125≈37.12` ✓, `(18.83+15)/2=16.915≈16.91` ✓. |
+| **`/code-review` (medium) encontró 5 hallazgos, 3 corregidos**: `except Exception` genérico en el test enmascaraba errores de config como skip silencioso; el test no era idempotente ante un corte a mitad de camino (ahora limpia antes de insertar); docstring de 13 líneas con narrativa forense, recortado a 4 | El hallazgo de mayor nivel (altitude): la ambigüedad de fondo de `ventas_historicas` (fila = evento real vs. snapshot en cero) queda documentada como invariante en un comentario nuevo arriba de `FREQ_ALTA_MIN`, para que la próxima query similar no reintroduzca el mismo bug. |
+| **Pendiente real, no resuelto en esta sesión: deploy a producción** | El servicio `etl` hornea el código en la imagen (`COPY . /app`, sin volumen montado) — el fix no se activa con un `git pull` en la VM, necesita `docker compose build etl && up -d --force-recreate etl` explícito, mismo patrón que ya vivimos con el corte mTLS. Producción sigue sirviendo `tickets_mes`/`criterio_frecuencia` incorrectos (ya visibles al cliente vía #65/#66) hasta que se despliegue. |
+
+**#64 cerrado** (bug real encontrado, corregido, testeado, verificado contra datos reales — el criterio de aceptación original ya no aplicaba tal cual, pero el espíritu de la QA se cumplió con creces).
+
+---
+
 ## Issues conocidos / TODOs en código
 
 | Issue | Ubicación | Descripción |
