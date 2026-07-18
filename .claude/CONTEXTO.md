@@ -2195,6 +2195,29 @@ Implementa la decisión de #88: `predict.py` elige el modelo ganador por SKU por
 
 ---
 
+### Medición de performance en la VM — Issue #74, sesión interrumpida por bug crítico (sesión 2026-07-17/18)
+
+**Decisiones de grilling previas a tocar la VM:** medir contra los 1.219 SKUs reales elegibles (no los ~5.500 candidatos del alcance original, ya descartados por #73), sin deadline duro documentado para el cron, piloto chico primero (mismo patrón que #72/#87), `version_modelo` distinto (`medicion-74-piloto`) con limpieza después.
+
+**Valor real de `PREDICT_PERIODS` confirmado por primera vez:** revisando `run_ofelia.sh`/`job_etl_diario.kjb` en la VM, el valor real de producción es **2** (no 4, el valor usado como estimación razonable al verificar #89 localmente — nunca se había confirmado contra el `.env` real hasta ahora).
+
+**Acceso a la VM: `ssm-user` sin grupo `docker`** — todos los comandos de Docker necesitan `sudo` explícito (no se agregó al grupo `docker` esta sesión, se optó por `sudo` en cada comando en vez de tocar permisos del sistema).
+
+**Bug crítico encontrado en el piloto (9 SKUs reales, 3m52s, ~26s/SKU):** los 9 SKUs procesados mostraron **r2=1.000000 exacto, sin excepción**, en 3 modelos distintos (RF/PROPHET/XGB). Verificado matemáticamente: `r2_score()` = (correlación de Pearson)², y con `horizon=forecast_periods=2` (el valor real recién confirmado), cualquier correlación entre dos series de 2 puntos no-constantes es **siempre ±1** — el cuadrado es siempre 1.0, sin importar la calidad real de la predicción. La decisión de #89 de usar `horizon=forecast_periods` (evaluar en la misma distancia que se predice de verdad, en vez del horizonte fijo de diagnóstico de #70/#72) era sólida en principio, pero no contempló que el valor real de producción pudiera ser tan chico como 2 — estadísticamente degenerado. **Cargado como issue nuevo #95 (blocker)**, con el diagnóstico completo y opciones de fix a evaluar (no prescriptivo, requiere diseño propio).
+
+**Importante: los datos ya calculados de #72/#73 NO están afectados** — `eval_walkforward.py` usa `EVAL_HORIZON=4` (no 2) para su propia evaluación, así que los 1.219 SKUs elegibles que ya aplicó #73 vienen de una muestra de 4 puntos por fold, no degenerada. El bug es específico de la evaluación walk-forward *interna y en tiempo real* que `predict.py` (#89) hace con `horizon=forecast_periods`.
+
+**Mitigación de emergencia aplicada, dado el cron real de esta noche (3 AM Montevideo, ventana de pocas horas al momento del hallazgo):**
+1. Piloto corrido y limpiado (`DELETE FROM predicciones WHERE version_modelo='medicion-74-piloto'`, 18 filas — 9 SKUs × 2 períodos).
+2. `services/python-worker/predict.py` **revertido en la VM** (`git checkout 0e580ef -- services/python-worker/predict.py`, el commit inmediato anterior a #89) + `docker compose build etl` + `up -d --force-recreate etl`. Confirmado con `grep -c elegir_ganador` (0 ocurrencias) que el contenedor corre la versión vieja.
+3. **Este es un parche temporal sin commitear, solo en el working tree de la VM** — el próximo `git pull` + rebuild normal en la VM lo va a sobreescribir con el código roto de vuelta a menos que #95 se resuelva antes. Anotado explícitamente en #95 para no perderlo.
+
+**Dato preliminar útil para #74 (no bloqueado por el bug):** la duración del walk-forward no depende de que el r2 resultante sea significativo — 3m52s para 9 SKUs reales (~26s/SKU) en hardware real de la VM es un primer dato de referencia, más lento que la extrapolación local de #89 (~8.3s/SKU) pero medido con solo 9 SKUs, no representativo todavía. **#74 queda abierto**, retomar junto con el fix de #95 (no tiene sentido medir performance de punta a punta con una metodología que #95 va a cambiar).
+
+**Decisión explícita del usuario:** documentar todo y parar acá por esta noche, en vez de forzar un fix apurado contra el reloj del cron — ya se resolvió el riesgo principal (producción protegida para esta noche).
+
+---
+
 ## Documentación adicional
 
 | Archivo | Contenido |
