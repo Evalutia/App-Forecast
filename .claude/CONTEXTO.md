@@ -2246,7 +2246,9 @@ Verificando el cron de la noche anterior (`jobs_historial`), se encontró que el
 
 **Verificado localmente:** suite completa (4 archivos de test) pasa. Smoke test real contra la base local sincronizada con `--periods=2` (el valor real de producción) — los r2 ahora muestran variación real (0.066 a 1.000 en 10 SKUs reales), y **coinciden exactamente** con los valores ya vistos en la primera verificación de #89 (cuando por error se probó con `--periods=4`) — confirma que la evaluación ya no depende de `forecast_periods`, tal como se buscaba.
 
-**Pendiente:** desplegar el fix real a la VM de producción (reemplazando el parche de emergencia sin commitear de anoche — revertir `git checkout` y hacer `git pull` + rebuild normal con este commit), re-correr el piloto contra la VM real para confirmar r2 no-degenerado con hardware real, y retomar #74 (medición de performance) con la metodología ya corregida.
+**Desplegado a producción (mismo día).** Parche de emergencia revertido (`git checkout HEAD -- services/python-worker/predict.py` — el archivo había quedado *staged* en la VM, un plano `git checkout --` sin `HEAD` no alcanzaba) + `git pull` + rebuild normal de `etl`. Piloto real (mismos 20 SKUs del piloto original de #74) re-corrido contra la VM: **r2 con variación real (0.066 a 0.687 en 4 SKUs)**, ya no 1.0 sistemático. Menos SKUs pasaron el filtro que en el piloto original (4 de 20 vs. 9 de 20) — efecto esperado del gate más estricto (`max(2,4)=4` en vez de `2`), no un problema. Datos de prueba limpiados (8 filas, `version_modelo='verificacion-95-vm'`).
+
+**#95 cerrado.** #74 retoma desde acá con la metodología ya corregida — el próximo piloto/corrida completa mide contra el código real, no el buggy.
 
 ---
 
