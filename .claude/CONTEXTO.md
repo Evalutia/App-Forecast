@@ -2218,6 +2218,20 @@ Implementa la decisión de #88: `predict.py` elige el modelo ganador por SKU por
 
 ---
 
+### Incidente real detectado la mañana siguiente: migración de #67 nunca aplicada a producción (sesión 2026-07-18)
+
+Verificando el cron de la noche anterior (`jobs_historial`), se encontró que el paso `calc_planilla` había **fallado** (`(1146, "Table 'evalutia.configuracion_sistema' doesn't exist")`, job id 224, 0.31s). El `git pull` de anoche trajo el código de #67 (que ya lee `configuracion_sistema` para los umbrales de frecuencia), pero la migración SQL nunca se había aplicado a producción — solo se probó localmente en su momento.
+
+**Impacto real (contenido, no catastrófico):** `run_calc_planilla.py` hace `DELETE`+`INSERT` de `planilla_ventas_calculada` recién al final de `main()` — el crash ocurrió en `cargar_configuracion()`, al principio, antes de tocar esa tabla. La Planilla no quedó vacía ni corrupta, pero el cliente vio los datos de la noche anterior (un día de atraso) en vez de los de hoy, hasta la intervención manual. El resto del pipeline (`calc_sugerencias`, `calc_stock_resumen`) corrió sin problema — falla contenida a un solo paso.
+
+**Fix aplicado en el momento:**
+1. `infra/sql/17-configuracion-sistema.sql` aplicada a producción (idempotente, sin cambio de comportamiento — sembró `tickets_bajo_max=2`/`tickets_alto_min=5`, los valores ya vigentes).
+2. `run_calc_planilla.sh` corrido manualmente en el contenedor `etl` — **540.93s, 5.559 SKUs, 71.982 filas, frecuencia alta=707/media=486/baja=4365** (números idénticos a la verificación de producción de #64, mismo dataset real). Planilla refrescada con datos de hoy.
+
+**Lección para el pipeline de deploy:** un `git pull` + rebuild de `etl` trae el código nuevo, pero **no aplica migraciones SQL automáticamente** — cada feature con migración (#67, y cualquier futura) necesita un paso explícito de `mysql ... < infra/sql/NN-*.sql` contra producción, separado del deploy de código. Ya había pasado algo similar con las migraciones 14/15 en la sesión del corte mTLS (documentado más arriba) — patrón recurrente, no un caso aislado.
+
+---
+
 ## Documentación adicional
 
 | Archivo | Contenido |
