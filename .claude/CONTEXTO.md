@@ -2139,6 +2139,30 @@ npm run dev       # http://localhost:5173
 
 ---
 
+### Criterio walk-forward en `predict.py` — Issue #89 (sesión 2026-07-17)
+
+Implementa la decisión de #88: `predict.py` elige el modelo ganador por SKU por mejor `r2_test` walk-forward real, no menor RMSE in-sample.
+
+| Decisión | Definición |
+|----------|-----------|
+| **`WalkForwardResult` no trae `forecast_future`** (solo métricas) | Se resuelve con el mismo patrón ya usado en `eval_walkforward.py` (#86): walk-forward de los 3 candidatos para elegir el ganador, después un fit de referencia in-sample **solo del ganador** (`fit_rf_insample`/`fit_xgb_insample`/`fit_prophet_insample`, `steps_forecast=forecast_periods`) para conseguir el forecast real. |
+| **Horizonte de fold = `forecast_periods`**, no el `EVAL_HORIZON` fijo de #70/#72 | Evalúa el modelo en la misma distancia que realmente se va a predecir en producción, no en un horizonte de diagnóstico ajeno a la tarea real. |
+| **`predicciones.rmse`/`.r2` pasan a ser las métricas walk-forward del ganador**, no el ajuste in-sample del fit de referencia | Mismo principio de transparencia que #70 ("el r2_test real se expone al cliente") — `ResultadosService.GetResumenGlobal()` ya lee estas columnas como "R² promedio"; el número que ve el cliente ahora es honesto, no inflado por sobreajuste. Baja de escala como consecuencia esperada, no un bug. |
+| **Volatilidad entre folds: informativa, no descalifica** | Mismo criterio que #88 — un modelo volátil con mejor `r2_test` sigue ganando sobre uno estable con peor `r2_test`. |
+| **`elegir_ganador()` extraída como función pura**, con `ScoredModel(NamedTuple)` | Único punto testeable sin la pila ML completa — 4 tests unitarios (mayor r2 gana, ignora None/NaN, volátil puede ganar, fallback al primero). |
+
+**Verificado end-to-end contra los 101 SKUs reales de grupo 201** (vía `docker cp` puntual al contenedor `etl` corriendo, sin rebuild, para no interferir con la corrida de #72 en simultáneo): 56/101 procesados (45 se descartan por historia insuficiente — gate preexistente, no introducido acá), **464s (~7.7 min) para 56 SKUs, ~8.3s/SKU promedio**. Todos ganados por PROPHET, consistente con su `median_r2_test` muy superior en este grupo (visto en #72: 0.36 vs 0.0 de RF/XGB). Confirma el criterio de aceptación del issue ("impacto en tiempo medido y documentado") — manejable para la ventana del cron de las 3 AM con el universo actual (~104 SKUs); el impacto sobre el universo ampliado que dejarían #73/#75 queda para #74.
+
+**`/code-review` (8 ángulos) encontró 5 findings reales, corregidos antes de commitear:**
+- **Bug real en frontend:** `PrediccionesTable.tsx` usaba chequeo falsy (`prediccion.r2 ? ... : '—'`) en vez de null-check — con `r2` walk-forward, `0` es un valor real y alcanzable, y se renderizaba como "sin dato". Corregido a `!= null` (también en `rmse`).
+- **Gate de historia mínima incompleto** en los paths `--force-end`/`--include-current-period`: no sumaban `forecast_periods` como sí hace el path por defecto, dejando pasar SKUs que después no producían ningún fold walk-forward (pérdida total del forecast en vez de solo pérdida de precisión). Corregido.
+- Fake de test incompleto (`rmse_test_median` faltante), tupla sin tipar (ahora `ScoredModel`), comentario impreciso sobre paridad con `eval_walkforward.py` — corregidos, bajo riesgo.
+- **No se toca:** `ResultadosService.R2Promedio` cambia de escala (consecuencia esperada de #88/#70, no renderizado hoy en ningún componente de frontend) y el eje Y fijo `max:1` de `ModelPerformanceChart.tsx` (cosmético, Chart.js auto-extiende) — quedan documentados como seguimiento, no bloquean el cierre.
+
+**#89 cerrado.**
+
+---
+
 ## Documentación adicional
 
 | Archivo | Contenido |

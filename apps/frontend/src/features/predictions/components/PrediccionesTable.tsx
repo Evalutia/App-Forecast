@@ -117,8 +117,8 @@ export default function PrediccionesTable({ className }: Props) {
                     <td className="sku-column">{prediccion.sku}</td>
                     <td>{desde}</td>
                     <td>{hasta}</td>
-                    <td>{prediccion.r2 ? prediccion.r2.toFixed(3) : '—'}</td>
-                    <td>{prediccion.rmse ? prediccion.rmse.toFixed(2) : '—'}</td>
+                    <td>{prediccion.r2 != null ? prediccion.r2.toFixed(3) : '—'}</td>
+                    <td>{prediccion.rmse != null ? prediccion.rmse.toFixed(2) : '—'}</td>
                     <td className="cantidad-column">{formatPronostico(prediccion.cantidadPredicha)}</td>
                   </tr>
                 );

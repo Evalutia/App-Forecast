@@ -13,7 +13,7 @@ import json
 
 from datetime import datetime
 from decimal import Decimal
-from typing import Dict, List, Optional
+from typing import Dict, List, NamedTuple, Optional
 
 from ioworker.db import (
     DBConfig,
@@ -29,10 +29,18 @@ from ml.models import (
     fit_rf_insample,
     fit_xgb_insample,
     fit_prophet_insample,
+    fit_rf_with_walkforward,
+    fit_xgb_with_walkforward,
+    fit_prophet_with_walkforward,
     ModelResult,
+    WalkForwardResult,
 )
 from utils.logging_conf import setup_logging
 from utils.versioning import resolve_version
+
+# Issue #89: tope de folds walk-forward por SKU al elegir el modelo ganador --
+# mismo default que EVAL_MAX_FOLDS en eval_walkforward.py (#72).
+PREDICT_MAX_FOLDS = int(os.getenv("PREDICT_MAX_FOLDS", "5"))
 
 
 def parse_args() -> argparse.Namespace:
@@ -130,6 +138,31 @@ def safe_metric(val):
 
 def as_decimal2(x: float) -> Decimal:
     return Decimal(f"{x:.2f}")
+
+
+class ScoredModel(NamedTuple):
+    name: str
+    wf: WalkForwardResult
+
+
+def elegir_ganador(wf_results: List[ScoredModel]) -> ScoredModel:
+    """
+    Issue #89: elige el modelo ganador por SKU por mejor r2_test walk-forward
+    (issue #88) -- reemplaza el criterio anterior de menor RMSE in-sample,
+    demostrado propenso a sobreajuste (#68/#78). `wf_results` ya viene
+    filtrada a resultados no-None. La volatilidad entre folds
+    (WalkForwardResult.stable) queda solo informativa -- no descalifica al
+    ganador, mismo principio de transparencia que #70. Si ningún candidato
+    tiene r2_test_median válido, cae al primero (mismo fallback que el
+    criterio anterior).
+    """
+    winner: Optional[ScoredModel] = None
+    for candidate in wf_results:
+        if candidate.wf.r2_test_median is None or not np.isfinite(candidate.wf.r2_test_median):
+            continue
+        if winner is None or candidate.wf.r2_test_median > winner.wf.r2_test_median:
+            winner = candidate
+    return winner if winner is not None else wf_results[0]
 
 
 def _parse_force_end(force_end_str: str) -> Optional[pd.Timestamp]:
@@ -277,7 +310,11 @@ def main() -> None:
                     freq_str = "QS" if args.resample_rule.upper().startswith("Q") else "MS"
                     # entrenamos con todos los periodos STRICTAMENTE anteriores a fidx_start
                     train = train_full[train_full.index < fidx_start].copy()
-                    if len(train) < min_history_periods:
+                    # Issue #89: el walk-forward exige len(train) >= forecast_periods + 2
+                    # (walk_forward_split, min_train=2) -- sin este margen, un SKU podia
+                    # pasar este gate y aun asi no producir ningun fold, perdiendo el
+                    # forecast por completo en vez de solo perder precision.
+                    if len(train) < (min_history_periods + forecast_periods):
                         warnings_list.append(f"SKU {sku} omitido por pocos datos ({len(train)} periodos tras aplicar force-end)")
                         continue
 
@@ -302,7 +339,9 @@ def main() -> None:
                     else:
                         fidx_start = train.index[-1] + pd.offsets.MonthBegin()
                         freq_str = "MS"
-                    if len(train) < min_history_periods:
+                    # Issue #89: mismo margen que el path de force-end -- el walk-forward
+                    # exige len(train) >= forecast_periods + 2.
+                    if len(train) < (min_history_periods + forecast_periods):
                         warnings_list.append(f"SKU {sku} omitido por pocos datos ({len(train)} periodos tras quitar el último periodo)")
                         continue
 
@@ -341,9 +380,6 @@ def main() -> None:
                 # determinar lags según frecuencia
                 lags = 8 if args.resample_rule.upper().startswith("Q") else 12
 
-                # Entrenamiento de modelos sobre 'train'
-                all_results: List[ModelResult] = []
-
                 # Selección explícita de modelos según --model-set
                 if args.model_set == "prophet":
                     want_rf = False
@@ -364,47 +400,69 @@ def main() -> None:
                     want_xgb = True
                     want_prophet = False
 
+                # Issue #89: el ganador por SKU se elige por r2_test walk-forward real
+                # (issue #88) en vez de RMSE in-sample -- este ultimo ya se demostro
+                # propenso a sobreajuste (#68/#78), misma metrica que #70 ya usa para
+                # elegibilidad. El horizonte de cada fold usa forecast_periods (la
+                # distancia real que se va a predecir), no el horizonte fijo de
+                # diagnostico de #70/#72 -- evalua el modelo en la misma tarea que
+                # despues va a cumplir en produccion.
+                wf_results: List[ScoredModel] = []
                 if want_rf:
-                    r = fit_rf_insample(train, steps_forecast=forecast_periods, lags=lags, freq=args.resample_rule)
-                    if r:
-                        all_results.append(r)
+                    wf = fit_rf_with_walkforward(
+                        train, freq=args.resample_rule, lags=lags, horizon=forecast_periods, max_folds=PREDICT_MAX_FOLDS
+                    )
+                    if wf:
+                        wf_results.append(ScoredModel("RF", wf))
                 if want_xgb:
-                    r = fit_xgb_insample(train, steps_forecast=forecast_periods, lags=lags, freq=args.resample_rule)
-                    if r:
-                        all_results.append(r)
-
+                    wf = fit_xgb_with_walkforward(
+                        train, freq=args.resample_rule, lags=lags, horizon=forecast_periods, max_folds=PREDICT_MAX_FOLDS
+                    )
+                    if wf:
+                        wf_results.append(ScoredModel("XGB", wf))
                 if want_prophet:
                     try:
-                        r = fit_prophet_insample(
-                            sku=sku,
-                            train=train,
-                            steps_forecast=forecast_periods,
-                            lags=lags,
-                            freq=args.resample_rule,
+                        wf = fit_prophet_with_walkforward(
+                            train, freq=args.resample_rule, lags=lags, horizon=forecast_periods,
+                            max_folds=PREDICT_MAX_FOLDS, sku=sku,
                         )
-                        if r:
-                            all_results.append(r)
+                        if wf:
+                            wf_results.append(ScoredModel("PROPHET", wf))
                     except Exception:
-                        log.exception("Prophet error for sku %s", sku)
+                        log.exception("Prophet walkforward error for sku %s", sku)
 
-                if not all_results:
+                if not wf_results:
                     warnings_list.append(f"SKU {sku} omitido: ningún modelo produjo resultado")
                     continue
 
-                # Sanitizar forecasts
-                for r in all_results:
-                    r.forecast = _sanitize_forecast(r.forecast)
+                winner_name, winner_wf = elegir_ganador(wf_results)
 
-                # Elegir el mejor modelo por RMSE
-                best_result: Optional[ModelResult] = None
-                for r in all_results:
-                    if r.rmse is None or not np.isfinite(r.rmse):
-                        continue
-                    if best_result is None or r.rmse < best_result.rmse:
-                        best_result = r
-                # Si todas las métricas vienen nulas/NaN, quedarnos con el primero
+                # WalkForwardResult no trae forecast_future (solo metricas) -- una vez
+                # elegido el ganador, se hace un fit de referencia in-sample sobre toda
+                # la historia disponible para conseguir el forecast real. Mismo patron ya
+                # usado en eval_walkforward.py (#86) para catalogo_modelos -- ahi
+                # steps_forecast=1 (solo necesita hiperparametros/features), aca
+                # steps_forecast=forecast_periods (necesita el forecast real); no cambia
+                # las metricas in-sample del fit, solo el largo del array de forecast.
+                reference_fitters = {
+                    "RF": lambda: fit_rf_insample(train, steps_forecast=forecast_periods, lags=lags, freq=args.resample_rule),
+                    "XGB": lambda: fit_xgb_insample(train, steps_forecast=forecast_periods, lags=lags, freq=args.resample_rule),
+                    "PROPHET": lambda: fit_prophet_insample(
+                        sku=sku, train=train, steps_forecast=forecast_periods, lags=lags, freq=args.resample_rule
+                    ),
+                }
+                best_result: Optional[ModelResult] = reference_fitters[winner_name]()
                 if best_result is None:
-                    best_result = all_results[0]
+                    warnings_list.append(f"SKU {sku} omitido: fit de referencia de {winner_name} falló")
+                    continue
+
+                best_result.forecast = _sanitize_forecast(best_result.forecast)
+                # rmse/r2 persistidos pasan a ser las metricas walk-forward reales del
+                # ganador (no el ajuste in-sample del fit de referencia) -- ResultadosService
+                # las expone al cliente como "R2 promedio", mismo principio de
+                # transparencia que #70 ("el r2_test real se expone al cliente").
+                best_result.rmse = winner_wf.rmse_test_median
+                best_result.r2 = winner_wf.r2_test_median
 
                 # ----------------------------
                 # Construir las fechas que SE VAN A PERSISTIR: la primera fecha es
@@ -447,12 +505,13 @@ def main() -> None:
                     }
                 )
 
-                # Dump opcional para inspección
+                # Dump opcional para inspección -- issue #89: ya no hay un ModelResult
+                # in-sample por candidato (solo walk-forward + el fit de referencia del
+                # ganador), así que el dump queda acotado a ese único fit.
                 if args.debug_dump:
                     df_dump = pd.DataFrame({"fecha": train_full.index, "y_true": train_full.values})
-                    for r in all_results:
-                        if r.holdout_pred is not None:
-                            df_dump[r.name] = r.holdout_pred.reindex(train_full.index).values
+                    if best_result.holdout_pred is not None:
+                        df_dump[best_result.name] = best_result.holdout_pred.reindex(train_full.index).values
                     df_dump.to_csv(f"eval_{sku}.csv", index=False)
 
                 processed += 1
