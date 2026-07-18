@@ -42,6 +42,15 @@ from utils.versioning import resolve_version
 # mismo default que EVAL_MAX_FOLDS en eval_walkforward.py (#72).
 PREDICT_MAX_FOLDS = int(os.getenv("PREDICT_MAX_FOLDS", "5"))
 
+# Issue #95: horizonte fijo para la evaluacion walk-forward interna de
+# predict.py -- NO usar forecast_periods (la distancia real de forecast,
+# PREDICT_PERIODS=2 en produccion) ahi, un fold con solo 2 puntos de test
+# hace que r2_score (correlacion de Pearson al cuadrado) de siempre 1.0 sin
+# importar la calidad real del ajuste (ver r2_score en ml/evaluate.py).
+# Mismo default que EVAL_HORIZON en eval_walkforward.py (#72) -- misma
+# metodologia que #70/#72/#73 ya usan para elegibilidad.
+PREDICT_EVAL_HORIZON = int(os.getenv("PREDICT_EVAL_HORIZON", "4"))
+
 
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser("Forecast CLI (paridad de notebook)")
@@ -188,6 +197,18 @@ def main() -> None:
     logging.getLogger("cmdstanpy").setLevel(logging.WARNING)
     logging.getLogger("prophet").setLevel(logging.WARNING)
 
+    # Issue #95: con <3 puntos de test por fold, r2_score (correlacion de
+    # Pearson al cuadrado) es matematicamente degenerado (siempre 0.0/1.0,
+    # ver docstring en ml/evaluate.py) -- un override de PREDICT_EVAL_HORIZON
+    # por debajo de ese piso reintroduce en silencio el bug que motivo #95.
+    if PREDICT_EVAL_HORIZON < 3:
+        log.warning(
+            "PREDICT_EVAL_HORIZON=%s es degenerado para r2_score (necesita >=3 "
+            "puntos de test por fold) -- ver issue #95. La seleccion de modelo "
+            "y el r2 persistido van a quedar sin sentido.",
+            PREDICT_EVAL_HORIZON,
+        )
+
     db_cfg = DBConfig(
         host=args.mysql_host or "localhost",
         port=args.mysql_port,
@@ -310,11 +331,13 @@ def main() -> None:
                     freq_str = "QS" if args.resample_rule.upper().startswith("Q") else "MS"
                     # entrenamos con todos los periodos STRICTAMENTE anteriores a fidx_start
                     train = train_full[train_full.index < fidx_start].copy()
-                    # Issue #89: el walk-forward exige len(train) >= forecast_periods + 2
-                    # (walk_forward_split, min_train=2) -- sin este margen, un SKU podia
+                    # Issue #89/#95: el walk-forward exige len(train) >= horizon + 2
+                    # (walk_forward_split, min_train=2), y el horizonte real que se usa
+                    # para evaluar es PREDICT_EVAL_HORIZON (#95), no forecast_periods --
+                    # el margen tiene que cubrir el mayor de los dos, si no un SKU podia
                     # pasar este gate y aun asi no producir ningun fold, perdiendo el
                     # forecast por completo en vez de solo perder precision.
-                    if len(train) < (min_history_periods + forecast_periods):
+                    if len(train) < (min_history_periods + max(forecast_periods, PREDICT_EVAL_HORIZON)):
                         warnings_list.append(f"SKU {sku} omitido por pocos datos ({len(train)} periodos tras aplicar force-end)")
                         continue
 
@@ -339,15 +362,16 @@ def main() -> None:
                     else:
                         fidx_start = train.index[-1] + pd.offsets.MonthBegin()
                         freq_str = "MS"
-                    # Issue #89: mismo margen que el path de force-end -- el walk-forward
-                    # exige len(train) >= forecast_periods + 2.
-                    if len(train) < (min_history_periods + forecast_periods):
+                    # Issue #89/#95: mismo margen que el path de force-end.
+                    if len(train) < (min_history_periods + max(forecast_periods, PREDICT_EVAL_HORIZON)):
                         warnings_list.append(f"SKU {sku} omitido por pocos datos ({len(train)} periodos tras quitar el último periodo)")
                         continue
 
                 else:
-                    # comportamiento original: requerimos min_history + horizon sobre la serie completa
-                    if len(train_full) < (min_history_periods + forecast_periods):
+                    # comportamiento original: requerimos min_history + horizon sobre la
+                    # serie completa -- issue #95: horizon es el mayor entre forecast_periods
+                    # (fit de referencia) y PREDICT_EVAL_HORIZON (walk-forward).
+                    if len(train_full) < (min_history_periods + max(forecast_periods, PREDICT_EVAL_HORIZON)):
                         warnings_list.append(f"SKU {sku} omitido por pocos datos ({len(train_full)} periodos)")
                         continue
                     # entrenamos con la serie completa y predecimos a partir del periodo siguiente al último observado
@@ -403,27 +427,38 @@ def main() -> None:
                 # Issue #89: el ganador por SKU se elige por r2_test walk-forward real
                 # (issue #88) en vez de RMSE in-sample -- este ultimo ya se demostro
                 # propenso a sobreajuste (#68/#78), misma metrica que #70 ya usa para
-                # elegibilidad. El horizonte de cada fold usa forecast_periods (la
-                # distancia real que se va a predecir), no el horizonte fijo de
-                # diagnostico de #70/#72 -- evalua el modelo en la misma tarea que
-                # despues va a cumplir en produccion.
+                # elegibilidad.
+                #
+                # Issue #95 (bug real encontrado en el piloto de #74 contra la VM de
+                # produccion): el horizonte de evaluacion NO usa forecast_periods (la
+                # distancia real que se predice). PREDICT_PERIODS en produccion es 2,
+                # y r2_score = (correlacion de Pearson)^2 -- con exactamente 2 puntos de
+                # test por fold, esa correlacion es matematicamente siempre +-1, asi que
+                # r2_test da siempre 1.0 sin importar la calidad real de la prediccion
+                # (confirmado empiricamente: 9/9 SKUs de un piloto real dieron r2=1.0
+                # exacto). Se usa un horizonte fijo no degenerado (PREDICT_EVAL_HORIZON,
+                # mismo default que EVAL_HORIZON en eval_walkforward.py/#72) para elegir
+                # el ganador -- restaura la misma metodologia que #70/#72/#73 ya usan
+                # para elegibilidad, una sola fuente de verdad para "que tan bien
+                # generaliza este modelo". El forecast final que se persiste sigue
+                # siendo a forecast_periods reales (viene del fit de referencia aparte).
                 wf_results: List[ScoredModel] = []
                 if want_rf:
                     wf = fit_rf_with_walkforward(
-                        train, freq=args.resample_rule, lags=lags, horizon=forecast_periods, max_folds=PREDICT_MAX_FOLDS
+                        train, freq=args.resample_rule, lags=lags, horizon=PREDICT_EVAL_HORIZON, max_folds=PREDICT_MAX_FOLDS
                     )
                     if wf:
                         wf_results.append(ScoredModel("RF", wf))
                 if want_xgb:
                     wf = fit_xgb_with_walkforward(
-                        train, freq=args.resample_rule, lags=lags, horizon=forecast_periods, max_folds=PREDICT_MAX_FOLDS
+                        train, freq=args.resample_rule, lags=lags, horizon=PREDICT_EVAL_HORIZON, max_folds=PREDICT_MAX_FOLDS
                     )
                     if wf:
                         wf_results.append(ScoredModel("XGB", wf))
                 if want_prophet:
                     try:
                         wf = fit_prophet_with_walkforward(
-                            train, freq=args.resample_rule, lags=lags, horizon=forecast_periods,
+                            train, freq=args.resample_rule, lags=lags, horizon=PREDICT_EVAL_HORIZON,
                             max_folds=PREDICT_MAX_FOLDS, sku=sku,
                         )
                         if wf:

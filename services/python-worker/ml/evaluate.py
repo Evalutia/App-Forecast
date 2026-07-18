@@ -59,6 +59,17 @@ def r2_score(y_true, y_pred) -> float:
         * Si no -> 0.0
     - Se calculan con valores finitos (se ignoran NaN/Inf pares).
     - Si y_pred es constante y no coincide con y_true -> 0.0.
+
+    ADVERTENCIA (issue #95): con exactamente 2 puntos no-constantes, la
+    correlacion de Pearson es matematicamente siempre +-1 -- el cuadrado da
+    siempre 1.0, sin importar la calidad real de la prediccion. Cualquier
+    caller que evalue walk-forward con un horizonte de test tan chico (ej.
+    horizon=2 en fit_*_with_walkforward) obtiene un r2 degenerado, no una
+    medicion real. Usar un horizonte de al menos 3-4 puntos por fold para
+    que esta metrica sea informativa (confirmado empiricamente: 9/9 SKUs de
+    un piloto real con horizon=2 dieron r2=1.0 exacto en predict.py/#89,
+    corregido en #95 desacoplando el horizonte de evaluacion del horizonte
+    de forecast real).
     """
     y_true = np.asarray(y_true, dtype=np.float64).ravel()
     y_pred = np.asarray(y_pred, dtype=np.float64).ravel()

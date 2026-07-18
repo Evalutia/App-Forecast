@@ -2232,6 +2232,24 @@ Verificando el cron de la noche anterior (`jobs_historial`), se encontró que el
 
 ---
 
+### Fix del r2_test degenerado — Issue #95 (sesión 2026-07-18)
+
+**Diseño, vía `/grill-me`:** de las dos opciones planteadas en el issue (desacoplar el horizonte de evaluación del horizonte de forecast real, vs. agrupar los puntos de test de todos los folds antes de calcular un solo r2), se eligió **desacoplar** — `predict.py` evalúa internamente con un horizonte fijo (`PREDICT_EVAL_HORIZON`, mismo default 4 que `EVAL_HORIZON` en `eval_walkforward.py`/#72), no con `forecast_periods` (2, el valor real de producción). El forecast final que se persiste sigue siendo a `forecast_periods` reales — solo cambia la vara con la que se *mide* la calidad del modelo. Se descartó agrupar folds porque hubiera perdido la señal de `estable` (necesita varianza *entre* folds) y arriesgado otra divergencia de metodología entre `eval_walkforward.py` y `predict.py` — el mismo tipo de problema que ya costó una sesión entera en #73.
+
+| Decisión | Definición |
+|----------|-----------|
+| **`PREDICT_EVAL_HORIZON`**, constante propia de `predict.py`, no compartida con `eval_walkforward.py` | Mismo patrón ya establecido con `PREDICT_MAX_FOLDS`/`EVAL_MAX_FOLDS` — configurables por separado, mismo default, sin acoplar los dos scripts. |
+| **Los 3 gates de historia mínima de #89 se corrigen a `max(forecast_periods, PREDICT_EVAL_HORIZON)`** | El walk-forward real ahora exige `len(train) >= PREDICT_EVAL_HORIZON + 2`, no `forecast_periods + 2` — sin este ajuste, el gate viejo hubiera dejado pasar SKUs que después no producen ningún fold. |
+| **Guard en runtime si `PREDICT_EVAL_HORIZON < 3`** | Encontrado en `/code-review`: sin esto, alguien podría re-introducir el bug en silencio seteando la env var a un valor chico. Solo un `log.warning`, no bloquea la corrida (es un valor operativo, no algo que deba abortar el job). |
+| **Comentario defensivo en `r2_score()`** (`ml/evaluate.py`) | Documenta la trampa matemática en la función compartida misma, no solo en este issue — para que no se repita en otro caller futuro. |
+| **Test nuevo `test_evaluate.py`** | Fija la propiedad matemática (2 puntos → siempre 1.0, incluso con predicción en tendencia opuesta; 4 puntos → sí puede dar r2 bajo) y que el default de `PREDICT_EVAL_HORIZON` sea seguro (`>=3`) — encontrado como gap real en `/code-review` (nada pineaba el comportamiento corregido, un futuro "as I simplify this" podía reintroducir el bug sin que ningún test lo note). |
+
+**Verificado localmente:** suite completa (4 archivos de test) pasa. Smoke test real contra la base local sincronizada con `--periods=2` (el valor real de producción) — los r2 ahora muestran variación real (0.066 a 1.000 en 10 SKUs reales), y **coinciden exactamente** con los valores ya vistos en la primera verificación de #89 (cuando por error se probó con `--periods=4`) — confirma que la evaluación ya no depende de `forecast_periods`, tal como se buscaba.
+
+**Pendiente:** desplegar el fix real a la VM de producción (reemplazando el parche de emergencia sin commitear de anoche — revertir `git checkout` y hacer `git pull` + rebuild normal con este commit), re-correr el piloto contra la VM real para confirmar r2 no-degenerado con hardware real, y retomar #74 (medición de performance) con la metodología ya corregida.
+
+---
+
 ## Documentación adicional
 
 | Archivo | Contenido |
