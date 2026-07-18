@@ -2163,6 +2163,38 @@ Implementa la decisión de #88: `predict.py` elige el modelo ganador por SKU por
 
 ---
 
+### Aplicar criterio de elegibilidad — Issue #73 (sesión 2026-07-17)
+
+**Hallazgo previo a implementar, resuelto por grilling:** el ganador por SKU que #72 persistió en `articulos_elegibilidad_econometrico` usaba el criterio viejo de selección (menor RMSE in-sample, el único que existía cuando #72 se diseñó el 2026-07-13) — pero #88/#89, decididos y cerrados *ese mismo día* después de #72, cambiaron el criterio real que usa `predict.py` a mejor `r2_test` walk-forward. Comparado empíricamente: **481/1476 SKUs (32.6%) tenían un modelo ganador distinto** entre ambos criterios — aplicar #73 directo sobre los datos de #72 hubiera decidido elegibilidad según un modelo que ni siquiera es el que corre en producción.
+
+| Decisión | Definición |
+|----------|-----------|
+| **Recalcular el ganador con el criterio de #88/#89** antes de aplicar elegibilidad, no reusar el de #72 | Sin re-correr walk-forward — `catalogo_modelos` ya tiene las 3 métricas por (sku, modelo), la recomputación es una consulta sobre datos ya persistidos. |
+| **Aplicar el criterio de #70 tal cual, sin excepciones** para los SKUs ya elegibles | Confirmado a pesar de que 42/95 SKUs actualmente elegibles (44%) no pasarían el criterio real — #70 ya decidió esto a conciencia (aflojó el umbral de 0.3 a ≥0 sabiendo que afectaba al grupo 201 actual). Un SKU no-elegible no queda sin nada: cae a lo que ya calcula Planilla (`rotacion_sugerida`) para el resto del catálogo. |
+| **Alcance: solo base local**, no toca producción | Mismo patrón que #72 — la expansión real en el cron nocturno (104→~1219 SKUs) queda gateada detrás de #74 (medir performance en la VM real) y #75 (rollout gradual), como ya estaba planeado. |
+| **`meses_historia` no se re-chequea por separado** | El piso de 24 meses de #70 ya queda cubierto indirectamente: hacen falta ≥8 trimestres para tener ≥2 folds evaluables (`estable` no-None), así que el gate de estabilidad ya excluye la historia insuficiente sin necesidad de un chequeo aparte. |
+
+**Bug real encontrado y corregido antes de aplicar:** `estable` llega de MySQL como `NULL` para SKUs de 1 solo fold, pero pandas lo lee como `NaN` en una columna `float64` — y `bool(float('nan'))` es `True` en Python. El chequeo ingenuo `bool(ganador["estable"])` dejaba pasar como "estable" justo los casos que #70 dice que deben quedar afuera (1324 vs 1219 elegibles, detectado comparando el dry-run del script contra el cálculo manual en SQL). Corregido con `_estable_normalizado()` (None/NaN → None, saneado antes de persistir — mismo problema que ya documentó `_finite()` en #86).
+
+**Segundo hallazgo, post-aplicación:** 6 SKUs quedaron `elegible=TRUE` del seed original de #71 sin ninguna medición real (`r2_test`/`n_folds` NULL — sin ventas reales, mismo tipo de SKU de prueba mal cargado ya visto antes). Revocados explícitamente (`revocar_elegibilidad_sin_medicion`) — elegibilidad sin evidencia no es una opción bajo el principio de #70.
+
+**`/code-review` (2 ángulos) encontró 5 findings reales en el script, corregidos:** `n_folds` sin el mismo saneo NaN que `estable` (mismo riesgo de crash en pymysql), sin `ORDER BY`/dedup ante una re-corrida de la misma `version_modelo` (tabla histórica sin `UNIQUE`), división por cero si ningún SKU tiene `r2_test` válido, rowcount de la escritura nunca comparado contra lo esperado (podía ocultar un `#72` corrido solo con `EVAL_PERSIST_CATALOG`), cómputo duplicado de "huérfanos" contra dos snapshots potencialmente distintos.
+
+**Hallazgo fuera de alcance, cargado como issue nuevo (#94, `blocker`):** `ResultadosService.cs` (`GetSkusElegiblesModelo`) sigue leyendo `grupos.aplica_modelo_econometrico` (el flag viejo) — `articulos_elegibilidad_econometrico` ni siquiera está mapeada en `EvalutiaDbContext`. No es un bug de #73, es un gap de #71 que #73 recién hace consecuente: sin este fix, desplegar la elegibilidad real a producción (futuro #75) dejaría el R² promedio y los pronósticos de `/api/resultados` filtrando contra el set viejo de ~104 SKUs, aunque `predicciones` tenga datos reales para ~1.219. Bloqueante para #75, no para #73.
+
+**Resultado real, aplicado en base local** (`services/python-worker/ml/apply_elegibilidad.py`, `APPLY_VERSION=catalogo-completo-72 APPLY_PERSIST=true`):
+
+| | Antes (seed #71) | Después (#73, criterio real) |
+|---|---|---|
+| Elegibles | 104 (grupo 201 completo) | **1.219** (82.6% de 1.476 evaluados) |
+| Ganan elegibilidad | — | 1.166 |
+| Pierden elegibilidad | — | 42 (de 95 medibles) |
+| Revocados por falta de evidencia | — | 6 |
+
+**#73 cerrado.**
+
+---
+
 ## Documentación adicional
 
 | Archivo | Contenido |
