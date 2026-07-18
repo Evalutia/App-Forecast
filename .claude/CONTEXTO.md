@@ -2049,7 +2049,23 @@ El diseño de la sesión anterior (2026-07-13, ver arriba) seguía vigente casi 
 
 **Fix aplicado** (`services/python-worker/ml/eval_walkforward.py`): el cálculo del "ganador" por SKU (antes hecho una sola vez al final, sobre el DataFrame completo vía `groupby`) se movió a ocurrir apenas termina el loop interno de los 3 modelos de cada SKU — matemáticamente idéntico (el ganador de un SKU no depende de ningún otro SKU), pero permite flushear a la DB cada `EVAL_PERSIST_BATCH_SIZE` SKUs (default 100) en vez de al final. Verificado con un test de 5 SKUs y batch size 2: los checkpoints de progreso y los conteos de filas persistidas coinciden exactamente con lo esperado.
 
-**Corrida completa lanzada en background** (`EVAL_VERSION=catalogo-completo-72`) sobre las ~5.550 SKUs del catálogo, con persistencia incremental real. Pendiente: resultado final, análisis, y decisión de deploy a producción — se documenta en esta misma sección cuando termine.
+**Corrida completa terminada, limpia, sin cortes.** ~66 minutos locales (19:12→20:18) para las 1.955 SKUs con historia real en `ventas_historicas` (los ~3.595 SKUs restantes del catálogo de 5.550 no tienen ninguna venta real, se descartan casi instantáneo — confirma que la estimación cruda inicial de "hasta 15h" estaba sobreestimada, tal como se anticipó). Persistencia incremental verificada en producción real (no solo en el test de 5 SKUs): 3.010 filas en `catalogo_modelos` (1.476 SKUs distintos, `version_modelo=catalogo-completo-72`, sin contaminación de datos de piloto/test), 1.476 filas con métrica real en `articulos_elegibilidad_econometrico`.
+
+**Resultado real, catálogo completo:**
+
+| Modelo | SKUs evaluados | `median_r2_test` | Estable/Volátil/1-fold |
+|--------|-----------------|-------------------|--------------------------|
+| PROPHET | 58 | 0.3624 | 20/33/5 (57% volátil) |
+| RF | 1.476 | 0.0000 | 1236/140/100 |
+| XGB | 1.476 | 0.0000 | 1239/137/100 |
+
+Selección real de producción hoy (criterio viejo, menor RMSE in-sample): RF gana 1.419 de 1.476 (96%) — muy distinto al patrón de grupo 201 solo (RF 33/104), porque a nivel catálogo completo casi ningún SKU tiene los ≥8 trimestres que Prophet necesita (58/1955 = 3%), así que RF gana por default en la enorme mayoría. Mediana de `r2_test` walk-forward del modelo seleccionado: **0.0000** (peor que grupo 201 solo, que daba 0.0769) — 0% con `r2_test` negativo, 10.4% volátiles, 7.1% sin folds suficientes para evaluar estabilidad. Promedio de `r2_test` (no mediana): 0.1514.
+
+**Veredicto textual del script (catálogo completo, reemplaza el de grupo-201-solo de #87): "REDISEÑO NECESARIO — señales claras de sobreajuste/memorización incluso con walk-forward."** Confirma con muchos más datos (1.955 SKUs vs 104) la misma conclusión de #87/#88 — no cambia ninguna decisión ya tomada, la refuerza.
+
+**Insumo directo para #73** (siguiente issue de la cadena): las 1.476 filas de `r2_test`/`estable`/`n_folds`/`meses_historia` ya están persistidas y listas — #73 solo necesita aplicar el criterio de elegibilidad (`r2_test ≥ 0` + no-volátil, ya definido en #70) sobre datos reales, sin tener que volver a correr nada.
+
+**#72 cerrado.**
 
 ---
 

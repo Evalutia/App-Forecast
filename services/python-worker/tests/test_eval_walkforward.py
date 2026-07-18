@@ -1,7 +1,8 @@
 """Self-check para la agregacion de walk-forward (issue #86).
 
-Corre sin pytest (no es una dependencia de python-worker todavia):
-    python3 tests/test_eval_walkforward.py
+Corre sin pytest (no es una dependencia de python-worker todavia). Modo
+modulo, no como script suelto -- si no, 'ml' no queda en sys.path:
+    python3 -m tests.test_eval_walkforward
 """
 from __future__ import annotations
 
