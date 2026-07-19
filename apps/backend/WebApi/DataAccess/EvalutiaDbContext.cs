@@ -43,6 +43,8 @@ public class EvalutiaDbContext : DbContext
 
   public virtual DbSet<ConfiguracionSistema> ConfiguracionSistema { get; set; }
 
+  public virtual DbSet<ArticuloElegibilidadEconometrico> ArticulosElegibilidadEconometrico { get; set; }
+
   protected override void OnModelCreating(ModelBuilder modelBuilder)
   {
     modelBuilder
@@ -475,6 +477,31 @@ public class EvalutiaDbContext : DbContext
           .HasColumnName("actualizado_en");
       entity.Property(e => e.ActualizadoPor)
           .HasColumnName("actualizado_por");
+    });
+
+    modelBuilder.Entity<ArticuloElegibilidadEconometrico>(entity =>
+    {
+      entity.HasKey(e => e.Sku).HasName("PRIMARY");
+
+      entity.ToTable("articulos_elegibilidad_econometrico");
+
+      entity.Property(e => e.Sku)
+          .HasMaxLength(128)
+          .HasColumnName("sku");
+      entity.Property(e => e.Elegible)
+          .HasColumnName("elegible");
+      entity.Property(e => e.R2Test)
+          .HasColumnName("r2_test");
+      entity.Property(e => e.Estable)
+          .HasColumnName("estable");
+      entity.Property(e => e.NFolds)
+          .HasColumnName("n_folds");
+      entity.Property(e => e.MesesHistoria)
+          .HasColumnName("meses_historia");
+      entity.Property(e => e.EvaluadoEn)
+          .ValueGeneratedOnAddOrUpdate()
+          .HasColumnType("timestamp(6)")
+          .HasColumnName("evaluado_en");
     });
   }
 }

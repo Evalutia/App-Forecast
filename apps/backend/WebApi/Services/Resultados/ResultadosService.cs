@@ -13,15 +13,17 @@ namespace Services.Resultados
       _db = db;
     }
 
-    // SKUs cuyo grupo tiene modelo econométrico habilitado (mismo criterio que get_skus_modelo.py de #43).
-    // Evita que predicciones generadas antes de que un SKU perdiera elegibilidad (issue #57) sigan
-    // filtrándose a los promedios/pronósticos de Resultados.
+    // SKUs elegibles para modelo econométrico (issue #94: migrado de grupos.aplica_modelo_econometrico,
+    // flag muerto desde #71, a articulos_elegibilidad_econometrico.elegible -- mismo criterio que
+    // get_skus_modelo.py usa desde #71, este servicio nunca se había actualizado). Evita que predicciones
+    // generadas antes de que un SKU perdiera elegibilidad (issue #57) sigan filtrándose a los
+    // promedios/pronósticos de Resultados.
     private HashSet<string> GetSkusElegiblesModelo()
     {
-      return _db.Articulos
+      return _db.ArticulosElegibilidadEconometrico
         .AsNoTracking()
-        .Join(_db.Grupos.AsNoTracking().Where(g => g.AplicaModeloEconometrico),
-              a => a.GrupoId, g => g.Id, (a, g) => a.Sku)
+        .Where(e => e.Elegible)
+        .Select(e => e.Sku)
         .ToHashSet();
     }
 

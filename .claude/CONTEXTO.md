@@ -2289,6 +2289,25 @@ Confirmado contra `predicciones` directo: 57 SKUs×2 filas (PROPHET) + 1 SKU×2 
 
 ---
 
+### ResultadosService lee la tabla de elegibilidad real — Issue #94 (sesión 2026-07-18)
+
+**Decisiones de grilling (dentro de #75):** #94 se resuelve **antes** de desplegar la elegibilidad real de #73 a producción (evita el bug silencioso que motivó el issue), sin rollout gradual (el volumen real que reveló #74 es chico, 58 SKUs nuevos), y la elegibilidad se porta directo desde los datos ya calculados localmente (no se re-corre walk-forward contra producción).
+
+**Fix:** nuevo modelo EF Core `ArticuloElegibilidadEconometrico` mapeado a `articulos_elegibilidad_econometrico` (mismo patrón exacto que `ConfiguracionSistema` de #67 — Model + `DbSet` + bloque en `OnModelCreating`). `GetSkusElegiblesModelo()` en `ResultadosService.cs` pasa de un `JOIN` contra `grupos.aplica_modelo_econometrico` (flag muerto desde #71) a filtrar directo `articulos_elegibilidad_econometrico.elegible` — el mismo criterio que `get_skus_modelo.py` ya usa desde #71. Confirmado por grep que `Grupo.AplicaModeloEconometrico` no tiene ningún otro lector en el backend — no queda un segundo call site roto.
+
+**`/code-review` encontró 3 findings reales, corregidos:**
+- Los tests sembraban `articulos_elegibilidad_econometrico`/`predicciones` para SKUs que nunca se insertaban en `articulos` — la tabla real tiene FK (`fk_elegibilidad_articulo`), pero EF InMemory no la valida, así que los tests pasaban afirmando un estado imposible contra MySQL real. Corregido sembrando `Articulos` también.
+- `GetStockAnalysis()` (el segundo consumidor real de `GetSkusElegiblesModelo()`, vía `PronosticoProximoTrimestre`) no tenía ningún test — solo se cubría `GetResumenGlobal()`. Agregado.
+- `MesesHistoria` estaba tipado `short?` para una columna `SMALLINT UNSIGNED` — rompe la convención ya establecida en el codebase (`VentasMensuales` mapea el mismo tipo MySQL a `ushort`). Corregido a `ushort?`.
+
+**Hallazgo operativo, no de código:** esta Mac tenía el mismo problema de #91 (solo runtime net10 instalado, tests de C# no podían correr localmente) — resuelto de forma **persistente** esta vez (a diferencia del scaffold temporal de #91): runtime net8 descargado e instalado con un `sudo cp` puntual dentro de la instalación existente de `dotnet`, en vez de un `DOTNET_ROOT` combinado con symlinks (que no funcionó — el resolver de .NET no lo respetó). Verificado con `dotnet --list-runtimes`: net8.0.29 y net10.0.5 conviven sin conflicto. Este problema no debería repetirse en sesiones futuras en esta máquina.
+
+**Verificado:** build limpio, **16/16 tests pasan** (los 12 de #91 + 4 nuevos de #94), corridos localmente de punta a punta (no solo leídos).
+
+**#94 cerrado.**
+
+---
+
 ## Documentación adicional
 
 | Archivo | Contenido |
