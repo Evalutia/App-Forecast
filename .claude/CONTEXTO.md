@@ -2376,6 +2376,37 @@ Encontrado por `/code-review` durante el smoke test de #86: `_build_catalog_row(
 
 ---
 
+### Re-scope de #76 + hallazgo crítico #97: r2_test degenerado en 96% de catalogo_modelos (sesión 2026-07-19)
+
+**Re-scope de #76:** la mitad original sobre calibración de pesos del ensemble quedó obsoleta (confirmado por grep: cero referencias a ensemble/pesos en `predict.py`, #88/#89 reemplazaron el blending por selección winner-take-all). Issue editado para dejar solo los 3 casos borde, re-anclados a la arquitectura actual, con dependencia de #68 corregida (walk-forward real de #89/#95 ya cubre lo que #68 pedía) y estimación bajada de 4-6h a 3-4h.
+
+**Metodología para identificar SKUs candidatos:** en vez de derivar detección de "baja frecuencia"/"quiebre" desde cero en Python, se usó `planilla_ventas_calculada` (dominio de planilla, `estado_mes`/`tickets_mes` ya validados contra el Excel del cliente en #36-39) para encontrar candidatos reales:
+
+| Caso | Criterio de selección | Candidatos con ≥6 trimestres (mínimo para walk-forward) |
+|------|------------------------|------------------------------------------------------------|
+| 1. Baja frecuencia | `tickets_mes` entre 1-3 en ≥50% de los meses, con ventas reales >0 | 9 SKUs (ej. C00702, E00342, C00401) |
+| 2. Quiebre de stock frecuente | `estado_mes IN ('quiebre_parcial','sin_stock')` en ≥30-40% de los meses, con ventas reales | 12 SKUs (ej. I01236, I01673, I01943) |
+| 3. <12 meses de historia | `meses_historia < 12` en `ventas_historicas` | 15 SKUs, **todos con exactamente 1 mes de historia** |
+
+**Caso 3 resuelto trivialmente:** los 15 candidatos locales tienen 1 mes de historia -- muy por debajo del mínimo de `_walk_forward_split` (necesita ≥6 trimestres). Walk-forward ni siquiera arranca (0 folds), y `predict.py`'s `min_history_periods` (12 trimestres en producción, confirmado en #74) los excluye de entrada. No hace falta tratamiento especial -- el gate existente ya los maneja. Limitación anotada: localmente no hay SKUs entre 30-40 meses (cerca del gate real de producción de 36 meses) para auditar ese borde específico; la distribución local se concentra en ~25 meses de historia.
+
+**Casos 1 y 2 destaparon un hallazgo mucho más grande que el propio alcance de #76:** al correr walk-forward real sobre los 21 SKUs candidatos (`EVAL_VERSION=audit-76`), **el 100% de las 42 filas resultantes (21 SKUs × RF/XGB) dieron `r2_test` exactamente `0.0`**, con `n_obs_train=1` en todas. Para descartar que fuera un artefacto del lote curado, se revisó la distribución completa de `catalogo_modelos` sobre las 3010 filas de corridas reales previas (excluyendo el lote de auditoría y los benchmarks de #92):
+
+| Métrica | Valor sobre 3010 filas reales |
+|---|---|
+| `r2_test` exactamente 0.0 | 83.3% |
+| `r2_test` exactamente 1.0 | 12.7% |
+| **Total degenerado (0.0 o 1.0 exacto)** | **96.0%** |
+| `n_obs_train` ≤ 1 | 95.1% (mediana global = 1) |
+
+**El patrón no es específico de los casos borde de #76 -- es sistémico en casi todo el catálogo.** Mecanismo (hipótesis con evidencia fuerte, no 100% confirmada): `EVAL_LAGS=8` consume 8 períodos como features de lag; con el tamaño de fold que genera `_walk_forward_split` (ventana expanding, folds tempranos chicos), a la mayoría les queda ~1 fila útil de entrenamiento tras restar los lags -- el modelo no tiene de qué aprender, predice casi una constante, y `r2_score` (Pearson² con manejo de varianza-cero desde #95) satura en exactamente 0.0 o 1.0 en vez de dar un valor intermedio informativo. Mismo síntoma que #95 (r2 en un valor exacto sospechoso) pero causa distinta (lags devorando el training window, no el horizonte de test) -- **abierto como issue separado, #97, crítico**, porque `catalogo_modelos` es la fuente exacta que #73 usó para calcular los 1219 SKUs elegibles ya desplegados a producción en #75: el criterio `r2_test>=0 AND estable` deja pasar tanto 0.0 como 1.0 exactos sin distinguirlos de un ajuste real.
+
+**Consecuencia para #76:** con la métrica de referencia (`r2_test`) contaminada en ~96% del catálogo, no se puede dar una "decisión documentada" confiable sobre si los casos borde necesitan tratamiento especial en el criterio de #70 -- cualquier conclusión hoy estaría midiendo ruido, no señal real, para prácticamente cualquier SKU, no solo los de baja frecuencia/quiebre. **#76 queda bloqueado por #97**, no cerrado: su criterio de aceptación original solo se puede cumplir de forma honesta una vez que #97 tenga un fix y se pueda re-correr el mismo lote de 21 SKUs con `r2_test` confiable.
+
+**#76 permanece abierto (bloqueado por #97, no cerrado). #97 abierto, crítico, ready-for-human -- diagnóstico completo, remedio sin decidir (candidato a `/grill-me` antes de `/implement`, mismo patrón que #95).**
+
+---
+
 ## Documentación adicional
 
 | Archivo | Contenido |
