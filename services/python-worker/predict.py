@@ -51,6 +51,14 @@ PREDICT_MAX_FOLDS = int(os.getenv("PREDICT_MAX_FOLDS", "5"))
 # metodologia que #70/#72/#73 ya usan para elegibilidad.
 PREDICT_EVAL_HORIZON = int(os.getenv("PREDICT_EVAL_HORIZON", "4"))
 
+# Issue #96: mismo problema que tenia eval_walkforward.py antes del fix de
+# #72 -- rows_buffer se acumulaba entero en memoria y recien se persistia
+# una vez, al final del loop completo. Con el catalogo ampliado (#73/#75)
+# y walk-forward mas pesado por SKU (#89/#95), una corrida nocturna real
+# que se corte a mitad de camino perderia el 100% del progreso, no solo lo
+# que faltaba. Se flushea cada N SKUs iterados en vez de al final.
+PREDICT_PERSIST_BATCH_SIZE = int(os.getenv("PREDICT_PERSIST_BATCH_SIZE", "50"))
+
 
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser("Forecast CLI (paridad de notebook)")
@@ -288,10 +296,22 @@ def main() -> None:
                 top_n=top_n_effective,
             )
 
-        rows_buffer: List[Dict] = []
+        rows_buffer: List[Dict] = []  # buffer que se vacia en cada flush (issue #96)
         summary_rows: List[Dict] = []
         processed = 0
+        inserted = 0
         warnings_list: List[str] = []
+        n_skus_iterados = 0
+
+        def _flush_predicciones():
+            nonlocal rows_buffer, inserted
+            if rows_buffer:
+                inserted += upsert_predicciones(engine, rows_buffer, job_id=job_id)
+                rows_buffer = []
+            log.info(
+                "[PROGRESS] %d/%d SKUs -- procesados=%d predicciones=%d",
+                n_skus_iterados, len(sku_series), processed, inserted,
+            )
 
         # min-history está en meses; convertir a cantidad de periodos según resample
         if args.resample_rule.upper().startswith("Q"):
@@ -554,11 +574,12 @@ def main() -> None:
             except Exception as e:
                 warnings_list.append(f"Error SKU {sku}: {e}")
                 log.exception("Error procesando SKU %s", sku)
-                continue
+            finally:
+                n_skus_iterados += 1
+                if n_skus_iterados % PREDICT_PERSIST_BATCH_SIZE == 0:
+                    _flush_predicciones()
 
-        inserted = 0
-        if rows_buffer:
-            inserted = upsert_predicciones(engine, rows_buffer, job_id=job_id)
+        _flush_predicciones()  # cola final, menor a PREDICT_PERSIST_BATCH_SIZE
 
         modelos = sorted({r["modelo"] for r in summary_rows})
         detalle = {

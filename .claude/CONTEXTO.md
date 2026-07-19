@@ -2324,6 +2324,26 @@ Confirmado contra `predicciones` directo: 57 SKUs×2 filas (PROPHET) + 1 SKU×2 
 
 ---
 
+### Persistencia incremental en predict.py (Issue #96, sesión 2026-07-18/19)
+
+Mismo anti-patrón que tenía `eval_walkforward.py` antes del fix de #72, encontrado durante el grilling de #74: `predict.py` acumulaba todas las filas de `predicciones` en `rows_buffer` (memoria) y recién las persistía con `upsert_predicciones()` una sola vez, al final de `main()`. Con el catálogo ampliado de #73/#75 (104 a 1.219 SKUs elegibles) y el walk-forward más pesado por SKU de #89/#95, una corrida nocturna real que se corte a mitad de camino perdería el 100% del progreso, no solo lo que faltaba.
+
+**Fix, mismo patrón que #72:** `PREDICT_PERSIST_BATCH_SIZE` (misma convención de nombre que `EVAL_PERSIST_BATCH_SIZE`, default 50) controla cada cuántos SKUs *iterados* (no solo procesados con éxito, también los omitidos/fallidos cuentan para la cadencia) se hace flush de `rows_buffer` contra `predicciones`, vía una función interna `_flush_predicciones()` con `nonlocal` sobre `rows_buffer`/`inserted`. Cola final después del loop, igual que `eval_walkforward.py`. La lógica de `jobs_historial` (`insert_job_start`/`update_job_end`, una sola vez por job completo) no se tocó, tal como pedía el issue.
+
+| Decisión | Definición |
+|----------|-----------|
+| **Cadencia sobre `n_skus_iterados`, no sobre `processed`** | El `finally` del try/except por SKU incrementa el contador y chequea el módulo pase lo que pase (éxito, omitido por poca historia, o excepción). Un SKU que no genera filas igual "cuenta" para la cadencia, mismo criterio que `n_skus_procesados` en `eval_walkforward.py`. |
+| **Log de progreso movido adentro de `_flush_predicciones()`** | Encontrado en el self-review: la primera versión del fix solo logueaba `[PROGRESS]` en el flush periódico dentro del loop, no en la cola final (a diferencia de `eval_walkforward.py`, donde el `print` de progreso vive dentro de `_flush()` mismo y por lo tanto corre en cada llamada, periódica y final). Corregido para que la última tanda (menor a `PREDICT_PERSIST_BATCH_SIZE`) también quede logueada, igual que el patrón original de #72. |
+| **`rows_buffer` se vacía por completo en cada flush, sin retener historial** | A diferencia de `eval_walkforward.py` (que arma `catalog_rows`/`rows` aparte para el resumen final), `predict.py` ya tenía `summary_rows` como lista separada para el resumen. `rows_buffer` no necesita sobrevivir al flush. |
+
+**Test nuevo, `test_flush_incremental_predicciones_no_espera_al_final_del_loop()`** (`services/python-worker/tests/test_predict.py`): con `PREDICT_PERSIST_BATCH_SIZE=3` y 7 SKUs fake, mockeando `get_engine`/`insert_job_start`/`update_job_end`/`upsert_predicciones`/`load_series_by_sku`/`fit_rf_with_walkforward`/`fit_xgb_with_walkforward`/`fit_rf_insample`/`fit_xgb_insample` (nada toca MySQL ni entrena modelos reales), corre `predict.main()` completo y verifica que `upsert_predicciones` se invoca 3 veces (cadencia `[6, 6, 2]` filas) en vez de una sola vez al final, y que el total persistido (14 filas = 7 SKUs × 2 períodos) es idéntico al que hubiera dado un único batch final. Mismo patrón de verificación que pedía el criterio de aceptación del issue, inspirado en cómo #72 verificó su propio fix.
+
+**Verificado:** suite completa (`test_predict`, `test_evaluate`, `test_eval_walkforward`, `test_apply_elegibilidad`) corrida dentro del contenedor `etl` (`/app/services/python-worker`, no el `python-worker` vacío, ver nota de infraestructura en `docs/agents/`), las 4 pasan. El log real de la corrida del test nuevo confirma la cadencia esperada: tres líneas `[PROGRESS]` (3/7, 6/7 y 7/7 SKUs, con predicciones acumuladas 6, 12 y 14 respectivamente); la última línea solo aparece después del fix del log movido a `_flush_predicciones()`.
+
+**#96 cerrado.**
+
+---
+
 ## Documentación adicional
 
 | Archivo | Contenido |
