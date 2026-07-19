@@ -2407,6 +2407,41 @@ Encontrado por `/code-review` durante el smoke test de #86: `_build_catalog_row(
 
 ---
 
+### Fix de #97: filtro de folds degenerados en `_aggregate_walkforward` (sesión 2026-07-19)
+
+**Decisiones de grilling:** filtrar folds degenerados dentro de `_aggregate_walkforward` (afecta uniformemente `eval_walkforward.py` y `predict.py`, que comparten la función) en vez de bajar `EVAL_LAGS` o esconder el síntoma aguas abajo en `apply_elegibilidad.py`. Umbral inicial: `n_train_rows >= lags`. Medición de impacto: re-correr local + `apply_elegibilidad.py` en dry-run, diff contra los 1219 SKUs ya elegibles en producción.
+
+**3 experimentos empíricos antes de fijar el umbral** (60 SKUs elegibles reales, muestra aleatoria):
+
+| Variante | Cobertura (SKUs con algún resultado) | r2_test |
+|---|---|---|
+| `n_train_rows>=lags` (lags=8 sin tocar) | 2/60 (3.3%) | Sano donde sobrevive (mediana 0.31) |
+| `n_train_rows>=lags/2` | 2/60 (3.3%) | Sin cambio -- el piso no era el cuello de botella real |
+| `lags=4` (mitad) | 19/60 (31.7%) | RF/XGB vuelven a degenerar en 0.0 exacto (89.5% con 1 solo fold evaluable) |
+
+Bajar `lags` sube la cobertura pero no arregla la señal -- solo mueve el mismo problema a más SKUs. Se descartó tocar `lags` y se shippeó la variante 1 (umbral sin modificar `lags`), aceptando la caída de cobertura como consecuencia honesta, con la pregunta "¿RF/XGB necesitan otro enfoque de features para historias cortas?" como seguimiento aparte (conectado al caso "baja frecuencia" de #76).
+
+**`/code-review` (8 ángulos) encontró un bug real, no solo un matiz:** el piso `n_train_rows>=lags` viene de cómo RF/XGB construyen features de lag (`_build_lag_month_trend`), pero `fit_prophet_insample` recibe `lags` y **nunca lo usa para features** -- solo chequea internamente `len(tr)>=min_needed` (8 o 12), independiente de `lags`. Aplicarle el mismo piso a Prophet descartaba folds válidos sin ninguna base real. **Fix aplicado:** el chequeo ahora es `if name != "PROPHET" and n_train_rows < lags: continue`, y se movió ANTES de `fit_one_fold()` (evita el fit caro para folds ya sabidos degenerados, mismo espíritu que #92) -- Prophet corre su propio gate interno sin pasar por este filtro. Test nuevo (`test_filtro_de_n_train_rows_no_aplica_a_prophet`) fija el comportamiento. Otros findings del review (documentación de esta decisión, comentario duplicado con `r2_score()`, tests que podrían compartir fixtures) quedaron anotados pero no bloquearon el fix -- son cleanup menor, no correctness.
+
+**Medición de impacto real (no extrapolada), re-corrida completa de los 1219 SKUs actualmente elegibles en producción, con el fix corregido:**
+
+- Corrida completa: **40 minutos** (mucho más rápido que la estimación inicial de ~2-3h, porque la mayoría de los folds ahora se descartan ANTES del fit caro).
+- **Solo 20/1219 SKUs (1.6%) producen algún resultado de walk-forward real** (Prophet: 20 SKUs, todos estables, 0 volátiles, 0 con 1-solo-fold; RF: 15 SKUs; XGB: 15 SKUs -- se solapan, 20 SKUs distintos en total).
+- `apply_elegibilidad.py` en dry-run sobre esos 20: **14 pasan el criterio real (`r2_test>=0 AND estable`), 6 lo pierden.**
+- Los otros **1199 SKUs quedan revocados por no tener ninguna medición real** (todos sus folds, en los 3 modelos, degenerados).
+
+**Resultado final: de 1219 SKUs "elegibles" hoy en producción, solo 14 (1.1%) tienen señal genuina bajo la métrica corregida.** Los otros 1205 estaban marcados elegibles sobre `r2_test` que en realidad no medía nada -- exactamente la preocupación que motivó abrir #97.
+
+**Verificado:** suite completa (`test_predict`, `test_evaluate`, `test_eval_walkforward` con 3 tests nuevos, `test_apply_elegibilidad`) corrida en el contenedor `etl`, las 4 pasan.
+
+**Alcance explícito de este fix, no confundir con algo más amplio:** esto es un parche de correctness puntual (filtra señal falsa), NO una solución al problema de fondo (RF/XGB necesitan mucha más historia de la que tiene la mayoría del catálogo real para producir señal confiable con `lags=8`). Ese problema de fondo queda abierto, sin resolver, y conectado al caso "baja frecuencia" de #76.
+
+**Pendiente, decisión de negocio, no técnica:** si desplegar esta corrección a producción (bajaría la elegibilidad real de 1219 a 14 SKUs) queda fuera del alcance de #97 -- mismo patrón que #73→#75 (medir/decidir primero, desplegar como paso separado y explícito). No se tocó producción en esta sesión.
+
+**#97: diagnóstico, fix y medición de impacto completos localmente. Deploy a producción pendiente de decisión aparte.**
+
+---
+
 ## Documentación adicional
 
 | Archivo | Contenido |

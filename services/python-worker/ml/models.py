@@ -691,12 +691,31 @@ def _aggregate_walkforward(
     last_fold_result = None
 
     for train, test in folds:
+        eff_lags = min(lags, max(1, len(train) - 1))
+        n_train_rows = len(train) - eff_lags
+        if name != "PROPHET" and n_train_rows < lags:
+            # Issue #97: con menos filas utiles de entrenamiento que
+            # 'lags' (ya restados los propios lags), RF/XGB no tienen de
+            # donde aprender una relacion real -- predicen casi una
+            # constante y r2_score (Pearson^2, con manejo de
+            # varianza-cero desde #95) satura en 0.0/1.0 exacto en vez
+            # de un valor intermedio informativo. Confirmado
+            # empiricamente: 95%+ de catalogo_modelos tenia
+            # n_obs_train<=1 y r2_test degenerado antes de este fix.
+            # Se chequea ANTES de fitear (evita el fit caro, mismo
+            # espiritu que #92) y NO aplica a Prophet: fit_prophet_insample
+            # recibe 'lags' pero nunca lo usa para features -- solo
+            # chequea internamente len(tr)>=min_needed, independiente de
+            # lags (ver /code-review de #97).
+            continue
+
         base = fit_one_fold(train, horizon)
         if base is None or getattr(base, "forecast", None) is None:
             continue
         fc = np.asarray(base.forecast, dtype="float64")
         if len(fc) < horizon:
             continue
+
         fc_test = fc[:horizon]
         try:
             r2_te = float(_r2(test.values, fc_test))
@@ -711,8 +730,7 @@ def _aggregate_walkforward(
         except Exception:
             rmse_te = None
 
-        eff_lags = min(lags, max(1, len(train) - 1))
-        n_train_rows_list.append(len(train) - eff_lags)
+        n_train_rows_list.append(n_train_rows)
         r2_tests.append(r2_te)
         rmse_trains.append(base.rmse)
         rmse_tests.append(rmse_te)

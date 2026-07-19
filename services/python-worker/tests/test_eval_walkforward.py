@@ -161,6 +161,81 @@ def test_build_catalog_row_usa_last_fold_result_sin_refit():
     )
 
 
+def test_folds_con_pocas_filas_utiles_se_excluyen_del_promedio():
+    # Issue #97: un fold cuya ventana de entrenamiento, ya restados los
+    # lags, deja menos filas utiles que 'lags' no aporta senal real -- el
+    # modelo no tiene de donde aprender una relacion, predice casi una
+    # constante, y r2_score satura en 0.0/1.0 exacto (degenerado). Con
+    # lags=3: train de 4 filas -> eff_lags=3, n_train_rows=1 (<3, se
+    # descarta); train de 10 filas -> eff_lags=3, n_train_rows=7 (>=3, cuenta).
+    idx_chico = pd.date_range("2024-01-01", periods=4, freq="MS")
+    train_chico = pd.Series(np.arange(4, dtype="float64"), index=idx_chico)
+    test_chico = pd.Series([4.0, 5.0], index=pd.date_range("2024-05-01", periods=2, freq="MS"))
+
+    idx_grande = pd.date_range("2024-01-01", periods=10, freq="MS")
+    train_grande = pd.Series(np.arange(10, dtype="float64"), index=idx_grande)
+    test_grande = pd.Series([10.0, 11.0], index=pd.date_range("2024-11-01", periods=2, freq="MS"))
+
+    folds = [(train_chico, test_chico), (train_grande, test_grande)]
+
+    def fit_one_fold(train, horizon):
+        if len(train) == 4:
+            # constante degenerada -- si este fold contara, r2 seria 0.0/1.0 exacto
+            return _FakeFoldResult(forecast=np.array([999.0, 999.0]), rmse=0.5)
+        return _FakeFoldResult(forecast=np.array([11.0, 12.0]), rmse=0.5)
+
+    result = _aggregate_walkforward(
+        name="TEST", folds=folds, fit_one_fold=fit_one_fold, horizon=2, lags=3
+    )
+
+    assert result is not None
+    assert result.n_folds == 1, f"esperaba solo el fold grande (n_train_rows=7>=lags), dio n_folds={result.n_folds}"
+    assert result.n_train_rows_mean == 7.0, f"esperaba n_train_rows_mean=7 (solo el fold grande), dio {result.n_train_rows_mean}"
+
+
+def test_walkforward_result_none_si_todos_los_folds_degeneran():
+    # Issue #97: si TODOS los folds quedan por debajo del piso de
+    # n_train_rows, el WalkForwardResult debe ser None -- mismo
+    # comportamiento que cuando ningun fold produce forecast valido hoy.
+    idx = pd.date_range("2024-01-01", periods=4, freq="MS")
+    train = pd.Series(np.arange(4, dtype="float64"), index=idx)
+    test = pd.Series([4.0, 5.0], index=pd.date_range("2024-05-01", periods=2, freq="MS"))
+
+    result = _aggregate_walkforward(
+        name="TEST",
+        folds=[(train, test)],
+        fit_one_fold=lambda tr, h: _FakeFoldResult(forecast=np.array([999.0, 999.0]), rmse=0.5),
+        horizon=2,
+        lags=3,
+    )
+
+    assert result is None, "todos los folds degenerados (n_train_rows<lags) -> deberia ser None, no un resultado con senal falsa"
+
+
+def test_filtro_de_n_train_rows_no_aplica_a_prophet():
+    # Issue #97 (hallazgo de /code-review): el piso n_train_rows>=lags viene
+    # de como RF/XGB construyen features de lag (_build_lag_month_trend) --
+    # fit_prophet_insample recibe 'lags' pero NUNCA lo usa para features,
+    # solo chequea internamente len(tr)>=min_needed. Aplicarle el mismo
+    # piso a Prophet descartaria folds validos sin ninguna base real.
+    # Mismo fold "chico" que en test_walkforward_result_none_si_todos...
+    # (n_train_rows=1 < lags=3), pero con name="PROPHET" debe SI contar.
+    idx = pd.date_range("2024-01-01", periods=4, freq="MS")
+    train = pd.Series(np.arange(4, dtype="float64"), index=idx)
+    test = pd.Series([4.0, 5.0], index=pd.date_range("2024-05-01", periods=2, freq="MS"))
+
+    result = _aggregate_walkforward(
+        name="PROPHET",
+        folds=[(train, test)],
+        fit_one_fold=lambda tr, h: _FakeFoldResult(forecast=np.array([4.0, 5.0]), rmse=0.0),
+        horizon=2,
+        lags=3,
+    )
+
+    assert result is not None, "Prophet no deberia quedar excluido por el piso de n_train_rows -- no le aplica"
+    assert result.n_folds == 1
+
+
 def test_json_safe_replaces_nan_with_none():
     # Regresion: XGBRegressor.get_params() trae 'missing': float('nan') por
     # default -- json.dumps de eso produce el literal NaN, que MySQL rechaza
@@ -182,5 +257,8 @@ if __name__ == "__main__":
     test_last_fold_result_es_el_ultimo_fold_exitoso()
     test_last_fold_result_ignora_folds_que_fallan()
     test_build_catalog_row_usa_last_fold_result_sin_refit()
+    test_folds_con_pocas_filas_utiles_se_excluyen_del_promedio()
+    test_walkforward_result_none_si_todos_los_folds_degeneran()
+    test_filtro_de_n_train_rows_no_aplica_a_prophet()
     test_json_safe_replaces_nan_with_none()
     print("OK - test_eval_walkforward.py")
