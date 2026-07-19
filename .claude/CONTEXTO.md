@@ -2252,6 +2252,33 @@ Verificando el cron de la noche anterior (`jobs_historial`), se encontró que el
 
 ---
 
+### Corrida completa de #74 e incidente real de la VM (sesión 2026-07-18, tarde)
+
+**Decisiones de grilling:** medir directo contra los 1.219 SKUs completos (sin piloto adicional, ya validado en #95), correr ahora en horario diurno (la VM tenía margen de CPU en ese momento), `nohup`+background para sobrevivir un corte de sesión SSM (mismo riesgo ya documentado en #72), persistencia incremental de `predict.py` quedó como deuda técnica aparte (**issue #96**, no bloqueante para esta medición puntual).
+
+**Bug operativo real, no de código:** el primer intento de lanzar la corrida falló silenciosamente — el comando armaba `--skus="$(cat /tmp/skus_1219_clean.txt)"` **dentro** de `docker compose exec -T etl bash -c '...'`, pero ese archivo vivía en el filesystem de la VM, no en el del contenedor (son filesystems separados). El `cat` fallo con "No such file", pero el `$(...)` vacío no abortó el comando — `predict.py` arrancó igual con `--skus=""`, probablemente procesando `ventas_historicas` sin ningún filtro. Ese proceso quedó corriendo sin que lo notáramos, corriendo en paralelo con el intento correcto (relanzado después de copiar el archivo con `docker compose cp`).
+
+**Consecuencia:** ambos procesos corrieron ~3.5 horas en simultáneo en un `t3.medium` (4GB RAM) — el no filtrado, con `predict.py` acumulando todo en memoria antes de persistir (el mismo problema que ya documenta #96), probablemente agotó la RAM de la instancia. Efecto observado: **comprobación de estado de EC2 en "2/3 aprobadas"**, CPU baja (2.31%, descartando saturación de CPU) pero el agente de SSM dejó de responder por completo (sesiones que "conectan" a nivel AWS pero la terminal interactiva queda congelada, después ni siquiera se pueden iniciar sesiones nuevas). **Se resolvió con un reinicio de la instancia** (EC2 → Acciones → Estado de la instancia → Reiniciar) — los contenedores volvieron solos (`restart: unless-stopped`), sin necesidad de reconstruir nada.
+
+**Resultado real, rescatado de `jobs_historial` después del reinicio** (el job había terminado ANTES de que hiciera falta reiniciar — el problema era la sesión/agente, no el proceso en sí):
+
+| Job | version_modelo | Estado | Inicio | Fin | Duración |
+|-----|-----------------|--------|--------|-----|----------|
+| 229 | `medicion-74` (correcto, 1.219 SKUs reales) | **exitoso** | 15:25:02 | 18:52:09 | **3h27m** |
+| 230 | (huérfano, `--skus` vacío) | fallido | 15:27:16 | 18:47:58 | 3h20m |
+
+**3h27m para el volumen real (1.219 SKUs) entra cómodo en la ventana del cron** — arrancando a las 3 AM terminaría ~6:30 AM, muy por debajo de cualquier horario de apertura del cliente. Responde la pregunta central de #74. El desglose fino (SKUs procesados exactos, por modelo) quedó pendiente de extraer — la sesión se volvió inestable para pegar comandos largos, se pausó antes de forzarlo.
+
+**Pendiente para cerrar #74:**
+1. Extraer el detalle fino de `jobs_historial.detalle` (id 229) sin el array de warnings (usar `JSON_EXTRACT` para traer solo `skus_procesados`/`modelos`, el campo completo son >50k caracteres).
+2. Limpiar `predicciones` de ambos jobs (`version_modelo IN ('medicion-74', <lo que haya usado el huérfano>)`) — no debe quedar en la base de producción.
+3. Documentar el plan de mitigación si hiciera falta (probablemente no hace falta ninguno dado el margen de tiempo).
+4. Cerrar el issue.
+
+**Lección para la próxima corrida larga contra la VM:** cuando se arma un comando con `$(cat archivo)` dentro de `docker compose exec ... bash -c '...'`, el archivo tiene que existir **dentro** del contenedor (copiarlo con `docker compose cp` primero), no alcanza con que exista en el host de la VM. Y verificar SIEMPRE que el proceso anterior murió de verdad (`ps aux` en el host Y dentro del contenedor) antes de asumir que un reintento arrancó limpio.
+
+---
+
 ## Documentación adicional
 
 | Archivo | Contenido |
