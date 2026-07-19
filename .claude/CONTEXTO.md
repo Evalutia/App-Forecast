@@ -2442,6 +2442,30 @@ Bajar `lags` sube la cobertura pero no arregla la señal -- solo mueve el mismo 
 
 ---
 
+### Cierre real de #76: conclusión sobre casos borde (sesión 2026-07-19, con r2_test ya confiable)
+
+Con #97 resuelto, se re-corrieron los casos borde de #76. **Los 21 candidatos originales (≥6 trimestres, el piso mínimo de `_walk_forward_split`) dieron 0 resultados** -- el fix de #97 exige mucha más historia de la que esos candidatos tenían. Se buscaron candidatos nuevos combinando el patrón de baja frecuencia/quiebre CON suficiente historia (≥16 trimestres) para tener chance de sobrevivir el filtro: solo **5 candidatos de baja frecuencia y 2 de quiebre** cumplen ambas condiciones en todo el catálogo local -- un hallazgo en sí mismo (SKUs con patrón de baja frecuencia/quiebre Y suficiente historia para evaluar son raros).
+
+**Resultado real (7 SKUs, criterio real de #70 aplicado al modelo ganador de cada uno):**
+
+| SKU | Caso | Modelo ganador | r2_test | estable | Elegible |
+|---|---|---|---|---|---|
+| E00204 | baja frecuencia | PROPHET | 0.261 | No | ❌ |
+| E00428 | baja frecuencia | XGB | 0.982 | **No** | ❌ |
+| E00678 | baja frecuencia | XGB | 0.815 | **Sí** | ✅ |
+| I00724 | quiebre | PROPHET | 0.774 | No | ❌ |
+| I00963 | baja frecuencia | PROPHET | 0.894 | No | ❌ |
+| I01089 | baja frecuencia | XGB | 0.490 | N/A (1 fold) | ❌ |
+| I01303 | quiebre | PROPHET | 0.632 | No | ❌ |
+
+**Solo 1/7 (14%) queda elegible**, contra 70% (14/20) en la población general con historia suficiente medida en #97 -- los casos borde de #76 tienen una tasa de elegibilidad real mucho menor que el resto del catálogo. El caso E00428 es el más elocuente: r2_test=0.982 (casi perfecto) pero `estable=False` -- el criterio de `estable` ya lo descarta correctamente, exactamente el escenario que preocupaba el alcance original de #76 ("¿hay escenarios donde un modelo mal calibrado domina la predicción?").
+
+**Decisión documentada (criterio de aceptación de #76):** no hace falta agregar una exclusión especial para baja frecuencia/quiebre en el criterio de #70. El chequeo de `estable` ya existente cumple ese rol -- descarta 6 de los 7 casos borde probados, incluyendo el caso de r2 engañosamente alto. Combinado con el fix de #97 (que ya excluye la mayoría de estos SKUs por falta de historia suficiente antes de siquiera llegar a evaluarlos), el criterio actual queda protegido en dos capas: primero por datos insuficientes, después por inestabilidad. **Caso 3** (<12 meses de historia) ya se había resuelto trivial en la primera pasada de #76 -- sin cambios.
+
+**#76 cerrado. Los 3 casos borde quedan reportados; ninguno requiere tratamiento especial nuevo en #70.**
+
+---
+
 ## Documentación adicional
 
 | Archivo | Contenido |
