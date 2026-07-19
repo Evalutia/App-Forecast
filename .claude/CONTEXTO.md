@@ -2269,13 +2269,23 @@ Verificando el cron de la noche anterior (`jobs_historial`), se encontró que el
 
 **3h27m para el volumen real (1.219 SKUs) entra cómodo en la ventana del cron** — arrancando a las 3 AM terminaría ~6:30 AM, muy por debajo de cualquier horario de apertura del cliente. Responde la pregunta central de #74. El desglose fino (SKUs procesados exactos, por modelo) quedó pendiente de extraer — la sesión se volvió inestable para pegar comandos largos, se pausó antes de forzarlo.
 
-**Pendiente para cerrar #74:**
-1. Extraer el detalle fino de `jobs_historial.detalle` (id 229) sin el array de warnings (usar `JSON_EXTRACT` para traer solo `skus_procesados`/`modelos`, el campo completo son >50k caracteres).
-2. Limpiar `predicciones` de ambos jobs (`version_modelo IN ('medicion-74', <lo que haya usado el huérfano>)`) — no debe quedar en la base de producción.
-3. Documentar el plan de mitigación si hiciera falta (probablemente no hace falta ninguno dado el margen de tiempo).
-4. Cerrar el issue.
+**Desglose fino, extraído con `JSON_EXTRACT` (evitando el array de warnings, >50k caracteres):**
+
+| Job | Estado | Duración | SKUs pedidos | **SKUs procesados** | Modelos ganadores |
+|-----|--------|----------|---------------|----------------------|---------------------|
+| 229 (`medicion-74`) | exitoso | 12427s (3h27m) | 1.219 | **58 (4.8%)** | PROPHET 57, XGB 1 |
+
+Confirmado contra `predicciones` directo: 57 SKUs×2 filas (PROPHET) + 1 SKU×2 filas (XGB) = 116 filas, `avg_r2` 0.376/0.392 — valores razonables, no degenerados, confirma que el fix de #95 funciona bien a escala real también.
+
+**Hallazgo importante, más allá de la performance:** de los 1.219 SKUs que #73 marcó `elegible=TRUE`, **solo 58 (4.8%) tienen suficiente historia real para que `predict.py` los procese** — el gate de `predict.py` exige 12 trimestres (3 años), más estricto que el piso de #73/#70 (~8-9 trimestres para 2 folds evaluables). Esto ya se había insinuado en el piloto chico de #95 (4/20 = 20%, muestra no representativa) pero ahora queda cuantificado con el volumen real. El "salto de 104 a 1.219 SKUs elegibles" que documentó #73 es la cifra correcta para la tabla de elegibilidad, pero el impacto *práctico* inmediato en cuántos SKUs nuevos reciben forecast real es mucho más chico (104 + 58 ≈ 162, no 1.219) hasta que haya más historia acumulada. No se abre issue nuevo por esto — es información para #75 (rollout), no un bug: cuantos más meses pasen, más SKUs cruzan el piso de 3 años naturalmente.
+
+**Limpieza de producción:** 116 filas de `medicion-74` borradas de `predicciones`. El job huérfano (230, `--skus` vacío) nunca llegó a persistir nada (crash antes de `upsert_predicciones`, `skus_procesados`/`modelos` quedaron `NULL` en su `detalle`) — nada que limpiar ahí. Se encontró de paso un `version_modelo='mvp-002'` con 76 SKUs reales (fechas de predicción 2026-06-19 a 2026-09-19) que no es de esta sesión — no se toca, queda fuera de alcance.
+
+**Sin plan de mitigación necesario** — 3h27m tiene margen enorme contra cualquier ventana nocturna razonable, y el volumen real que efectivamente se procesa (58, no 1.219) es aún menor de lo que preocupaba el alcance original del issue.
 
 **Lección para la próxima corrida larga contra la VM:** cuando se arma un comando con `$(cat archivo)` dentro de `docker compose exec ... bash -c '...'`, el archivo tiene que existir **dentro** del contenedor (copiarlo con `docker compose cp` primero), no alcanza con que exista en el host de la VM. Y verificar SIEMPRE que el proceso anterior murió de verdad (`ps aux` en el host Y dentro del contenedor) antes de asumir que un reintento arrancó limpio.
+
+**#74 cerrado.**
 
 ---
 
