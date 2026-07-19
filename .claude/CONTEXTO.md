@@ -2308,6 +2308,22 @@ Confirmado contra `predicciones` directo: 57 SKUs×2 filas (PROPHET) + 1 SKU×2 
 
 ---
 
+### Deploy final de #75 — elegibilidad real en producción (sesión 2026-07-18)
+
+**Script de sync** (`scripts/sync_elegibilidad_73_a_produccion.sql`): porta los 1.476 SKUs ya evaluados localmente (walk-forward real de #72, criterio de #70 aplicado por #73) directo a `articulos_elegibilidad_econometrico` en producción — `INSERT ... ON DUPLICATE KEY UPDATE`, sin re-correr walk-forward contra la VM (misma copia sincronizada de ventas reales, resultado equivalente). Verificado localmente antes de tocar producción: idempotente (1219/1482, igual antes y después de aplicarlo).
+
+**Desplegado en orden:**
+1. `git pull` en la VM.
+2. `webapi` reconstruido y recreado — trae de una vez el fix de #94 **y** el backend de #67/#91, que nunca se habían desplegado como contenedor (solo se había aplicado la migración SQL de #67 esa misma mañana).
+3. Script de elegibilidad aplicado contra producción — **confirmado 1219/1482 elegibles, idéntico a la base local.**
+4. `get_skus_modelo.py` confirmado en producción: ya devuelve los 1.219 SKUs reales (antes devolvía 104).
+
+**Decisión explícita:** no se disparó `run_predict.sh` manualmente esta noche — se deja que lo haga el cron natural de las 3 AM (ya validado end-to-end en #74, sin necesidad de otra intervención manual después de una noche ya larga con el incidente de RAM). Verificación de las predicciones reales generadas queda para la próxima sesión, revisando `jobs_historial` del cron de esta noche.
+
+**#75 sigue abierto** — pendiente confirmar mañana que el cron de las 3 AM generó predicciones reales para los SKUs recién elegibles (criterio de aceptación del issue: "predicciones generadas y verificadas en producción"), antes de cerrar.
+
+---
+
 ## Documentación adicional
 
 | Archivo | Contenido |
