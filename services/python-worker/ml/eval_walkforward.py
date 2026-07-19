@@ -7,9 +7,7 @@ from ml.models import (
     fit_rf_with_walkforward,
     fit_xgb_with_walkforward,
     fit_prophet_with_walkforward,
-    fit_rf_insample,
-    fit_xgb_insample,
-    fit_prophet_insample,
+    _mae,
 )
 from ioworker.db import DBConfig, get_engine, upsert_elegibilidad_metrics, insert_catalogo_modelos
 from ioworker.data import load_series_by_sku_mysql
@@ -99,44 +97,34 @@ def _finite(x):
         return None
 
 
-# Issue #86 (code review): dict en vez de if/elif -- una sola fuente de
-# verdad para el nombre de modelo -> fit de referencia, en vez de un
-# segundo if/elif que puede desincronizarse en silencio del `name=` que
-# usan fit_rf_with_walkforward/fit_xgb_with_walkforward/fit_prophet_with_walkforward.
-_REFERENCE_FITTERS = {
-    "RF": lambda sku, s: fit_rf_insample(s, steps_forecast=1, lags=LAGS, freq=FREQ),
-    "XGB": lambda sku, s: fit_xgb_insample(s, steps_forecast=1, lags=LAGS, freq=FREQ),
-    "PROPHET": lambda sku, s: fit_prophet_insample(sku=sku, train=s, steps_forecast=1, lags=LAGS, freq=FREQ),
-}
-
-
 def _build_catalog_row(sku: str, s: pd.Series, wf_result, version: str) -> dict:
     """
-    Issue #86: fit de referencia sobre la serie completa (no sobre los folds
-    del walk-forward) para obtener hiperparametros/features limpios -- no se
-    threadea WalkForwardResult/_aggregate_walkforward para esto, evita tocar
-    lo que ya usan #72/#73 en produccion.
+    Issue #92: hiperparametros/features/r2_train/rmse_train salen del
+    ModelResult que _aggregate_walkforward ya calculo para el ultimo fold
+    (mayor ventana de entrenamiento) -- ver WalkForwardResult.last_fold_result.
+    Antes (#86) esto hacia un fit extra sobre la serie completa solo para
+    tener estos campos "limpios", duplicando el costo de cada fold (varios
+    fits MCMC extra por SKU en Prophet).
     """
     name = wf_result.name
-    ref = None
-    fitter = _REFERENCE_FITTERS.get(name)
-    if fitter is None:
-        print(f"[WARN] catalogo_modelos: modelo '{name}' sin fit de referencia mapeado (sku={sku}) -- fila queda con campos in-sample en NULL.")
-    else:
-        try:
-            ref = fitter(sku, s)
-        except Exception as e:
-            print(f"[WARN] catalogo_modelos: fit de referencia fallo para sku={sku} modelo={name}: {e}")
-            ref = None
+    ref = wf_result.last_fold_result
+    if ref is None:
+        # No deberia pasar: _build_catalog_row solo se llama cuando
+        # wf_result no es None, y eso exige al menos un fold exitoso.
+        print(f"[WARN] catalogo_modelos: sin last_fold_result para sku={sku} modelo={name} -- fila queda con campos in-sample en NULL.")
 
     # mae_train: ni ModelResult ni WalkForwardResult lo calculan -- se arma
-    # aca mismo comparando el ajuste in-sample del fit de referencia contra
-    # la serie completa (mismo tipo de calculo que _mae en ml/models.py).
+    # aca mismo comparando el ajuste in-sample del ultimo fold contra su
+    # propia ventana de entrenamiento (mismo tipo de calculo que _mae en
+    # ml/models.py). ref.holdout_pred esta alineado a train.index del
+    # ultimo fold, NO a s.index completo -- reindexar s hacia abajo (no
+    # holdout_pred hacia arriba) evita rellenar con NaN y corromper el promedio.
     mae_train = None
     if ref is not None and ref.holdout_pred is not None:
         try:
-            fitted = ref.holdout_pred.reindex(s.index).values.astype("float64")
-            mae_train = float(np.mean(np.abs(s.values.astype("float64") - fitted)))
+            actual = s.reindex(ref.holdout_pred.index).values.astype("float64")
+            fitted = ref.holdout_pred.values.astype("float64")
+            mae_train = _mae(actual, fitted)
         except Exception:
             mae_train = None
 

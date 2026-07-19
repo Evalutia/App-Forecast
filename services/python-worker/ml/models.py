@@ -210,6 +210,16 @@ class WalkForwardResult:
     n_train_rows_mean: Optional[float]
     n_train_rows_min: Optional[int]
     stable: Optional[bool]
+    # Issue #92: ModelResult del ultimo fold exitoso (mayor ventana de
+    # entrenamiento), retenido para que un consumidor como _build_catalog_row
+    # no tenga que re-fitear sobre la serie completa solo para sacar
+    # hiperparametros/features/r2_train limpios.
+    # OJO: sigue siendo un fit de FOLD, no de la serie completa -- su
+    # ventana de entrenamiento excluye los ultimos 'horizon' periodos (ver
+    # _walk_forward_split). last_fold_result.forecast predice ese tramo ya
+    # conocido, NO periodos futuros reales -- no usar como pronostico de
+    # produccion (para eso ver el fit de referencia propio de predict.py).
+    last_fold_result: Optional["ModelResult"] = None
 
 # (A continuación se mantiene TODO el resto del archivo original,
 #  exactamente igual que antes, hasta la definición de fit_rf_insample, etc.)
@@ -678,6 +688,7 @@ def _aggregate_walkforward(
     rmse_tests: List[Optional[float]] = []
     mae_tests: List[Optional[float]] = []
     n_train_rows_list: List[int] = []
+    last_fold_result = None
 
     for train, test in folds:
         base = fit_one_fold(train, horizon)
@@ -706,6 +717,9 @@ def _aggregate_walkforward(
         rmse_trains.append(base.rmse)
         rmse_tests.append(rmse_te)
         mae_tests.append(mae_te)
+        # folds vienen ordenados por ventana de entrenamiento creciente
+        # (ver walk_forward_split) -- el ultimo exitoso queda con la mayor.
+        last_fold_result = base
 
     if not r2_tests:
         return None
@@ -727,6 +741,7 @@ def _aggregate_walkforward(
         n_train_rows_mean=float(np.mean(n_train_rows_list)),
         n_train_rows_min=int(np.min(n_train_rows_list)),
         stable=(bool(np.std(r2_arr) < 0.2) if n_folds > 1 else None),
+        last_fold_result=last_fold_result,
     )
 
 

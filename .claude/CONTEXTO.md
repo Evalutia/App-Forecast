@@ -2344,6 +2344,38 @@ Mismo anti-patrón que tenía `eval_walkforward.py` antes del fix de #72, encont
 
 ---
 
+### Elimina el fit de referencia duplicado en catalogo_modelos — Issue #92 (sesión 2026-07-19)
+
+Encontrado por `/code-review` durante el smoke test de #86: `_build_catalog_row()` en `eval_walkforward.py` hacía un fit *aparte*, sobre la serie completa, solo para sacar `hiperparametros`/`features`/`r2_train`/`rmse_train` "limpios" para la tabla diagnóstica `catalogo_modelos` — encima de los folds que el walk-forward ya había corrido momentos antes para ese mismo SKU/modelo. Confirmado empíricamente en #86: 4 corridas MCMC de Prophet por SKU (3 folds + 1 fit de referencia extra) en vez de 3.
+
+**Decisiones de grilling:**
+
+| Decisión | Definición |
+|----------|-----------|
+| **Aplica a los 3 modelos (RF/XGB/Prophet), no solo a Prophet** | `_aggregate_walkforward` ya es un único código compartido por los 3 vía `fit_rf_with_walkforward`/`fit_xgb_with_walkforward`/`fit_prophet_with_walkforward` — semántica pareja (misma fuente de `r2_train`/`hiperparametros` para los 3) vale más que ahorrar unos ms extra solo en RF/XGB, que ya eran baratos. |
+| **`WalkForwardResult` retiene el `ModelResult` del último fold exitoso** | Nuevo campo `last_fold_result` (default `None`, agregado al final del dataclass — no rompe construcciones existentes). `_walk_forward_split` siempre devuelve folds en orden ascendente de ventana de entrenamiento, así que el último fold que llega a `r2_tests.append(...)` en el loop de `_aggregate_walkforward` es, por construcción, el de mayor ventana entre los que tuvieron éxito (verificado con test que fuerza el último fold de la lista a fallar). |
+| **`_REFERENCE_FITTERS` se elimina por completo, sin fallback** | `_build_catalog_row` solo se llama cuando `wf_result` no es `None`, lo que exige ≥1 fold exitoso — `last_fold_result` está garantizado no-`None` en ese caso. No hay caso alcanzable que necesite un fit de respaldo. |
+| **`mae_train` cambia de dirección de reindex** | Antes: `ref.holdout_pred.reindex(s.index)` (seguro cuando `ref` venía de un fit sobre la serie completa). Ahora `ref` es el último fold, cuya ventana excluye los últimos `horizon` períodos (`EVAL_HORIZON=4`, ~1 año en `FREQ=QS`) — reindexar hacia arriba metería NaN. Se invirtió: `s.reindex(ref.holdout_pred.index)`, y se reusa `_mae()` de `ml/models.py` en vez de reimplementarlo inline (hallazgo de `/code-review`, ángulo Reuse). |
+| **Semántica de `r2_train`/`rmse_train`/`hiperparametros`/`features` cambia** | Antes: fit sobre la serie completa. Ahora: fit del último fold walk-forward (ventana algo menor). Aceptado porque `catalogo_modelos` es tabla puramente diagnóstica — confirmado que ningún código de producción la lee (ni `apply_elegibilidad.py`, que solo usa `r2_test`/`estable`/`n_folds`, ni backend, ni frontend). |
+
+**`/code-review` (8 ángulos) no encontró bugs de correctness** — 3 ángulos independientes verificaron por separado que `last_fold_result` es no-`None` siempre que se necesita, que el reindex nuevo no introduce NaN, y que `predict.py` (que también usa `fit_*_with_walkforward` pero nunca lee `last_fold_result`) queda intacto. 2 findings aplicados: reusar `_mae()` en vez de reimplementarlo, y reforzar el docstring de `last_fold_result` en `ml/models.py` para dejar explícito que sigue siendo un fit de fold (ventana incompleta) y que `.forecast` no debe usarse como pronóstico real de producción — hallazgo del ángulo Altitude, pensando en un futuro consumidor de `WalkForwardResult` que no fuera `eval_walkforward.py`.
+
+**Medición real (criterio de aceptación del issue), benchmark aislado sobre 10 SKUs con historia larga (40 trimestres) para forzar que Prophet corra de verdad:**
+
+| | Antes (#86) | Después (#92) |
+|---|---|---|
+| Walk-forward (igual en ambas versiones) | 230.96s | 230.96s |
+| Fit de referencia extra | 51.14s | 0s (eliminado) |
+| **Total** | **282.10s** | **230.96s** |
+
+**18.1% de reducción** en el tiempo total de construir `catalogo_modelos` para este lote. Un SKU individual (C00204/PROPHET) mostró 38.16s de fit duplicado eliminado por sí solo — el caso exacto que motivó el issue.
+
+**Verificado:** suite completa (`test_predict`, `test_evaluate`, `test_eval_walkforward`, `test_apply_elegibilidad`) corrida en el contenedor `etl`, las 4 pasan. 3 tests nuevos en `test_eval_walkforward.py` (TDD): que `last_fold_result` captura el último fold exitoso, que ignora folds que fallan al final de la lista, y que `_build_catalog_row` usa `last_fold_result` sin re-fit y calcula `mae_train` correctamente contra la ventana del fold.
+
+**#92 cerrado.**
+
+---
+
 ## Documentación adicional
 
 | Archivo | Contenido |
