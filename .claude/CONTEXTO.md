@@ -2466,6 +2466,20 @@ Con #97 resuelto, se re-corrieron los casos borde de #76. **Los 21 candidatos or
 
 ---
 
+### Cierre de #75: cron real confirmado en producción (sesión 2026-07-20)
+
+Acceso a la VM recuperado (clave SSH nueva, autorizada por el socio -- ver nota de seguridad abajo). Verificado contra `jobs_historial`/`predicciones` reales:
+
+**Job 231** (`tipo_job='forecast'`, `version='mvp-001'`): `2026-07-19 03:17:58` a `03:22:08` (4 min), `estado='exitoso'`. `skus_procesados=20` de los 1219 elegibles -- el resto quedó fuera con warnings explícitos `"omitido por pocos datos (N periodos tras aplicar force-end)"`, consistente con el hallazgo de #97 (la mayoría del catálogo elegible no tiene historia suficiente para generar una predicción real, más allá de si pasa el criterio de elegibilidad).
+
+**Confirmado en `predicciones`:** 40 filas reales, 20 SKUs distintos, 2 modelos (`PROPHET`/`XGB`), r2 en rango razonable (0.06-0.69, sin valores degenerados visibles en esta muestra). Cumple el criterio de aceptación de #75 ("predicciones generadas y verificadas en producción").
+
+**Nota de seguridad, acceso nuevo a la VM:** el socio generó una clave SSH (ED25519) como alternativa al flujo de sesión SSM usado el resto de la sesión. Se recibió inicialmente en `~/Downloads` (carpeta sincronizada a la nube) con permisos `0644` -- movida a `~/.ssh/` con permisos `600` antes de usarla, y borradas las copias de `Downloads`. `ubuntu` (el usuario de esta clave) está en el grupo `docker` directo (no hace falta `sudo` para comandos docker, a diferencia de `ssm-user`) pero SÍ hace falta `sudo` para leer `/opt/evalutia/.env` (propiedad de `ssm-user`).
+
+**#75 cerrado.**
+
+---
+
 ## Documentación adicional
 
 | Archivo | Contenido |
