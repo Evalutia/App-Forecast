@@ -2480,6 +2480,24 @@ Acceso a la VM recuperado (clave SSH nueva, autorizada por el socio -- ver nota 
 
 ---
 
+### Deploy del fix de #97 a producción (sesión 2026-07-20)
+
+Decisión explícita del usuario: desplegar la elegibilidad real corregida ahora ("por ahora es lo que tenemos, después se va mejorando en base a trabajo y esfuerzo"), aceptando la caída de 1219 a 14 SKUs como el número honesto actual.
+
+**Hallazgo adicional antes de desplegar:** `revocar_elegibilidad_sin_medicion` (de #73) solo tocaba `elegible`, dejando `r2_test`/`estable`/`n_folds` con el valor VIEJO (potencialmente degenerado, de antes del fix de #97) en SKUs sin ninguna medición real hoy. Corregido para dejarlos en `NULL` -- encontrado al generar el script de sync, antes de tocar producción (ver commit `4e6a131`).
+
+**Desplegado:**
+1. Acceso a la VM recuperado vía clave SSH nueva (autorizada por el socio, ver nota de seguridad en el cierre de #75 más arriba).
+2. `git pull` en la VM vía `sudo -u ssm-user` (el usuario `ubuntu` de la clave nueva no tenía el deploy key de GitHub configurado; `ssm-user` sí).
+3. `docker compose build etl python-worker && up -d --force-recreate etl python-worker` -- ambos servicios bakean el código de `ml/models.py`/`predict.py`/`eval_walkforward.py` por separado (Dockerfiles distintos, `services/etl/Dockerfile` y `services/python-worker/Dockerfile`), los dos necesitaban rebuild.
+4. `scripts/sync_elegibilidad_97_a_produccion.sql` aplicado directo contra producción (mismo patrón que #75: `docker compose exec mysql` con redirección del lado del host, no dentro del `bash -c` del contenedor).
+
+**Verificado en producción:** `articulos_elegibilidad_econometrico` -- 1482 filas totales, **14 elegibles**, valores idénticos a la medición local (r2_test 0.016-0.69, todos `estable=TRUE`). Los 1205 restantes revocados, con `r2_test`/`estable`/`n_folds` en `NULL` (no valores viejos engañosos). Todos los servicios (`etl`, `python-worker`, `webapi`, `mysql`, etc.) saludables tras el redeploy.
+
+**#97 desplegado a producción. La elegibilidad real hoy es 14 SKUs -- crecerá con más historia de ventas acumulada y, eventualmente, con trabajo futuro sobre el enfoque de features de RF/XGB para historias cortas (pregunta abierta, no resuelta en esta sesión).**
+
+---
+
 ## Documentación adicional
 
 | Archivo | Contenido |
