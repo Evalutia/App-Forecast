@@ -123,10 +123,21 @@ def revocar_elegibilidad_sin_medicion(engine, huerfanos: List[str]) -> List[str]
     contra el mismo snapshot que se usa para el resumen -- evita
     recalcularlo aca contra un estado potencialmente distinto tras el
     upsert). Devuelve los SKUs revocados.
+
+    Issue #97 (code review): tambien limpia r2_test/estable/n_folds --
+    antes solo se tocaba 'elegible', dejando el r2_test/estable de una
+    medicion VIEJA (potencialmente degenerada, de antes del fix de #97)
+    en un SKU que hoy no tiene ninguna medicion real. "Sin evidencia" debe
+    verse como NULL, no como un numero de una corrida anterior que ya no
+    aplica.
     """
     if not huerfanos:
         return []
-    sql = text("UPDATE articulos_elegibilidad_econometrico SET elegible = FALSE, evaluado_en = NOW(6) WHERE sku = :sku")
+    sql = text(
+        "UPDATE articulos_elegibilidad_econometrico "
+        "SET elegible = FALSE, r2_test = NULL, estable = NULL, n_folds = NULL, evaluado_en = NOW(6) "
+        "WHERE sku = :sku"
+    )
     with engine.begin() as conn:
         for sku in huerfanos:
             conn.execute(sql, {"sku": sku})
