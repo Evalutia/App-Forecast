@@ -2498,6 +2498,18 @@ Decisión explícita del usuario: desplegar la elegibilidad real corregida ahora
 
 ---
 
+### Hallazgo sin ticket: el backfill de 2 años (#44) probablemente explica la mayor parte del problema de cobertura (sesión 2026-07-20)
+
+Durante el `/grill-me` del plan de modelos econométricos (que derivó en los tickets #98-#103), surgió una pista que **no se convirtió en ticket a pedido explícito del usuario** ("dejalo por afuera, no lo mezcles con el plan de modelos") -- se deja esta nota para que no se pierda, no para forzar una acción.
+
+**El hallazgo:** issue #44 (cerrado, sesión 2026-06-23) documenta que el backfill histórico para los grupos nuevos se limitó a "hoy − 2 años" por **decisión explícita del cliente, no por límite técnico del sistema de origen** -- el propio issue aclara "no el grupo 201, que ya tiene 10 años cargados". La mediana real de historia del catálogo, medida hoy durante el trabajo de #97, es ~9 trimestres (~2.25 años) -- prácticamente ese mismo límite de 2 años.
+
+**Por qué importa:** todo el trabajo de hoy (#97 y el plan de #98-#103) ataca el problema de cobertura desde el lado del *modelo* (qué algoritmo, qué hiperparámetros, qué filtro de folds). Pero si el sistema de origen del cliente efectivamente tiene más de 2 años de historia disponibles para el resto del catálogo (igual que ya los tiene para el grupo 201), extender el backfill sería una palanca más barata y potencialmente de mayor impacto que cualquier cambio de modelo -- sin tocar una línea de `ml/`.
+
+**Por qué no se actuó ahora:** el usuario prefirió mantenerlo separado del plan de modelos en curso, sin comprometerse a nada todavía. Queda como una pregunta abierta para retomar cuando se decida: ¿el sistema de origen (`ConsStockVenta`) realmente tiene más de 2 años disponibles para los grupos que no son el 201? Si la respuesta es sí, extender `BACKFILL_FROM` en `run_backfill_ventas.sh` (ya soporta override vía env var, sin cambios de código) sería el primer paso.
+
+---
+
 ## Documentación adicional
 
 | Archivo | Contenido |
