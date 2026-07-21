@@ -7,16 +7,31 @@ const ESTADOS_MES = [
   { value: 'sin_stock',      label: 'Sin stock'          },
 ];
 
+// Criterio del mes vigente (el mas reciente de cada articulo), no "en algun
+// momento del año": a diferencia de estadoMes (un quiebre puntual importa
+// aunque haya sido hace meses), criterioFrecuencia depende de cuantos
+// tickets tuvo CADA mes -- "al menos un mes" haria que casi cualquier SKU
+// no-alta-frecuencia pasara el filtro. Lo que importa es que criterio
+// respalda el numero que se ve HOY (mismo mes de referencia/"esRef" que ya
+// resalta PlanillaTable.tsx en itálica).
+const CRITERIOS_FRECUENCIA = [
+  { value: '',                 label: 'Todos los criterios'          },
+  { value: 'historico',        label: 'Histórico (≤2 tickets)'       },
+  { value: 'promedio',         label: 'Promedio (3-4 tickets)'       },
+  { value: 'real_extrapolado', label: 'Real / Extrapolado (≥5 tickets)' },
+];
+
 type Props = {
   marcaId:    number | undefined;
   generoId:   number | undefined;
   grupoId:    number | undefined;
   estadoMes:  string | undefined;
-  onFilterChange: (updates: { marcaId?: number; generoId?: number; grupoId?: number; estadoMes?: string }) => void;
+  criterioFrecuencia: string | undefined;
+  onFilterChange: (updates: { marcaId?: number; generoId?: number; grupoId?: number; estadoMes?: string; criterioFrecuencia?: string }) => void;
   onReset: () => void;
 };
 
-export default function FiltrosPlanilla({ marcaId, generoId, grupoId, estadoMes, onFilterChange, onReset }: Props) {
+export default function FiltrosPlanilla({ marcaId, generoId, grupoId, estadoMes, criterioFrecuencia, onFilterChange, onReset }: Props) {
   const { data: filtros, isLoading, isError } = usePlanillaFiltros(grupoId);
 
   const cargando  = isLoading;
@@ -26,7 +41,9 @@ export default function FiltrosPlanilla({ marcaId, generoId, grupoId, estadoMes,
   const sinMarca  = filtros?.articulosIncompletos.sinMarca  ?? 0;
   const sinGenero = filtros?.articulosIncompletos.sinGenero ?? 0;
   const hayIncompletos   = !isError && !isLoading && (sinMarca > 0 || sinGenero > 0);
-  const hayFiltrosActivos = marcaId != null || generoId != null || grupoId != null || (estadoMes != null && estadoMes !== '');
+  const hayFiltrosActivos = marcaId != null || generoId != null || grupoId != null
+      || (estadoMes != null && estadoMes !== '')
+      || (criterioFrecuencia != null && criterioFrecuencia !== '');
 
   return (
     <section className="pg-filter-card">
@@ -79,6 +96,19 @@ export default function FiltrosPlanilla({ marcaId, generoId, grupoId, estadoMes,
             onChange={e => onFilterChange({ estadoMes: e.target.value || undefined })}
           >
             {ESTADOS_MES.map(({ value, label }) => (
+              <option key={value} value={value}>{label}</option>
+            ))}
+          </select>
+        </div>
+
+        <div className="pg-form-row">
+          <label className="pg-label">Criterio de frecuencia (mes vigente)</label>
+          <select
+            className="pg-select"
+            value={criterioFrecuencia ?? ''}
+            onChange={e => onFilterChange({ criterioFrecuencia: e.target.value || undefined })}
+          >
+            {CRITERIOS_FRECUENCIA.map(({ value, label }) => (
               <option key={value} value={value}>{label}</option>
             ))}
           </select>

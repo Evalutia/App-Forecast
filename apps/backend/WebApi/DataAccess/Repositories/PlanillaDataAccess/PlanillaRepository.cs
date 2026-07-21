@@ -18,7 +18,8 @@ namespace DataAccess.Repositories.PlanillaDataAccess
         uint? marcaId,
         uint? generoId,
         uint? grupoId,
-        string? estadoMes)
+        string? estadoMes,
+        string? criterioFrecuencia)
     {
       // Query base sobre filas de planilla — el filtro estadoMes se aplica aquí,
       // antes del Distinct, lo que implementa la semántica "al menos un mes con ese estado"
@@ -41,6 +42,28 @@ namespace DataAccess.Repositories.PlanillaDataAccess
           articulosQuery = articulosQuery.Where(a => a.GrupoId == grupoId);
         var skusFiltrados = articulosQuery.Select(a => a.Sku);
         skuQuery = skuQuery.Where(s => skusFiltrados.Contains(s));
+      }
+
+      // criterioFrecuencia no es un atributo fijo del articulo como marca/género --
+      // varía mes a mes (depende de tickets_mes de CADA mes), así que "al menos un
+      // mes" (semántica de estadoMes de arriba) sería poco selectivo: casi cualquier
+      // SKU que no sea de altísima frecuencia pasaría el filtro. Lo que importa para
+      // decidir HOY es el mes vigente (el último mes con datos de ESE sku, mismo
+      // concepto que "esRef"/mes de referencia en PlanillaTable.tsx) -- por eso se
+      // filtra por SKU (igual que marca/género/grupo), no por fila.
+      if (criterioFrecuencia != null)
+      {
+        var mesVigentePorSku = _db.PlanillasVentasCalculadas
+            .GroupBy(p => p.Sku)
+            .Select(g => new { Sku = g.Key, Orden = g.Max(p => p.Year * 12 + p.Month) });
+
+        var skusConCriterioVigente =
+            from p in _db.PlanillasVentasCalculadas
+            join mv in mesVigentePorSku on p.Sku equals mv.Sku
+            where p.Year * 12 + p.Month == mv.Orden && p.CriterioFrecuencia == criterioFrecuencia
+            select p.Sku;
+
+        skuQuery = skuQuery.Where(s => skusConCriterioVigente.Contains(s));
       }
 
       var totalSkus = skuQuery.Count();

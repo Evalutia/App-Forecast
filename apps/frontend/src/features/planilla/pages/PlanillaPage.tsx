@@ -15,8 +15,9 @@ export default function PlanillaPage() {
   const [generoId, setGeneroId] = useState<number | undefined>();
   const [grupoId, setGrupoId] = useState<number | undefined>();
   const [estadoMes, setEstadoMes] = useState<string | undefined>();
+  const [criterioFrecuencia, setCriterioFrecuencia] = useState<string | undefined>();
 
-  const params: PlanillaVentasParams = { page, pageSize, marcaId, generoId, grupoId, estadoMes };
+  const params: PlanillaVentasParams = { page, pageSize, marcaId, generoId, grupoId, estadoMes, criterioFrecuencia };
 
   const { data: sugerenciasData, isLoading: sugerenciasLoading } = usePlanillaSugerencias();
   const sugerencias = useMemo<Map<string, PlanillaSugerenciaDto>>(
@@ -26,7 +27,7 @@ export default function PlanillaPage() {
 
   const handlePageChange = (nextPage: number) => setPage(nextPage);
 
-  const handleFilterChange = (updates: Partial<{ marcaId?: number; generoId?: number; grupoId?: number; estadoMes?: string }>) => {
+  const handleFilterChange = (updates: Partial<{ marcaId?: number; generoId?: number; grupoId?: number; estadoMes?: string; criterioFrecuencia?: string }>) => {
     if ('marcaId'   in updates) setMarcaId(updates.marcaId);
     if ('generoId'  in updates) setGeneroId(updates.generoId);
     if ('grupoId'   in updates) {
@@ -36,6 +37,7 @@ export default function PlanillaPage() {
       setGeneroId(undefined);
     }
     if ('estadoMes' in updates) setEstadoMes(updates.estadoMes);
+    if ('criterioFrecuencia' in updates) setCriterioFrecuencia(updates.criterioFrecuencia);
     setPage(1);
   };
 
@@ -44,6 +46,7 @@ export default function PlanillaPage() {
     setGeneroId(undefined);
     setGrupoId(undefined);
     setEstadoMes(undefined);
+    setCriterioFrecuencia(undefined);
     setPage(1);
   };
 
@@ -67,6 +70,7 @@ export default function PlanillaPage() {
           generoId={generoId}
           grupoId={grupoId}
           estadoMes={estadoMes}
+          criterioFrecuencia={criterioFrecuencia}
           onFilterChange={handleFilterChange}
           onReset={handleReset}
         />

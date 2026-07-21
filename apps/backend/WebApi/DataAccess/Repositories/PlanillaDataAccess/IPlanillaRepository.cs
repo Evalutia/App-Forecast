@@ -10,7 +10,8 @@ namespace DataAccess.Repositories.PlanillaDataAccess
         uint? marcaId,
         uint? generoId,
         uint? grupoId,
-        string? estadoMes
+        string? estadoMes,
+        string? criterioFrecuencia
     );
 
     (List<(uint Id, string Nombre)> Marcas, List<(uint Id, string Nombre)> Generos, List<(uint Id, string Nombre)> Grupos, int SinMarca, int SinGenero) GetFiltros(uint? grupoId);

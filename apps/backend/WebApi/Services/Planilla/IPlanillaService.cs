@@ -4,7 +4,7 @@ namespace Services.Planilla
 {
   public interface IPlanillaService
   {
-    (IReadOnlyList<PlanillaSkuDto> Items, int TotalSkus) GetVentas(int page, int pageSize, uint? marcaId = null, uint? generoId = null, uint? grupoId = null, string? estadoMes = null);
+    (IReadOnlyList<PlanillaSkuDto> Items, int TotalSkus) GetVentas(int page, int pageSize, uint? marcaId = null, uint? generoId = null, uint? grupoId = null, string? estadoMes = null, string? criterioFrecuencia = null);
     PlanillaFiltrosDto GetFiltros(uint? grupoId = null);
     IReadOnlyList<PlanillaSugerenciaDto> GetSugerencias();
   }

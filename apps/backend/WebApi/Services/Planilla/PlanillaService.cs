@@ -9,6 +9,9 @@ namespace Services.Planilla
     private static readonly HashSet<string> _estadosValidos =
         ["normal", "quiebre_parcial", "sin_stock"];
 
+    private static readonly HashSet<string> _criteriosValidos =
+        ["historico", "promedio", "real_extrapolado"];
+
     public PlanillaService(IPlanillaRepository repo)
     {
       _repo = repo;
@@ -20,7 +23,8 @@ namespace Services.Planilla
         uint? marcaId = null,
         uint? generoId = null,
         uint? grupoId = null,
-        string? estadoMes = null)
+        string? estadoMes = null,
+        string? criterioFrecuencia = null)
     {
       if (page < 1)
         throw new InvalidOperationException("page debe ser >= 1");
@@ -33,7 +37,12 @@ namespace Services.Planilla
             $"Valor inválido '{estadoMes}'. Permitidos: {string.Join(", ", _estadosValidos)}",
             nameof(estadoMes));
 
-      var (filas, totalSkus) = _repo.GetVentas(page, pageSize, marcaId, generoId, grupoId, estadoMes);
+      if (criterioFrecuencia != null && !_criteriosValidos.Contains(criterioFrecuencia))
+        throw new ArgumentException(
+            $"Valor inválido '{criterioFrecuencia}'. Permitidos: {string.Join(", ", _criteriosValidos)}",
+            nameof(criterioFrecuencia));
+
+      var (filas, totalSkus) = _repo.GetVentas(page, pageSize, marcaId, generoId, grupoId, estadoMes, criterioFrecuencia);
 
       // Pivot tall → wide: agrupar filas por SKU y construir array de meses
       var items = filas

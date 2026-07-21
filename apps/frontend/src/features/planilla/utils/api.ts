@@ -12,6 +12,7 @@ export async function fetchPlanillaVentas(params: PlanillaVentasParams): Promise
   if (params.generoId != null) qp.generoId = params.generoId;
   if (params.grupoId != null) qp.grupoId = params.grupoId;
   if (params.estadoMes) qp.estadoMes = params.estadoMes;
+  if (params.criterioFrecuencia) qp.criterioFrecuencia = params.criterioFrecuencia;
 
   const { data } = await api.get<PlanillaVentasPagedResponse>(`${BASE}/ventas`, { params: qp });
   return data;

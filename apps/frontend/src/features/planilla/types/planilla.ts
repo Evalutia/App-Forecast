@@ -56,6 +56,7 @@ export interface PlanillaVentasParams {
   generoId?: number;
   grupoId?: number;
   estadoMes?: string;
+  criterioFrecuencia?: string;
 }
 
 export interface PlanillaSugerenciaDto {
