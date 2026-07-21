@@ -2498,15 +2498,24 @@ Decisión explícita del usuario: desplegar la elegibilidad real corregida ahora
 
 ---
 
-### Hallazgo sin ticket: el backfill de 2 años (#44) probablemente explica la mayor parte del problema de cobertura (sesión 2026-07-20)
+### Hallazgo del backfill de 2 años (#44), retomado y convertido en tickets #104/#105 (sesión 2026-07-21)
 
-Durante el `/grill-me` del plan de modelos econométricos (que derivó en los tickets #98-#103), surgió una pista que **no se convirtió en ticket a pedido explícito del usuario** ("dejalo por afuera, no lo mezcles con el plan de modelos") -- se deja esta nota para que no se pierda, no para forzar una acción.
+Surgió en el `/grill-me` del plan de modelos econométricos (sesión 2026-07-20, que derivó en #98-#103) como una pista deliberadamente dejada sin ticket a pedido del usuario. Retomada al día siguiente vía `/grill-me` dedicado.
 
-**El hallazgo:** issue #44 (cerrado, sesión 2026-06-23) documenta que el backfill histórico para los grupos nuevos se limitó a "hoy − 2 años" por **decisión explícita del cliente, no por límite técnico del sistema de origen** -- el propio issue aclara "no el grupo 201, que ya tiene 10 años cargados". La mediana real de historia del catálogo, medida hoy durante el trabajo de #97, es ~9 trimestres (~2.25 años) -- prácticamente ese mismo límite de 2 años.
+**El hallazgo original:** issue #44 (cerrado, sesión 2026-06-23) limitó el backfill histórico de los grupos no-201 a "hoy − 2 años" por **decisión explícita del cliente, no por límite técnico** -- el grupo 201 ya tiene 10 años cargados desde el mismo mecanismo. La mediana real de historia del catálogo (~9 trimestres) coincide casi exactamente con ese límite.
 
-**Por qué importa:** todo el trabajo de hoy (#97 y el plan de #98-#103) ataca el problema de cobertura desde el lado del *modelo* (qué algoritmo, qué hiperparámetros, qué filtro de folds). Pero si el sistema de origen del cliente efectivamente tiene más de 2 años de historia disponibles para el resto del catálogo (igual que ya los tiene para el grupo 201), extender el backfill sería una palanca más barata y potencialmente de mayor impacto que cualquier cambio de modelo -- sin tocar una línea de `ml/`.
+**Verificación técnica real, corrida en producción antes de decidir nada:** se conectó por SSH a la VM (misma clave `nueva_key_ec2.pem` de la sesión anterior, usuario `ubuntu`, confirmado con un chequeo de solo lectura antes de tocar nada) y se corrió manualmente `run_extract_sales_chunk.sh` contra el SOAP real (`ConsStockVenta`, `WS_URL=https://200.125.29.194:81` -- la URL del README estaba desactualizada, quedó en HTTP de antes del corte mTLS de #51/#52) para el grupo 50 (PERIFÉRICOS, el no-201 más grande, 744 artículos), pidiendo la semana 01-07/07/2022 (~4 años atrás). Resultado real: **644 unidades de venta confirmadas** (ej. SKU I00724 vendió 1 unidad el 01/07/2022), insertadas en `ventas_historicas_stage` (staging, truncado después, nunca tocó la tabla real). Confirma que el sistema de origen sí tiene historia real disponible mucho más allá de los 2 años actuales.
 
-**Por qué no se actuó ahora:** el usuario prefirió mantenerlo separado del plan de modelos en curso, sin comprometerse a nada todavía. Queda como una pregunta abierta para retomar cuando se decida: ¿el sistema de origen (`ConsStockVenta`) realmente tiene más de 2 años disponibles para los grupos que no son el 201? Si la respuesta es sí, extender `BACKFILL_FROM` en `run_backfill_ventas.sh` (ya soporta override vía env var, sin cambios de código) sería el primer paso.
+**Decisión tomada directamente** (el usuario explícitamente no quiso pasar por el cliente para esto, toma la responsabilidad): igualar la profundidad del grupo 201 (~10 años, desde `2016-10-03`) para todos los grupos no-201.
+
+**Hallazgos adicionales durante el `/grill-me` de esta sesión, antes de armar los tickets:**
+- Todos los grupos no-201 arrancan `ventas_historicas` en `2024-06-25` (coincide con "hoy − 2 años" al momento en que corrió #44), excepto el grupo 76 que ya tiene historia completa hasta `2016-10-03` (artefacto de re-categorización histórica de SKUs entre grupos).
+- **Bug real en `backfill_jobs.py`**: `cmd_check` solo compara `grupo_id` contra corridas `exitoso` previas, no compara `fecha_desde`/`fecha_hasta` -- correr el backfill extendido tal cual hubiera salteado los 65 grupos de una, sin extraer nada (no-op silencioso). Se agrega como bloqueante del mismo ticket, no un ticket aparte.
+- **Timing real medido** (no estimado): el backfill original de 2 años tardó ~13.7 horas en total para 65 grupos (`jobs_historial`), el grupo más grande (200) solo él ~3.8h. Extendiendo a 10 años (5x el rango), se espera **varios días de corrida real** -- se agrega como criterio de rollout (piloto de 1 grupo primero, `nohup` para sobrevivir el cierre de la sesión SSH).
+
+**Tickets publicados:**
+- [#104](https://github.com/Evalutia/App-Forecast/issues/104) -- fix de resumibilidad + backfill extendido a ~10 años. Sin bloqueos, listo para arrancar.
+- [#105](https://github.com/Evalutia/App-Forecast/issues/105) -- medir el impacto real en elegibilidad post-backfill, reusando `ml/run_eval_elegibilidad_dry_run.py` (#102). Bloqueado por #104.
 
 ---
 
