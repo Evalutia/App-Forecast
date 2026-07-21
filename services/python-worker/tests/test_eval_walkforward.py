@@ -260,6 +260,30 @@ def test_filtro_de_n_train_rows_no_aplica_a_ets():
     assert result.n_folds == 1
 
 
+def test_filtro_de_n_train_rows_no_aplica_a_sarima():
+    # Issue #99 (mismo trato que Prophet/ETS): SARIMA es univariado, no
+    # consume 'lags' como features tabulares (fit_sarima_insample recibe
+    # 'lags' solo para mantener la misma firma que el resto de los
+    # fit_*_insample, pero jamas lo usa para construir columnas lag_N).
+    # El piso n_train_rows>=lags viene exclusivamente de como RF/XGB
+    # construyen _build_lag_month_trend -- no le aplica a SARIMA, que tiene
+    # su propio gate interno de historia minima (2 ciclos estacionales).
+    idx = pd.date_range("2024-01-01", periods=4, freq="MS")
+    train = pd.Series(np.arange(4, dtype="float64"), index=idx)
+    test = pd.Series([4.0, 5.0], index=pd.date_range("2024-05-01", periods=2, freq="MS"))
+
+    result = _aggregate_walkforward(
+        name="SARIMA",
+        folds=[(train, test)],
+        fit_one_fold=lambda tr, h: _FakeFoldResult(forecast=np.array([4.0, 5.0]), rmse=0.0),
+        horizon=2,
+        lags=3,
+    )
+
+    assert result is not None, "SARIMA no deberia quedar excluido por el piso de n_train_rows -- no le aplica"
+    assert result.n_folds == 1
+
+
 def test_json_safe_replaces_nan_with_none():
     # Regresion: XGBRegressor.get_params() trae 'missing': float('nan') por
     # default -- json.dumps de eso produce el literal NaN, que MySQL rechaza
@@ -285,5 +309,6 @@ if __name__ == "__main__":
     test_walkforward_result_none_si_todos_los_folds_degeneran()
     test_filtro_de_n_train_rows_no_aplica_a_prophet()
     test_filtro_de_n_train_rows_no_aplica_a_ets()
+    test_filtro_de_n_train_rows_no_aplica_a_sarima()
     test_json_safe_replaces_nan_with_none()
     print("OK - test_eval_walkforward.py")

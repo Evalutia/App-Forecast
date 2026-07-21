@@ -693,7 +693,7 @@ def _aggregate_walkforward(
     for train, test in folds:
         eff_lags = min(lags, max(1, len(train) - 1))
         n_train_rows = len(train) - eff_lags
-        if name not in ("PROPHET", "ETS") and n_train_rows < lags:
+        if name not in ("PROPHET", "ETS", "SARIMA") and n_train_rows < lags:
             # Issue #97: con menos filas utiles de entrenamiento que
             # 'lags' (ya restados los propios lags), RF/XGB no tienen de
             # donde aprender una relacion real -- predicen casi una
@@ -704,11 +704,10 @@ def _aggregate_walkforward(
             # n_obs_train<=1 y r2_test degenerado antes de este fix.
             # Se chequea ANTES de fitear (evita el fit caro, mismo
             # espiritu que #92) y NO aplica a modelos univariados
-            # (Prophet, issue #97; ETS, issue #98): ninguno de los dos usa
-            # 'lags' para construir features -- ambos chequean
-            # internamente su propia historia minima, independiente de
-            # lags (ver /code-review de #97). Si se suma SARIMA (#99),
-            # tambien univariado, va en esta misma tupla.
+            # (Prophet, issue #97; ETS, issue #98; SARIMA, issue #99):
+            # ninguno de los tres usa 'lags' para construir features --
+            # todos chequean internamente su propia historia minima,
+            # independiente de lags (ver /code-review de #97).
             continue
 
         base = fit_one_fold(train, horizon)
@@ -947,5 +946,131 @@ def fit_ets_with_walkforward(
     except Exception:
         log.exception(
             "fit_ets_with_walkforward fallo (sku=%s, lags=%s, freq=%s, n=%s)", sku, lags, freq, len(full_series)
+        )
+        return None
+
+
+# -------------------------------------------------------------------------
+# Nueva función SARIMA (issue #99). Mismo mirror de forma que
+# fit_ets_insample/fit_ets_with_walkforward -- SARIMA es univariado (no
+# consume 'lags' como features tabulares, igual que Prophet/ETS), 'lags' se
+# recibe solo para mantener la misma firma que el resto de los fit_*.
+#
+# Orden fijo, NO auto-busqueda de orden (p,d,q)(P,D,Q,s) por SKU (decision de
+# diseno explicita de #99): pmdarima.auto_arima u otro order-search por SKU
+# es mas flexible pero puede fallar en converger o ser lento corriendo sobre
+# miles de SKUs heterogeneos en la corrida nocturna -- un default razonable
+# es mas confiable a escala que optimizar por SKU.
+#
+# (1,1,1)(1,1,1,s): una diferenciacion regular (d=1) y una estacional (D=1)
+# para series de demanda tipicamente no estacionarias en nivel y con
+# estacionalidad cuya intensidad cambia de un ciclo a otro, mas un termino AR
+# y uno MA en cada parte (regular/estacional) para capturar autocorrelacion
+# residual tras diferenciar -- analogo al "modelo airline" clasico de
+# Box-Jenkins (0,1,1)(0,1,1,s), con un AR adicional en cada parte por
+# robustez general. Verificado empiricamente (ver sesion de implementacion)
+# que converge sin NaN en fittedvalues sobre series sinteticas trimestrales
+# de 8-16 periodos, con y sin valores negativos.
+# -------------------------------------------------------------------------
+SARIMA_ORDER = (1, 1, 1)
+SARIMA_SEASONAL_ORDER_QUARTERLY = (1, 1, 1, 4)
+SARIMA_SEASONAL_ORDER_MONTHLY = (1, 1, 1, 12)
+
+
+def fit_sarima_insample(
+    sku: str,
+    train: pd.Series,
+    steps_forecast: int,
+    lags: int = 12,
+    freq: str = "MS",
+) -> Optional[ModelResult]:
+    """
+    Entrena SARIMA (statsmodels.tsa.statespace.sarimax.SARIMAX) sobre 'train'
+    (serie con índice datetime, valores float) con orden fijo (ver
+    SARIMA_ORDER/SARIMA_SEASONAL_ORDER_* arriba) y devuelve ModelResult con:
+      - forecast: array numpy de longitud steps_forecast (orden horizonte 1..n)
+      - holdout_pred: ajuste in-sample (fittedvalues) alineado con train.index
+      - rmse, r2 calculados sobre in-sample
+    Si la serie no tiene historia suficiente o el ajuste falla (SARIMA puede
+    no converger) retorna None.
+    """
+    try:
+        tr = pd.Series(train).astype("float64").sort_index()
+        is_quarterly = str(freq).upper().startswith("Q")
+        seasonal_periods = 4 if is_quarterly else 12
+        seasonal_order = SARIMA_SEASONAL_ORDER_QUARTERLY if is_quarterly else SARIMA_SEASONAL_ORDER_MONTHLY
+        # Mismo piso que ETS (#98): 2 ciclos estacionales completos.
+        min_needed = 2 * seasonal_periods
+        if len(tr) < min_needed:
+            return None
+
+        # Issue #81: sin filtro de signo -- una nota de credito (venta neta
+        # negativa) es un dato de entrenamiento real, no debe descartarse.
+        # A diferencia de ETS (ExponentialSmoothing multiplicativo), SARIMAX
+        # no tiene ninguna restriccion de positividad que rompa con negativos.
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", category=ConvergenceWarning)
+            warnings.simplefilter("ignore", category=UserWarning)
+            model = SARIMAX(
+                tr,
+                order=SARIMA_ORDER,
+                seasonal_order=seasonal_order,
+                enforce_stationarity=False,
+                enforce_invertibility=False,
+            )
+            fitted = model.fit(disp=False)
+
+        y_fc = np.asarray(fitted.forecast(steps_forecast), dtype="float64")
+        y_fc = np.maximum(y_fc, 0.0)
+
+        holdout = pd.Series(np.asarray(fitted.fittedvalues, dtype="float64"), index=tr.index)
+
+        rmse_val = _rmse(tr.values, holdout.values)
+        r2_val = _r2(tr.values, holdout.values)
+
+        params = {
+            "order": SARIMA_ORDER,
+            "seasonal_order": seasonal_order,
+        }
+
+        return ModelResult(
+            name="SARIMA",
+            forecast=y_fc,
+            rmse=rmse_val,
+            r2=r2_val,
+            params=params,
+            features=None,
+            holdout_pred=holdout,
+        )
+    except Exception:
+        log.exception("fit_sarima_insample fallo (sku=%s, lags=%s, freq=%s, n=%s)", sku, lags, freq, len(train))
+        return None
+
+
+def fit_sarima_with_walkforward(
+    full_series: pd.Series,
+    freq: str,
+    lags: int = 12,
+    horizon: int = 2,
+    max_folds: int = 5,
+    *,
+    sku: str,
+) -> Optional[WalkForwardResult]:
+    try:
+        folds = _walk_forward_split(full_series, min_train=2, horizon=horizon, max_folds=max_folds)
+        if not folds:
+            return None
+        return _aggregate_walkforward(
+            name="SARIMA",
+            folds=folds,
+            fit_one_fold=lambda train, steps: fit_sarima_insample(
+                sku=sku, train=train, steps_forecast=steps, lags=lags, freq=freq
+            ),
+            horizon=horizon,
+            lags=lags,
+        )
+    except Exception:
+        log.exception(
+            "fit_sarima_with_walkforward fallo (sku=%s, lags=%s, freq=%s, n=%s)", sku, lags, freq, len(full_series)
         )
         return None

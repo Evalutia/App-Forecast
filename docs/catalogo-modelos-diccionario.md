@@ -1,8 +1,8 @@
 # Diccionario de variables de entrada — modelos de forecasting
 
-Explica, una sola vez, qué representa conceptualmente cada variable de entrada (`feature`) usada por los 4 algoritmos de forecasting (RandomForest, XGBoost, Prophet, ETS). Referencia para interpretar la columna `features` de `catalogo_modelos` (issue #86) sin tener que releer `ml/models.py` cada vez.
+Explica, una sola vez, qué representa conceptualmente cada variable de entrada (`feature`) usada por los 5 algoritmos de forecasting (RandomForest, XGBoost, Prophet, ETS, SARIMA). Referencia para interpretar la columna `features` de `catalogo_modelos` (issue #86) sin tener que releer `ml/models.py` cada vez.
 
-Fuente: `services/python-worker/ml/models.py`, función `_build_lag_month_trend` y `fit_rf_insample`/`fit_xgb_insample`/`fit_prophet_insample`/`fit_ets_insample`.
+Fuente: `services/python-worker/ml/models.py`, función `_build_lag_month_trend` y `fit_rf_insample`/`fit_xgb_insample`/`fit_prophet_insample`/`fit_ets_insample`/`fit_sarima_insample`.
 
 ## RandomForest y XGBoost
 
@@ -46,6 +46,19 @@ Igual que Prophet, ETS no usa `lag_N`/`period`/`trend` -- su input es directamen
 | `seasonal_periods` | Cantidad de periodos en un ciclo estacional completo: `4` si `freq` es trimestral, `12` si es mensual. Determina cuántas observaciones necesita el modelo para aprender el patrón estacional. |
 
 **Historia mínima.** A diferencia de RF/XGB (que dependen de `eff_lags`) o de Prophet (`min_needed=8` trimestral / `12` mensual), ETS necesita al menos **2 ciclos estacionales completos** para estimar el componente estacional (`min_needed = 2 * seasonal_periods`: 8 periodos trimestral, 24 mensual) -- por debajo de eso, `fit_ets_insample` devuelve `None` sin intentar el fit (`statsmodels` tira `ValueError` si se le pide un ajuste estacional sin suficientes ciclos).
+
+## SARIMA
+
+Igual que Prophet y ETS, SARIMA no usa `lag_N`/`period`/`trend` -- su input es directamente la serie de tiempo (`statsmodels.tsa.statespace.sarimax.SARIMAX` recibe la serie completa, sin construir un `DataFrame` de features). Sus "features" son el orden fijo `(p,d,q)(P,D,Q,s)`:
+
+| Hiperparámetro | Significado |
+|---|---|
+| `order` | Orden no estacional `(p,d,q)`. Fijo en `(1,1,1)`: `p=1` autoregresivo (un rezago), `d=1` una diferenciación regular (la serie de demanda típicamente no es estacionaria en nivel), `q=1` media móvil (un término de error rezagado). |
+| `seasonal_order` | Orden estacional `(P,D,Q,s)`. Fijo en `(1,1,1,4)` trimestral / `(1,1,1,12)` mensual: `P=1`/`Q=1` análogos autoregresivo/media móvil pero a un ciclo estacional de distancia, `D=1` una diferenciación estacional (la intensidad de la estacionalidad cambia de un ciclo a otro), `s` el largo del ciclo (`4` trimestral, `12` mensual). |
+
+**Orden fijo, no auto-búsqueda (decisión de diseño de issue #99).** A diferencia de un enfoque tipo `pmdarima.auto_arima` (que prueba múltiples combinaciones de `(p,d,q)(P,D,Q,s)` por SKU), acá el orden es el mismo `(1,1,1)(1,1,1,s)` para todo el catálogo -- análogo trimestral/mensual del "modelo airline" clásico de Box-Jenkins `(0,1,1)(0,1,1,s)`, con un término AR adicional en cada parte por robustez general. Auto-búsqueda por SKU es más flexible pero puede fallar en converger o ser lenta corriendo sobre miles de SKUs heterogéneos en la corrida nocturna -- un default razonable es más confiable a escala que optimizar por SKU. Ver `SARIMA_ORDER`/`SARIMA_SEASONAL_ORDER_QUARTERLY`/`SARIMA_SEASONAL_ORDER_MONTHLY` en `ml/models.py`.
+
+**Historia mínima.** Mismo piso que ETS: al menos **2 ciclos estacionales completos** (`min_needed = 2 * seasonal_periods`: 8 periodos trimestral, 24 mensual) -- por debajo de eso, `fit_sarima_insample` devuelve `None` sin intentar el fit. El ajuste en sí (`SARIMAX(...).fit()`) va envuelto en `try/except`: SARIMA puede fallar en converger sobre series heterogéneas, y en ese caso también devuelve `None` en vez de propagar la excepción.
 
 ## Ver también
 

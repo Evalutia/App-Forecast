@@ -8,6 +8,7 @@ from ml.models import (
     fit_xgb_with_walkforward,
     fit_prophet_with_walkforward,
     fit_ets_with_walkforward,
+    fit_sarima_with_walkforward,
     _mae,
 )
 from ioworker.db import DBConfig, get_engine, upsert_elegibilidad_metrics, insert_catalogo_modelos
@@ -190,12 +191,13 @@ def main() -> None:
                   f"catalogo_modelos={n_cat_total} elegibilidad={n_elegibilidad_total}")
 
     for sku, s in series_by_sku.items():
-        sku_results = []  # resultados de este SKU (hasta 3, uno por modelo)
+        sku_results = []  # resultados de este SKU (hasta 5, uno por modelo)
         for fit_wf, kwargs in (
             (fit_rf_with_walkforward, {}),
             (fit_xgb_with_walkforward, {}),
             (fit_prophet_with_walkforward, {"sku": sku}),
             (fit_ets_with_walkforward, {"sku": sku}),
+            (fit_sarima_with_walkforward, {"sku": sku}),
         ):
             try:
                 res = fit_wf(s, freq=FREQ, lags=LAGS, horizon=HORIZON, max_folds=MAX_FOLDS, **kwargs)

@@ -2538,11 +2538,39 @@ Parte del plan de #98-#103 (mismo `/grill-me` que originó el hallazgo del backf
 
 ---
 
+### Suma SARIMA como modelo candidato, issue #99 (sesión 2026-07-21)
+
+Parte del mismo plan de #98-#103. Bloqueado deliberadamente por #98 para copiar un patrón real ya revisado (ETS) en vez de uno hipotético. SARIMA estaba en el alcance ORIGINAL del cliente (issue #30) pero nunca se conectó al pipeline real. Mirror exacto de `fit_ets_insample`/`fit_ets_with_walkforward`: univariado (no consume `lags` como features tabulares), sin dependencia nueva (`statsmodels>=0.14.1` ya estaba en `requirements.txt`, `SARIMAX` ya importado sin usar).
+
+**Decisiones de implementación:**
+
+| Decisión | Definición |
+|----------|-----------|
+| **Orden fijo `(1,1,1)(1,1,1,s)`, no auto-búsqueda por SKU** | Decisión de diseño explícita de #99: `pmdarima.auto_arima` u otro order-search por SKU es más flexible pero puede fallar en converger o ser lento corriendo sobre miles de SKUs heterogéneos en la corrida nocturna. `d=1`/`D=1` (una diferenciación regular y una estacional) más un término AR y uno MA en cada parte -- análogo trimestral/mensual del "modelo airline" clásico de Box-Jenkins `(0,1,1)(0,1,1,s)`, con un AR adicional en cada parte por robustez general. `s=4` trimestral / `s=12` mensual, igual que `seasonal_periods` en ETS. |
+| **`enforce_stationarity=False`/`enforce_invertibility=False`** | Evita que `SARIMAX.fit()` falle por quedar en el borde de la región de estacionariedad/invertibilidad al forzar el mismo orden fijo sobre series heterogéneas -- coherente con devolver `None` en vez de crashear ante cualquier fallo de ajuste (`try/except` alrededor de todo `fit_sarima_insample`, SARIMA puede no converger). |
+| **Historia mínima propia: 2 ciclos estacionales completos** (`min_needed = 2 * seasonal_periods`, mismo criterio que ETS/#98) | Verificado empíricamente contra el contenedor `etl`: con exactamente el mínimo (8 trimestres), `SARIMAX.fit()` converge sin `NaN` en `fittedvalues` (statsmodels usa inicialización diffusa, no lanza `ValueError` como sí hace `ExponentialSmoothing` estacional). El único costo real observado es un `UserWarning` ("Too few observations to estimate starting parameters...") en el borde exacto del mínimo -- silenciado igual que `ConvergenceWarning`. |
+| **Exceptuado del filtro de folds degenerados de #97** | `_aggregate_walkforward`: `if name not in ("PROPHET", "ETS", "SARIMA") and n_train_rows < lags` -- SARIMA no consume `lags` como features tabulares (igual que Prophet/ETS), el filtro no le aplica. |
+| **`--model-set full`/`classic` en `predict.py` suman SARIMA** | Mismo patrón que ETS en #98: ambos ya eran alias del mismo branch (ahora `RF+XGB+PROPHET+ETS+SARIMA`). `--model-set prophet` y `tree` quedan sin tocar. No se agregó ningún valor nuevo a `--model-set` (eso es alcance de #100, bloqueado por #98 y #99, no tocado). |
+
+**Tests (TDD):** 4 tests nuevos agregados a `tests/test_models.py` (mismo archivo que ETS, no un archivo separado, ya que la suite completa referencia `test_models` como módulo único) -- resultado válido con historia trimestral suficiente (16 trimestres), no crashea ni descarta filas con un valor negativo en el training, serie corta (4 trimestres) devuelve `None`, walk-forward produce resultado con historia suficiente (24 trimestres). 1 test agregado a `test_eval_walkforward.py` (`test_filtro_de_n_train_rows_no_aplica_a_sarima`, mismo patrón que el de ETS/Prophet). Los 5 tests se corrieron primero contra el código sin implementar (fallaron por `ImportError`/`AssertionError`, confirmando TDD real) antes de escribir `fit_sarima_insample`/`fit_sarima_with_walkforward`.
+
+**Smoke test real** (5 SKUs elegibles reales, `EVAL_ONLY_SKUS`, `EVAL_PERSIST_CATALOG=1 EVAL_VERSION=smoke-99`): SARIMA produjo resultado walk-forward no degenerado en los 5/5 SKUs -- mediana `r2_test=0.3709`, el más alto de los 5 modelos en esta muestra (ETS 0.3458, XGB 0.2196, RF 0.2018, PROPHET 0.1866). No ganó la selección real de producción en esta muestra puntual (criterio de menor RMSE in-sample: PROPHET 4/5, ETS 1/5), pero el criterio de aceptación del issue (resultado válido, no degenerado, no filtrado) queda cumplido.
+
+**Documentación:** nueva sección "SARIMA" en `docs/catalogo-modelos-diccionario.md`, mismo formato que ETS -- SARIMA no tiene columnas `lag_N`/`period`/`trend`, sus "features" son el orden fijo `(p,d,q)(P,D,Q,s)`.
+
+**Self-review (correctness, removed-behavior, cross-file callers, reuse, altitude, efficiency)** no encontró bugs -- verificado que no hay lista fija de modelos hardcodeada en webapi/frontend (mismo hallazgo que #98, re-confirmado con grep), que el `UserWarning` silenciado es real (confirmado corriendo sin el filtro) y no oculta un problema distinto, y que `params` (con tuplas `SARIMA_ORDER`/`seasonal_order`) serializa correctamente vía `json.dumps` en `_build_catalog_row` sin necesitar cambios en `_json_safe`.
+
+**Verificado:** suite completa (`test_predict`, `test_evaluate`, `test_eval_walkforward`, `test_models`, `test_apply_elegibilidad`) corrida dentro del contenedor `etl`, las 5 pasan.
+
+**#99 cerrado.**
+
+---
+
 ## Documentación adicional
 
 | Archivo | Contenido |
 |---------|-----------|
 | `docs/arquitectura-mysql.md` | Diseño de BD, relaciones, índices, patrones de consulta |
 | `docs/script-de-prediccion.md` | Detalles de predict.py, modelos ML, ensemble |
-| `docs/catalogo-modelos-diccionario.md` | Diccionario de variables de entrada (`lag_N`, `period`, `trend`, `ds`/`y`, hiperparámetros ETS) de RF/XGB/Prophet/ETS -- issue #85/#98 |
+| `docs/catalogo-modelos-diccionario.md` | Diccionario de variables de entrada (`lag_N`, `period`, `trend`, `ds`/`y`, hiperparámetros ETS/SARIMA) de RF/XGB/Prophet/ETS/SARIMA -- issue #85/#98/#99 |
 | `services/etl/README_ETL_Diario_actualizado.md` | Flujo ETL completo, variables, backfills |

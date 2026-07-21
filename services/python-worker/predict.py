@@ -30,10 +30,12 @@ from ml.models import (
     fit_xgb_insample,
     fit_prophet_insample,
     fit_ets_insample,
+    fit_sarima_insample,
     fit_rf_with_walkforward,
     fit_xgb_with_walkforward,
     fit_prophet_with_walkforward,
     fit_ets_with_walkforward,
+    fit_sarima_with_walkforward,
     ModelResult,
     WalkForwardResult,
 )
@@ -432,25 +434,30 @@ def main() -> None:
                     want_xgb = False
                     want_prophet = True
                     want_ets = False
+                    want_sarima = False
                 elif args.model_set == "tree":
                     want_rf = True
                     want_xgb = True
                     want_prophet = False
                     want_ets = False
+                    want_sarima = False
                 elif args.model_set in ("full", "classic"):
-                    # full / classic => RF + XGB + PROPHET + ETS (issue #98:
-                    # ETS se suma como candidato univariado mas, mismo trato
-                    # que PROPHET en este set)
+                    # full / classic => RF + XGB + PROPHET + ETS + SARIMA
+                    # (issue #98: ETS se suma como candidato univariado mas,
+                    # mismo trato que PROPHET en este set; issue #99: SARIMA
+                    # idem, mismo trato que ETS/PROPHET)
                     want_rf = True
                     want_xgb = True
                     want_prophet = True
                     want_ets = True
+                    want_sarima = True
                 else:
                     # default safety: RF + XGB
                     want_rf = True
                     want_xgb = True
                     want_prophet = False
                     want_ets = False
+                    want_sarima = False
 
                 # Issue #89: el ganador por SKU se elige por r2_test walk-forward real
                 # (issue #88) en vez de RMSE in-sample -- este ultimo ya se demostro
@@ -503,6 +510,16 @@ def main() -> None:
                             wf_results.append(ScoredModel("ETS", wf))
                     except Exception:
                         log.exception("ETS walkforward error for sku %s", sku)
+                if want_sarima:
+                    try:
+                        wf = fit_sarima_with_walkforward(
+                            train, freq=args.resample_rule, lags=lags, horizon=PREDICT_EVAL_HORIZON,
+                            max_folds=PREDICT_MAX_FOLDS, sku=sku,
+                        )
+                        if wf:
+                            wf_results.append(ScoredModel("SARIMA", wf))
+                    except Exception:
+                        log.exception("SARIMA walkforward error for sku %s", sku)
 
                 if not wf_results:
                     warnings_list.append(f"SKU {sku} omitido: ningún modelo produjo resultado")
@@ -524,6 +541,9 @@ def main() -> None:
                         sku=sku, train=train, steps_forecast=forecast_periods, lags=lags, freq=args.resample_rule
                     ),
                     "ETS": lambda: fit_ets_insample(
+                        sku=sku, train=train, steps_forecast=forecast_periods, lags=lags, freq=args.resample_rule
+                    ),
+                    "SARIMA": lambda: fit_sarima_insample(
                         sku=sku, train=train, steps_forecast=forecast_periods, lags=lags, freq=args.resample_rule
                     ),
                 }
