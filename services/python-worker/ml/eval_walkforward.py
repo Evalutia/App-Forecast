@@ -7,6 +7,7 @@ from ml.models import (
     fit_rf_with_walkforward,
     fit_xgb_with_walkforward,
     fit_prophet_with_walkforward,
+    fit_ets_with_walkforward,
     _mae,
 )
 from ioworker.db import DBConfig, get_engine, upsert_elegibilidad_metrics, insert_catalogo_modelos
@@ -194,6 +195,7 @@ def main() -> None:
             (fit_rf_with_walkforward, {}),
             (fit_xgb_with_walkforward, {}),
             (fit_prophet_with_walkforward, {"sku": sku}),
+            (fit_ets_with_walkforward, {"sku": sku}),
         ):
             try:
                 res = fit_wf(s, freq=FREQ, lags=LAGS, horizon=HORIZON, max_folds=MAX_FOLDS, **kwargs)

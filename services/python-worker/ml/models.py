@@ -693,7 +693,7 @@ def _aggregate_walkforward(
     for train, test in folds:
         eff_lags = min(lags, max(1, len(train) - 1))
         n_train_rows = len(train) - eff_lags
-        if name != "PROPHET" and n_train_rows < lags:
+        if name not in ("PROPHET", "ETS") and n_train_rows < lags:
             # Issue #97: con menos filas utiles de entrenamiento que
             # 'lags' (ya restados los propios lags), RF/XGB no tienen de
             # donde aprender una relacion real -- predicen casi una
@@ -703,10 +703,12 @@ def _aggregate_walkforward(
             # empiricamente: 95%+ de catalogo_modelos tenia
             # n_obs_train<=1 y r2_test degenerado antes de este fix.
             # Se chequea ANTES de fitear (evita el fit caro, mismo
-            # espiritu que #92) y NO aplica a Prophet: fit_prophet_insample
-            # recibe 'lags' pero nunca lo usa para features -- solo
-            # chequea internamente len(tr)>=min_needed, independiente de
-            # lags (ver /code-review de #97).
+            # espiritu que #92) y NO aplica a modelos univariados
+            # (Prophet, issue #97; ETS, issue #98): ninguno de los dos usa
+            # 'lags' para construir features -- ambos chequean
+            # internamente su propia historia minima, independiente de
+            # lags (ver /code-review de #97). Si se suma SARIMA (#99),
+            # tambien univariado, va en esta misma tupla.
             continue
 
         base = fit_one_fold(train, horizon)
@@ -834,5 +836,116 @@ def fit_prophet_with_walkforward(
     except Exception:
         log.exception(
             "fit_prophet_with_walkforward fallo (sku=%s, lags=%s, freq=%s, n=%s)", sku, lags, freq, len(full_series)
+        )
+        return None
+
+
+# -------------------------------------------------------------------------
+# Nueva función ETS / Holt-Winters (issue #98). Mismo mirror de forma que
+# fit_prophet_insample/fit_prophet_with_walkforward -- ETS es univariado
+# (no consume 'lags' como features tabulares, igual que Prophet), 'lags' se
+# recibe solo para mantener la misma firma que el resto de los fit_*.
+# -------------------------------------------------------------------------
+def fit_ets_insample(
+    sku: str,
+    train: pd.Series,
+    steps_forecast: int,
+    lags: int = 12,
+    freq: str = "MS",
+) -> Optional[ModelResult]:
+    """
+    Entrena ETS (Holt-Winters, statsmodels.tsa.holtwinters.ExponentialSmoothing)
+    sobre 'train' (serie con índice datetime, valores float) y devuelve
+    ModelResult con:
+      - forecast: array numpy de longitud steps_forecast (orden horizonte 1..n)
+      - holdout_pred: ajuste in-sample (fittedvalues) alineado con train.index
+      - rmse, r2 calculados sobre in-sample
+    Si la serie no tiene historia suficiente o el ajuste falla retorna None.
+    """
+    try:
+        tr = pd.Series(train).astype("float64").sort_index()
+        is_quarterly = str(freq).upper().startswith("Q")
+        seasonal_periods = 4 if is_quarterly else 12
+        # Requerir minimo 2 ciclos estacionales completos (analogo al
+        # min_needed=8/12 de Prophet, pero ETS estacional necesita al menos
+        # 2 ciclos para poder estimar el componente estacional -- por
+        # debajo de eso statsmodels tira ValueError directamente).
+        min_needed = 2 * seasonal_periods
+        if len(tr) < min_needed:
+            return None
+
+        # Issue #81: sin filtro de signo -- una nota de credito (venta neta
+        # negativa) es un dato de entrenamiento real, no debe descartarse.
+        # Por eso el componente de tendencia/estacionalidad va en modo
+        # 'add' (aditivo), no 'mul': ExponentialSmoothing exige datos
+        # estrictamente positivos para componentes multiplicativos, y
+        # descartar los negativos generaria el mismo tipo de hueco
+        # irregular en la serie que ya se corrigio para Prophet en #81.
+        model = ExponentialSmoothing(
+            tr,
+            trend="add",
+            damped_trend=True,
+            seasonal="add",
+            seasonal_periods=seasonal_periods,
+            initialization_method="estimated",
+        )
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", category=ConvergenceWarning)
+            fitted = model.fit(optimized=True)
+
+        y_fc = np.asarray(fitted.forecast(steps_forecast), dtype="float64")
+        y_fc = np.maximum(y_fc, 0.0)
+
+        holdout = pd.Series(np.asarray(fitted.fittedvalues, dtype="float64"), index=tr.index)
+
+        rmse_val = _rmse(tr.values, holdout.values)
+        r2_val = _r2(tr.values, holdout.values)
+
+        params = {
+            "trend": "add",
+            "damped_trend": True,
+            "seasonal": "add",
+            "seasonal_periods": seasonal_periods,
+        }
+
+        return ModelResult(
+            name="ETS",
+            forecast=y_fc,
+            rmse=rmse_val,
+            r2=r2_val,
+            params=params,
+            features=None,
+            holdout_pred=holdout,
+        )
+    except Exception:
+        log.exception("fit_ets_insample fallo (sku=%s, lags=%s, freq=%s, n=%s)", sku, lags, freq, len(train))
+        return None
+
+
+def fit_ets_with_walkforward(
+    full_series: pd.Series,
+    freq: str,
+    lags: int = 12,
+    horizon: int = 2,
+    max_folds: int = 5,
+    *,
+    sku: str,
+) -> Optional[WalkForwardResult]:
+    try:
+        folds = _walk_forward_split(full_series, min_train=2, horizon=horizon, max_folds=max_folds)
+        if not folds:
+            return None
+        return _aggregate_walkforward(
+            name="ETS",
+            folds=folds,
+            fit_one_fold=lambda train, steps: fit_ets_insample(
+                sku=sku, train=train, steps_forecast=steps, lags=lags, freq=freq
+            ),
+            horizon=horizon,
+            lags=lags,
+        )
+    except Exception:
+        log.exception(
+            "fit_ets_with_walkforward fallo (sku=%s, lags=%s, freq=%s, n=%s)", sku, lags, freq, len(full_series)
         )
         return None

@@ -2510,11 +2510,39 @@ Durante el `/grill-me` del plan de modelos econométricos (que derivó en los ti
 
 ---
 
+### Suma ETS (Holt-Winters) como modelo candidato, issue #98 (sesión 2026-07-21)
+
+Parte del plan de #98-#103 (mismo `/grill-me` que originó el hallazgo del backfill de 2 años, sesión anterior). SARIMA y ETS estaban en el alcance ORIGINAL del cliente (issue #30) pero nunca se conectaron al pipeline real. Este ticket agrega ETS, mirror exacto del patrón ya establecido por Prophet en #81/#97: univariado (no consume `lags` como features tabulares), sin dependencia nueva (`statsmodels>=0.14.1` ya estaba en `requirements.txt`, `ExponentialSmoothing` ya importado sin usar).
+
+**Decisiones de implementación:**
+
+| Decisión | Definición |
+|----------|-----------|
+| **`trend="add"`/`seasonal="add"`, no `"mul"`** | Issue #81 exige no filtrar valores negativos (notas de crédito) antes de entrenar. `ExponentialSmoothing` exige datos estrictamente positivos para componentes multiplicativos -- aditivo es la única opción compatible con esa regla. |
+| **`damped_trend=True`** | Más conservador para el forecast futuro (la tendencia se aplana en vez de extrapolarse en línea recta indefinidamente a mayor horizonte). |
+| **Historia mínima propia: 2 ciclos estacionales completos** (`min_needed = 2 * seasonal_periods`, 8 trimestral / 24 mensual) | Análogo al `min_needed=8/12` de Prophet, pero basado en lo que `ExponentialSmoothing` necesita internamente para estimar el componente estacional -- por debajo de eso tira `ValueError`. Gate propio, independiente de `lags` (mismo criterio que Prophet). |
+| **Exceptuado del filtro de folds degenerados de #97** | `_aggregate_walkforward`: `if name not in ("PROPHET", "ETS") and n_train_rows < lags` -- ETS no consume `lags` como features tabulares (igual que Prophet), el filtro no le aplica. Comentario del código deja espacio explícito para sumar `"SARIMA"` en #99 sin reescribir la condición. |
+| **`--model-set full`/`classic` en `predict.py` suman ETS** | Ambos ya eran alias del mismo branch (`RF+XGB+PROPHET`) desde antes de este ticket -- se mantuvo la equivalencia agregando ETS a los dos. `--model-set prophet` (modo aislado de un solo modelo) y `tree` quedan sin tocar. |
+
+**Tests (TDD, `tests/test_models.py` nuevo + 1 test agregado a `test_eval_walkforward.py`):** resultado válido con historia trimestral suficiente (16 trimestres), no crashea ni descarta filas con un valor negativo en el training (holdout_pred cubre las 16 filas igual), serie corta (4 trimestres) devuelve `None`, exención del filtro de #97 (mismo patrón que `test_filtro_de_n_train_rows_no_aplica_a_prophet`).
+
+**Smoke test real** (5 SKUs elegibles reales, `EVAL_ONLY_SKUS`, `EVAL_PERSIST_CATALOG=1 EVAL_VERSION=smoke-98`): ETS produjo resultado walk-forward no degenerado en los 5/5 SKUs (mediana `r2_test=0.3458`, comparable a PROPHET 0.1866, RF 0.2018, XGB 0.2196), y ganó como modelo elegido (menor RMSE in-sample) en 1 de los 5 SKUs frente a la simulación de selección real.
+
+**Documentación:** nueva sección "ETS (Holt-Winters)" en `docs/catalogo-modelos-diccionario.md`, mismo formato que la sección de Prophet -- ETS no tiene columnas `lag_N`/`period`/`trend`, sus "features" son los hiperparámetros (`trend`, `damped_trend`, `seasonal`, `seasonal_periods`).
+
+**`/code-review` (angulos correctness, removed-behavior, cross-file callers, reuse, altitude)** no encontró bugs -- verificado que la columna `modelo` en `predicciones`/`catalogo_modelos` es `VARCHAR(64)` (sin restricción de enum, no hace falta migración), que no hay lista fija de modelos hardcodeada en webapi/frontend, y que `docs/script-de-prediccion.md` ya mencionaba `want_ets`/`want_sarima` como diseño aspiracional nunca implementado (inconsistencia preexistente, fuera de alcance de este ticket, no tocada).
+
+**Verificado:** suite completa (`test_predict`, `test_evaluate`, `test_eval_walkforward`, `test_models`, `test_apply_elegibilidad`) corrida dentro del contenedor `etl`, las 5 pasan.
+
+**#98 cerrado.**
+
+---
+
 ## Documentación adicional
 
 | Archivo | Contenido |
 |---------|-----------|
 | `docs/arquitectura-mysql.md` | Diseño de BD, relaciones, índices, patrones de consulta |
 | `docs/script-de-prediccion.md` | Detalles de predict.py, modelos ML, ensemble |
-| `docs/catalogo-modelos-diccionario.md` | Diccionario de variables de entrada (`lag_N`, `period`, `trend`, `ds`/`y`) de RF/XGB/Prophet — issue #85 |
+| `docs/catalogo-modelos-diccionario.md` | Diccionario de variables de entrada (`lag_N`, `period`, `trend`, `ds`/`y`, hiperparámetros ETS) de RF/XGB/Prophet/ETS -- issue #85/#98 |
 | `services/etl/README_ETL_Diario_actualizado.md` | Flujo ETL completo, variables, backfills |

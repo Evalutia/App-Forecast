@@ -1,8 +1,8 @@
 # Diccionario de variables de entrada — modelos de forecasting
 
-Explica, una sola vez, qué representa conceptualmente cada variable de entrada (`feature`) usada por los 3 algoritmos de forecasting (RandomForest, XGBoost, Prophet). Referencia para interpretar la columna `features` de `catalogo_modelos` (issue #86) sin tener que releer `ml/models.py` cada vez.
+Explica, una sola vez, qué representa conceptualmente cada variable de entrada (`feature`) usada por los 4 algoritmos de forecasting (RandomForest, XGBoost, Prophet, ETS). Referencia para interpretar la columna `features` de `catalogo_modelos` (issue #86) sin tener que releer `ml/models.py` cada vez.
 
-Fuente: `services/python-worker/ml/models.py`, función `_build_lag_month_trend` y `fit_rf_insample`/`fit_xgb_insample`.
+Fuente: `services/python-worker/ml/models.py`, función `_build_lag_month_trend` y `fit_rf_insample`/`fit_xgb_insample`/`fit_prophet_insample`/`fit_ets_insample`.
 
 ## RandomForest y XGBoost
 
@@ -33,6 +33,19 @@ La estacionalidad anual y los changepoints (puntos donde cambia la tendencia) se
 - (además `holidays_prior_scale`, `seasonality_mode`, `changepoint_range` — ver `HIPERPARAMETROS_OPTIMOS`/`HIPERPARAMETROS_GENERICOS` en `ml/models.py`)
 
 Estos valores están hipertuneados por SKU en `HIPERPARAMETROS_OPTIMOS`; para un SKU sin entrada específica se usa `HIPERPARAMETROS_GENERICOS`, calculado como la moda de los valores optimizados existentes.
+
+## ETS (Holt-Winters)
+
+Igual que Prophet, ETS no usa `lag_N`/`period`/`trend` -- su input es directamente la serie de tiempo (`statsmodels.tsa.holtwinters.ExponentialSmoothing` recibe la serie completa, sin construir un `DataFrame` de features). Sus "features" son hiperparámetros del modelo:
+
+| Hiperparámetro | Significado |
+|---|---|
+| `trend` | Tipo de componente de tendencia. Fijo en `"add"` (aditivo): la tendencia se suma a la serie, a diferencia de `"mul"` (multiplicativo), que la escala. Se usa aditivo porque `ExponentialSmoothing` exige datos estrictamente positivos para componentes multiplicativos, y la serie de entrenamiento puede tener valores negativos reales (notas de crédito, ver issue #81) que no se filtran antes de entrenar. |
+| `damped_trend` | Si la tendencia se "amortigua" (se aplana) a medida que el horizonte de pronóstico se aleja, en vez de extrapolarse en línea recta indefinidamente. Fijo en `True` -- más conservador para el forecast futuro. |
+| `seasonal` | Tipo de componente estacional. Fijo en `"add"` (aditivo), mismo motivo que `trend`. |
+| `seasonal_periods` | Cantidad de periodos en un ciclo estacional completo: `4` si `freq` es trimestral, `12` si es mensual. Determina cuántas observaciones necesita el modelo para aprender el patrón estacional. |
+
+**Historia mínima.** A diferencia de RF/XGB (que dependen de `eff_lags`) o de Prophet (`min_needed=8` trimestral / `12` mensual), ETS necesita al menos **2 ciclos estacionales completos** para estimar el componente estacional (`min_needed = 2 * seasonal_periods`: 8 periodos trimestral, 24 mensual) -- por debajo de eso, `fit_ets_insample` devuelve `None` sin intentar el fit (`statsmodels` tira `ValueError` si se le pide un ajuste estacional sin suficientes ciclos).
 
 ## Ver también
 
