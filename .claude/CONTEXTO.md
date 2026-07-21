@@ -2566,6 +2566,34 @@ Parte del mismo plan de #98-#103. Bloqueado deliberadamente por #98 para copiar 
 
 ---
 
+### Herramienta de comparación de hiperparámetros, issue #101 (sesión 2026-07-21)
+
+Automatiza el proceso manual que llevó al fix de #97 (3 experimentos: setear env vars a mano, correr `eval_walkforward.py` dentro del contenedor `etl`, escribir a mano una query SQL contra `catalogo_modelos` para interpretar el resultado). Todos los hiperparámetros relevantes ya eran configurables por env var, leídos a tiempo de importación en `eval_walkforward.py`/`models.py` -- no hacía falta ningún mecanismo nuevo, solo orquestación.
+
+**Script nuevo:** `services/python-worker/ml/compare_hyperparams.py`, corrible como `python3 -m ml.compare_hyperparams` (misma convención que `ml.eval_walkforward`/`ml.apply_elegibilidad`).
+
+**Decisión de diseño clave:** invoca `eval_walkforward.py` como SUBPROCESO fresco (`subprocess.run` con `os.environ` modificado), no como import + llamada directa -- los hiperparámetros de `eval_walkforward.py`/`models.py` se leen una sola vez a nivel de módulo (`X = int(os.getenv("X", "default"))`), así que una segunda llamada a `main()` en el mismo proceso Python no recogería nuevos valores de env var.
+
+**CLI:** `--skus SKU1,SKU2` (explícito) o `--random-n N` (N SKUs aleatorios entre los elegibles, mismo patrón de query que los pilotos de #97) para la muestra; `--lags`/`--horizon`/`--max-folds` como atajos dedicados más `--env KEY=VALUE` (repetible) como escape hatch genérico para cualquier otro hiperparámetro (`RF_MAX_DEPTH`, `XGB_LEARNING_RATE`, etc.); `--version` opcional, si no se pasa se autogenera como `compare-<timestamp>`. No hace sampling estratificado ni compara corridas pasadas entre sí (fuera de alcance, YAGNI, explícito en el issue).
+
+**Los 4 criterios de #97/#101 se reportan SEPARADOS, nunca colapsados en un solo score** (mediana `r2_test` real, brecha train-test etiquetada "informativo, NO usar aislado", % `estable=True`, cobertura de la muestra pedida) más una quinta línea explícita, la **flag de degeneración** (% de filas con `r2_test` EXACTAMENTE 0.0 o 1.0, igualdad de float exacta) que se marca visualmente como sospechosa por encima de 15%. Esta separación es la lección central de #97: una brecha chica entre `r2_train`/`r2_test` no prueba generalización, un modelo casi-constante puede dar r2 exacto 0.0/1.0 en ambos y "coincidir" sin haber aprendido nada.
+
+**Tests (`tests/test_compare_hyperparams.py`, 27 tests):** parseo de CLI (incluye mutua exclusión `--skus`/`--random-n`), merge de env vars (atajos vs. `--env` genérico, `--env` gana en colisión), y sobre todo `compute_report` con filas fabricadas a mano cubriendo r2_test=0.0 exacto, r2_test=1.0 exacto, 0.999999/0.000001 (regresión: NO deben contar como degenerados), `estable=None`, cobertura incompleta (simula exactamente el error de #97: un hiperparámetro que "gana" en r2 pero excluye la mayoría de la muestra), y el caso central "misma brecha chica, un caso con r2 alto genuino y otro degenerado" -- confirma que el reporte los distingue.
+
+**Verificación real** (dentro del contenedor `etl`, 5 SKUs elegibles aleatorios cada vez, `MYSQL_PASS=evalutia` porque el env del contenedor expone `MYSQL_PASSWORD`, no `MYSQL_PASS`, mismo patrón ya usado por el resto de `ml/`):
+
+- **Corrida 1 (`EVAL_LAGS` default=8):** RF/XGB solo produjeron resultado válido para 3/5 SKUs (cobertura 60%), con 33.3% de esas filas degeneradas (r2_test exacto 0/1) -- coincide con el patrón de #97 (RF/XGB necesitan mucha historia con `lags=8`).
+- **Corrida 2 (`--env EVAL_LAGS=4`):** RF/XGB pasaron a cobertura 100% (5/5), degeneración bajó a 20% -- confirma el hallazgo ya documentado en el cierre de #97 ("bajar `lags` sube la cobertura pero no arregla la señal por completo": la cobertura mejora claramente, la degeneración baja pero no desaparece).
+- Ambas corridas usaron muestras aleatorias distintas (no una comparación A/B estrictamente controlada), pero el reporte reflejó en ambos casos números reales, coherentes entre sí y con el diagnóstico ya conocido de #97 -- exactamente lo que #101 pedía verificar.
+
+**Self-review** (correctness, cross-file callers, reuse, simplificación, eficiencia, altitud, convenciones): sin bugs reales. Único hallazgo menor dejado sin resolver: `compute_report`/`format_report` recalculan cada uno el `set()` de SKUs solicitados (trabajo duplicado insignificante sobre listas chicas, herramienta de uso manual/secuencial, no vale la pena el refactor).
+
+**Verificado:** suite completa (`test_predict`, `test_evaluate`, `test_eval_walkforward`, `test_models`, `test_apply_elegibilidad` con `APPLY_VERSION=v1`, `test_compare_hyperparams` nuevo) corrida dentro del contenedor `etl`, las 6 pasan.
+
+**#101 cerrado.**
+
+---
+
 ## Documentación adicional
 
 | Archivo | Contenido |
