@@ -2623,6 +2623,40 @@ Decisiones ya tomadas en la sesión `/grill-me` previa, no re-discutidas acá: (
 
 ---
 
+### #103: casos borde de baja frecuencia/quiebre, re-auditados con muestra ampliada y ETS/SARIMA (sesión 2026-07-21)
+
+Retoma el hallazgo de #76 (1/7, 14% elegible en casos borde, contra 70% en población general con historia suficiente, medido en #97). #103 pedía: (1) decidir si la volatilidad es de los MODELOS o de la SEÑAL, (2) decidir si `estable` (#70) necesita tratamiento extra, (3) evaluar si vale la pena ampliar la muestra de 7 SKUs, ahora que #98/#99 (ETS/SARIMA) suman candidatos nuevos.
+
+**Ampliación de muestra (script nuevo, no productivo, `ml/audit_103_casos_borde.py`):** mismos criterios de dominio que #76 vía `planilla_ventas_calculada` (`tickets_mes`/`estado_mes`). El piso de historia de #76 (16 trimestres) era una elección conservadora sin anclaje a ningún umbral real -- se probó primero con el piso nominal de producción (24 meses/8 trimestres), pero resultó no discriminar nada: 5535 de los 5550 SKUs de `ventas_historicas` ya tienen ≥24 meses de historia. La población recién se vuelve selectiva en 30 meses (10 trimestres, donde el conteo cae a 103 SKUs), y ahí el patrón borde se estabiliza en **17 candidatos** (8 baja frecuencia + 9 quiebre) desde piso=10 hasta piso=16 -- techo real del catálogo local, no un límite arbitrario. Expansión real sobre los 7 de #76, aunque más modesta de lo esperado.
+
+**Corrida real** (`EVAL_VERSION=eval-audit-103`, `model-set` completo: RF+XGB+PROPHET+ETS+SARIMA, vía `eval_walkforward.py` con `EVAL_ONLY_SKUS`):
+
+- **Cobertura walk-forward** (al menos 1 modelo evaluable): solo 8/17 (47%), y muy desigual por caso -- baja frecuencia 6/8 (75%), quiebre 2/9 (22%). El resto ni junta datos suficientes para un fold.
+- **Elegibilidad final** (criterio real de #70, sobre los 8 evaluables): **0/8 (0%)** -- peor que el 14% de #76, muy por debajo del ~70% de la población general.
+- **Detalle por modelo** (estabilidad entre folds, sobre los evaluables, 38 filas en `catalogo_modelos`):
+
+| Modelo | Estable / evaluables |
+|---|---|
+| RF | 4/6 (66.7%) |
+| XGB | 4/6 (66.7%) |
+| SARIMA | 3/8 (37.5%) |
+| ETS | 1/8 (12.5%) |
+| PROPHET | 1/8 (12.5%) |
+
+**Hallazgo clave:** RF/XGB son notablemente más estables que los modelos univariados en estos casos borde específicos, pero tienen `r2_test` promedio más bajo -- pierden la competencia de "mejor r2" (criterio de selección de ganador de #88/#89) contra ETS/Prophet/SARIMA, que ganan más seguido pero son volátiles. El ganador real de cada SKU es casi siempre el modelo de mayor r2, no el más estable, y por eso la elegibilidad final termina en 0%.
+
+**Decisión documentada -- pregunta 1 (¿modelo o señal?):** predominantemente **señal**. Sumar 2 familias de modelo completamente distintas (ETS/SARIMA, exponential smoothing y ARIMA, frente a árboles y Prophet) no mejoró la elegibilidad, la empeoró -- ninguna de las 5 familias generaliza de forma consistente entre folds en estos SKUs, evidencia fuerte de que la demanda real de estos casos borde es intrínsecamente más errática (estructuralmente inestable entre períodos, no solo difícil de ajustar). Matiz real: el criterio de selección de ganador amplifica el efecto al preferir sistemáticamente el modelo de mayor r2 aunque sea más volátil, existiendo una alternativa (RF/XGB) con menor r2 pero mucha mayor estabilidad -- esto no cambia el veredicto de "señal", pero significa que parte de la brecha observada es de mecanismo de selección, no solo de la señal en sí.
+
+**Decisión documentada -- pregunta 2 (¿tratamiento nuevo en #70?):** no. El chequeo de `estable` sigue haciendo su trabajo correctamente -- reconfirmado con una muestra más grande (0/8 casos de r2 alto colándose inestable, igual que en #76). No hace falta agregar una exclusión especial nueva.
+
+**Propuesta concreta, sin ticket nuevo por ahora** (documentada acá, no implementada): evaluar si el criterio de selección de ganador (#88/#89, hoy "mejor r2_test" puro) debería ponderar estabilidad además de r2_test, dado que en estos casos borde RF/XGB (menor r2, mucho más estables) pierden sistemáticamente contra modelos más volátiles. Si se retoma, es un cambio al mecanismo de selección de #88/#89, no al criterio de exclusión de #70.
+
+**Decisión documentada -- pregunta 3 (¿ampliar muestra?):** sí, y ya se hizo -- de 7 a 17 candidatos, techo real del catálogo local con el patrón borde (confirmado: el conteo no crece entre piso=10 y piso=16 trimestres).
+
+**#103 cerrado.**
+
+---
+
 ## Documentación adicional
 
 | Archivo | Contenido |
