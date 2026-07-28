@@ -2091,6 +2091,23 @@ Selección real de producción hoy (criterio viejo, menor RMSE in-sample): RF ga
 
 ---
 
+### `backfill_jobs.py` / `run_backfill_ventas.sh` — Issue #104 (sesión 2026-07-27)
+
+| Decisión | Definición |
+|----------|-----------|
+| **`cmd_check` compara rango por igualdad exacta de string, no "cubre"** | `grupo_id + fecha_desde == BACKFILL_FROM + fecha_hasta == BACKFILL_TO`, no `fecha_desde_guardada <= BACKFILL_FROM AND fecha_hasta_guardada >= BACKFILL_TO`. Cubre el único caso real (piloto de 2 años de #44 vs. este backfill de 10 años); una semántica "cubre" agrega complejidad no pedida por el issue (saltearía silenciosamente un reproceso puntual con rango más chico que uno ya corrido). |
+| **Grupo 76 se excluye a mano de la corrida completa** (vía `GROUPS=<lista sin 76>`, mecanismo de override ya existente en `get_grupos_backfill.py`), **pero solo tras confirmar con query real** que TODOS sus SKUs ya tienen `MIN(fecha) <= 2016-10-03` — no confiar ciegamente en el hallazgo documentado en la sesión anterior por si es parcial. Si es parcial, entra en la corrida completa igual (más simple que un backfill a medida). |
+| **Piloto reusa el grupo 44** (1 SKU, mismo grupo del piloto de #44) | Más rápido/barato para validar que el mecanismo (chunking/merge/lock/`jobs_historial`) aguanta la ventana de 10 años. Advertencia: 1 SKU no extrapola linealmente el timing del grupo más grande (200, 3.8h con ventana de 2 años) porque el payload depende del volumen de ventas, no de la cantidad de artículos — la corrida completa se monitorea día a día, no se estima de antemano. |
+| **Lanzamiento de la corrida completa: `nohup` + `disown`, log a archivo** | `docker compose exec -T etl ... > /app/data/backfill_10y_$(date +%F).log 2>&1 & disown` — el `-T` evita problemas de TTY al cerrar la sesión SSH, `disown` saca el proceso de la tabla de jobs de la shell (más allá de lo que ya cubre `nohup` contra `SIGHUP`). Monitoreo preferido: polling contra `jobs_historial` (`detalle->>'$.grupo_id'`, `estado`, fechas) en vez de solo `tail -f` del log, porque sobrevive aunque se pierda el archivo. |
+| **Test nuevo de `backfill_jobs.py`: conexión real a MySQL local, no mock** | Mismo patrón que `test_run_calc_planilla.py` (`localhost:3307`, `pytest.skip` si no hay DB, CI no levanta MySQL para `services/etl/tests`) — evita mockear la sintaxis JSON path real de MySQL (`detalle->>'$.campo'`), que un mock in-memory no reproduciría fielmente. |
+| **Verificación "sin alterar filas ya existentes": snapshot `COUNT(*)`+`SUM(cantidad)` por grupo, no checksum** | `SELECT a.grupo_id, COUNT(*), SUM(vh.cantidad) FROM ventas_historicas vh JOIN articulos a ON a.sku=vh.sku WHERE vh.fecha >= '2024-06-25' AND a.grupo_id <> 201 GROUP BY a.grupo_id`, corrido antes y después, guardado en archivo. Se descarta cualquier técnica tipo `GROUP_CONCAT`/`MD5` -- ya documentada como fuente de falsos positivos en el cierre de #102 (truncamiento por `group_concat_max_len`, orden no garantizado), y acá el volumen es mucho mayor que en #102. |
+| **Sin resumibilidad por chunk, solo por grupo** | Un grupo que falla a mitad de camino reintenta el rango completo desde el chunk 1 (5x más chunks que la corrida de 2 años). Aceptado sin cambios -- el issue no pide resumibilidad de chunk, el mecanismo ya es idempotente por `ON DUPLICATE KEY UPDATE` (solo gasta tiempo/llamadas WS, no corrompe datos). Si en la práctica se vuelve un problema real y recurrente, ticket aparte con datos reales. |
+| **Chequeo operativo previo a la corrida completa (no solo el piloto)** | Confirmar `docker compose exec etl printenv WS_URL` == `https://200.125.29.194:81` en la VM real antes de lanzar -- no asumir que el `.env` de producción sigue igual al que se usó manualmente en la verificación de la sesión anterior (el README ya estaba desactualizado en ese punto). |
+
+> **Nota:** ninguna de estas decisiones toca `predict.py`/webapi/frontend -- el alcance es estrictamente ETL (`services/etl/`). El piloto (grupo 44) y la corrida completa son pasos manuales en producción, no automatizables en esta sesión.
+
+---
+
 ## Issues conocidos / TODOs en código
 
 | Issue | Ubicación | Descripción |

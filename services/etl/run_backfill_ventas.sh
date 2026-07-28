@@ -209,8 +209,8 @@ echo "[INFO] Grupos a procesar: ${GROUPS_LIST}"
 for G in ${GROUPS_LIST}; do
   echo "[INFO] === Grupo ${G} ==="
 
-  if [[ "$(python3 "${SELF_DIR}/backfill_jobs.py" check "${G}")" == "1" ]]; then
-    echo "[INFO] Grupo ${G} ya completado en una corrida anterior — se saltea."
+  if [[ "$(python3 "${SELF_DIR}/backfill_jobs.py" check "${G}" "${BACKFILL_FROM}" "${BACKFILL_TO}")" == "1" ]]; then
+    echo "[INFO] Grupo ${G} ya completado en una corrida anterior para este mismo rango — se saltea."
     continue
   fi
 

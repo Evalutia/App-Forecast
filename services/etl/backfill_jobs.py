@@ -5,9 +5,12 @@ de ventas (Issue #44). Un registro por grupo (tipo_job='backfill',
 detalle.subtipo='backfill_ventas'), no un estado global para los ~65 grupos.
 
 Subcomandos:
-  check <grupo_id>
+  check <grupo_id> <fecha_desde> <fecha_hasta>
       Imprime "1" si ese grupo ya tiene una corrida 'exitoso' registrada
-      (permite resumir sin re-extraer grupos ya completos), "0" si no.
+      para ESE MISMO rango de fechas (permite resumir sin re-extraer grupos
+      ya completos), "0" si no -- un grupo completado con un rango distinto
+      (ej. el backfill de 2 anios de #44) no cuenta como hecho para un
+      rango nuevo (#104).
 
   start <grupo_id> <fecha_desde> <fecha_hasta>
       Inserta una fila 'ejecutando' y imprime el job_id (lastrowid).
@@ -37,7 +40,7 @@ def db_connect():
         charset="utf8mb4",
     )
 
-def cmd_check(grupo_id: str) -> int:
+def cmd_check(grupo_id: str, fecha_desde: str, fecha_hasta: str) -> int:
     conn = db_connect()
     try:
         with conn.cursor() as cur:
@@ -46,8 +49,10 @@ def cmd_check(grupo_id: str) -> int:
                 " WHERE tipo_job = 'backfill' AND estado = 'exitoso' "
                 "   AND detalle->>'$.subtipo' = %s "
                 "   AND detalle->>'$.grupo_id' = %s "
+                "   AND detalle->>'$.fecha_desde' = %s "
+                "   AND detalle->>'$.fecha_hasta' = %s "
                 " LIMIT 1",
-                (SUBTIPO, str(grupo_id)),
+                (SUBTIPO, str(grupo_id), fecha_desde, fecha_hasta),
             )
             print("1" if cur.fetchone() else "0")
     finally:
@@ -104,8 +109,8 @@ def main() -> int:
         return 2
     sub = sys.argv[1]
     args = sys.argv[2:]
-    if sub == "check" and len(args) == 1:
-        return cmd_check(args[0])
+    if sub == "check" and len(args) == 3:
+        return cmd_check(*args)
     if sub == "start" and len(args) == 3:
         return cmd_start(*args)
     if sub == "end" and len(args) == 6:
