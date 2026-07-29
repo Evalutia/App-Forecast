@@ -2142,6 +2142,17 @@ Selección real de producción hoy (criterio viejo, menor RMSE in-sample): RF ga
 
 ---
 
+### `scripts/qa_planilla_oracle.py` — QA de cuentas ejecutada, Issue #108 (sesión 2026-07-29)
+
+| Decisión | Definición |
+|----------|-----------|
+| **Oráculo como script versionado, no queries ad-hoc** | `scripts/qa_planilla_oracle.py`: recomputa desde tablas crudas cada campo mensual (10) + resumen del export + ROT.S/Fiabilidad/QBK (algoritmos replicados de `run_calc_planilla.py`/`run_calc_sugerencias.py`/`exportPlanilla.ts`) y compara contra lo persistido. Solo SELECTs. Se corre con `cat scripts/qa_planilla_oracle.py \| docker compose exec -T etl python3 -` (acepta SKUs por argv; sin args selecciona perfiles automáticamente). |
+| **Resultado: fórmulas 100% OK** | `I02418` (12/12 meses cerrados), `C00678` (alta estable, fiab 86.2%), `C00175` (baja c/quiebre, ROT.S NULL correcto), `02770` (1/13 meses, placeholders #106 correctos). Global: fiabilidad ∈ [0,100] sobre 1246 SKUs. Valores reales de `I02418` para la respuesta al cliente: VTA=1517, DDSTK=10.59, RotDesEstac=6.62, ROT.S=8.44, fiab=19.09%, QBK=1.3 días. |
+| **Hallazgo operativo → #111 (blocker)** | Los únicos mismatches (10, todos en el mes de referencia) revelaron que **la planilla está congelada al 23/07**: ningún job `etl` en `jobs_historial` desde entonces. 28/07 falló por `Communications link failure` (MySQL reinició ~8 veces en la semana), 29/07 salteado por `backfill.lock` (esperado, #104), 24-27/07 sin rastro (ofelia recreado el 28 se llevó los logs). Sin OOM de kernel. Familia #59/#60. No se parchó nada (criterio de #108): issue nuevo con evidencia. |
+| **Acceso a producción para QA** | SSH directo con la .pem de Descargas (ver memoria del proyecto), script por stdin al contenedor `etl` que ya tiene pymysql + credenciales en env — sin exponer passwords en comandos. |
+
+---
+
 ## Issues conocidos / TODOs en código
 
 | Issue | Ubicación | Descripción |
