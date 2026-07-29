@@ -71,8 +71,8 @@ function rotDesEstac(meses: PlanillaMesDto[]): number | null {
 }
 
 function ddstk(meses: PlanillaMesDto[]): number | null {
-  const totalVentas = meses.reduce((s, m) => s + Number(m.ventasCantidad), 0);
-  const totalDias   = meses.reduce((s, m) => s + m.diasConStock, 0);
+  const totalVentas = meses.reduce((s, m) => s + (m.ventasCantidad ?? 0), 0);
+  const totalDias   = meses.reduce((s, m) => s + (m.diasConStock ?? 0), 0);
   return totalDias === 0 ? null : totalVentas / totalDias;
 }
 
@@ -83,7 +83,7 @@ function ddstk(meses: PlanillaMesDto[]): number | null {
 // null, extrapolacion indefinida), no hubo componente real que usar en el
 // blend para esa fila -- se deja en blanco, no se inventa un valor.
 function ventaRealOExtrapolacion(mes: PlanillaMesDto): number | null {
-  if (mes.estadoMes === 'normal') return Number(mes.ventasCantidad);
+  if (mes.estadoMes === 'normal') return mes.ventasCantidad ?? 0;
   if (mes.rotacionDiariaReal != null) return mes.rotacionDiariaReal * mes.diasNaturalesMes;
   return null;
 }
@@ -211,17 +211,18 @@ export async function exportPlanillaExcel(
   for (const item of items) {
     const rd  = rotDesEstac(item.meses);
     const dd  = ddstk(item.meses);
-    const vta = item.meses.slice(0, -1).reduce((s, m) => s + Number(m.ventasCantidad), 0);
+    const vta = item.meses.slice(0, -1).reduce((s, m) => s + (m.ventasCantidad ?? 0), 0);
     const sug = sugerencias.get(item.sku);
 
+    // Meses sin_datos (#106) exportan celda vacía (null), no un 0 inventado.
     const rowValues = [
       item.sku,
       item.descripcion ?? '',
       item.codigoBarras ?? '',
       item.generoDescripcion ?? '',
-      ...item.meses.map(m => Number(m.ventasCantidad)),
-      ...item.meses.map(m => m.rotacionDiariaReal ?? 0),
-      ...item.meses.map(m => m.ticketsMes ?? 0),
+      ...item.meses.map(m => m.ventasCantidad),
+      ...item.meses.map(m => m.estadoMes === 'sin_datos' ? null : m.rotacionDiariaReal ?? 0),
+      ...item.meses.map(m => m.ticketsMes),
       ...item.meses.map(m => m.valorHistorico ?? null),
       ...item.meses.map(m => ventaRealOExtrapolacion(m)),
       ...item.meses.map(m => criterioFrecuenciaLabel(m.criterioFrecuencia, m.estadoMes)),
