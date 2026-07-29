@@ -2130,6 +2130,18 @@ Selección real de producción hoy (criterio viejo, menor RMSE in-sample): RF ga
 
 ---
 
+### `exportPlanilla.ts` — Implementación Issue #107 (sesión 2026-07-29)
+
+| Decisión | Definición |
+|----------|-----------|
+| **Seam de testeo: `buildPlanillaWorkbook(items, sugerencias)` exportada** | Construcción pura del workbook (sin fetch ni DOM), testeable en node. `exportPlanillaExcel` queda como wrapper fetch+descarga. Primer test de frontend del repo: `exportPlanilla.test.ts` (11 asserts de layout/colores/sin_datos), script `npm test` (`vitest run`) agregado — vitest ya estaba en devDependencies sin usarse. |
+| **Hoja 1 idéntica al original del cliente** | `Articulo`/`Descripcion`/`Codigos Barras` + `Vta.<mes>`×13 + `<mes>`×13 (rotación sin prefijo, su convención) + `Rotacion DesEstac.`/`Estado Art.`/`VTA`/`DDSTK`, y a la derecha `ROT.S`/`Fiabilidad %`/`QBK (días)`/`Género`. 37 columnas — mismo ancho que el export que el cliente usó bien en junio. `Estado Art.` conserva su nombre de header con valores texto (`activo/inactivo/discontinuo`). |
+| **Hoja 2 "Detalle de cálculo"** | Anclas `Articulo`+`Descripcion` + 5 bloques ×13 (`Tick`/`Hist`/`V/E`/`Crit`/`VAj`). VAj con fondo por criterio (azul `BFDBFE` histórico, violeta `DDD6FE` promedio, teal `99F6E4` real/extrapolado — tintes claros de la paleta #65) y leyenda con chips mergeados en la fila 1; el resto de los bloques conserva el color de quiebre. Freeze en `xSplit:2, ySplit:3`. |
+| **`sin_datos` (#106) en el export** | Celda vacía con fondo gris claro `F1F5F9` en ambas hojas — nunca un 0 inventado. |
+| **Verificación de escala con la función real** | Script `vite-node` en scratchpad: 5550 SKUs × 13 meses → build 394ms, build+serialize ~4.9s, 2.6MB, heap 378MB. Verificado con openpyxl: hoja 1 `A1:AK5551` (37 cols), hoja 2 `A1:BO5553` (67 cols), headers exactos, placeholders null. |
+
+---
+
 ## Issues conocidos / TODOs en código
 
 | Issue | Ubicación | Descripción |
