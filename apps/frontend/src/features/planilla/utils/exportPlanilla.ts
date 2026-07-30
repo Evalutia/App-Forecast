@@ -338,6 +338,121 @@ function buildHojaDetalle(wb: ExcelJS.Workbook, items: PlanillaVentasDto[]): voi
   }
 }
 
+// ── Hoja 3: "Criterios" ──────────────────────────────────────────────────────
+// Issue #109: qué significa y cómo se calcula cada columna de las hojas 1-2.
+// Contenido estático destilado de las fórmulas VERIFICADAS contra producción
+// en la QA de #108 (scripts/qa_planilla_oracle.py) — viaja en cada export.
+// Lenguaje para el cliente: sin nombres de tablas ni jerga interna.
+
+// "[mes]" representa cada uno de los 13 meses de la ventana (12 cerrados + el
+// mes en curso). exportado tal cual en la hoja; los tests mapean los headers
+// reales contra estas filas normalizando la parte del mes.
+type CriterioRow = { col: string; hoja: string; que: string; como: string };
+
+export const CRITERIOS_COLUMNAS: CriterioRow[] = [
+  // Hoja 1 — Planilla de Reposición
+  { col: 'Articulo', hoja: 'Planilla', que: 'Código del artículo.', como: 'Identificador del catálogo.' },
+  { col: 'Descripcion', hoja: 'Planilla', que: 'Descripción del artículo.', como: 'Tal como figura en el catálogo.' },
+  { col: 'Codigos Barras', hoja: 'Planilla', que: 'Código de barras.', como: 'Tal como figura en el catálogo. Vacío si el artículo no tiene.' },
+  { col: 'Vta.[mes]', hoja: 'Planilla', que: 'Unidades vendidas en ese mes (ventas netas: descuenta devoluciones).',
+    como: 'Suma de las ventas del mes. La columna de más a la derecha es el mes en curso (incompleto), en letra gris. Celda vacía gris claro = sin datos de ese mes (ej. artículo dado de alta después).' },
+  { col: '[mes]', hoja: 'Planilla', que: 'Rotación diaria real del mes: a qué ritmo se vendió mientras hubo stock.',
+    como: 'Unidades vendidas del mes ÷ días del mes con stock disponible. Vacía si el mes no tuvo ningún día con stock.' },
+  { col: 'Rotacion DesEstac.', hoja: 'Planilla', que: 'Rotación diaria promedio del año, corregida por estacionalidad.',
+    como: 'Promedio sobre los 12 meses cerrados: los meses con stock completo usan su rotación ÷ factor estacional del mes; los meses con quiebre usan la rotación ajustada por frecuencia; los meses sin stock o sin datos no participan. Excluye el mes en curso.' },
+  { col: 'Estado Art.', hoja: 'Planilla', que: 'Estado del artículo en el catálogo.', como: 'activo (en venta normal), inactivo (temporalmente inactivo) o discontinuo (sin reposición futura).' },
+  { col: 'VTA', hoja: 'Planilla', que: 'Total de unidades vendidas en el año.', como: 'Suma de las ventas de los 12 meses cerrados. Excluye el mes en curso.' },
+  { col: 'DDSTK', hoja: 'Planilla', que: 'Demanda diaria con stock: venta promedio por día en los días que hubo stock.',
+    como: 'Suma de ventas de los 13 meses ÷ suma de días con stock de los 13 meses.' },
+  { col: 'ROT.S', hoja: 'Planilla', que: 'Rotación diaria sugerida para planificar la reposición.',
+    como: 'Promedio ponderado de la rotación de hasta 13 meses cerrados con datos útiles (stock completo: rotación real; quiebre: rotación ajustada). Los meses recientes pesan más que los antiguos. Vacía si hay menos de 3 meses útiles.' },
+  { col: 'Fiabilidad %', hoja: 'Planilla', que: 'Qué tan estable es la rotación del artículo — cuánto confiar en ROT.S.',
+    como: '100% = rotación idéntica todos los meses; baja cuanto más varía de mes a mes. Siempre entre 0% y 100%.' },
+  { col: 'QBK (días)', hoja: 'Planilla', que: 'Días estimados hasta quedarse sin stock.', como: 'Stock actual ÷ ROT.S. 0 = ya sin stock.' },
+  { col: 'Género', hoja: 'Planilla', que: 'Género del artículo.', como: 'Tal como figura en el catálogo.' },
+  // Hoja 2 — Detalle de cálculo
+  { col: 'Tick.[mes]', hoja: 'Detalle', que: 'Tickets: cantidad de días de ese mes con al menos una venta real.',
+    como: 'Se cuentan días con venta, no unidades. Define qué método se usa para el valor ajustado (ver bandas abajo).' },
+  { col: 'Hist.[mes]', hoja: 'Detalle', que: 'Histórico: venta mensual promedio del artículo.',
+    como: 'Promedio de ventas de los 12 meses cerrados en los que el artículo ya existía. Es el mismo valor en todos los meses de la fila.' },
+  { col: 'V/E.[mes]', hoja: 'Detalle', que: 'Venta real del mes, o su extrapolación si hubo quiebre.',
+    como: 'Con stock todo el mes: la venta real. Con quiebre: rotación diaria real × días del mes (estima cuánto se habría vendido sin quiebre). Vacía si el mes no tuvo stock.' },
+  { col: 'Crit.[mes]', hoja: 'Detalle', que: 'Método usado para el valor ajustado de ese mes.',
+    como: 'Histórico, Promedio, Venta real o Extrapolado — según los tickets del mes (ver bandas abajo).' },
+  { col: 'VAj.[mes]', hoja: 'Detalle', que: 'Valor ajustado: la estimación de demanda mensual que usa el sistema.',
+    como: 'El resultado de aplicar el método de Crit. El color de fondo indica el método (ver leyenda).' },
+];
+
+export const CRITERIOS_BANDAS = [
+  ['2 tickets o menos', 'Histórico', 'Muy pocas ventas en el mes: la venta puntual no es representativa, se usa el promedio anual.'],
+  ['3 a 4 tickets', 'Promedio', 'Zona intermedia: promedio entre el Histórico y la Venta real (o Extrapolación si hubo quiebre).'],
+  ['5 tickets o más', 'Venta real / Extrapolado', 'Ventas frecuentes: el propio mes es representativo. Con quiebre se usa la extrapolación.'],
+] as const;
+
+const CRITERIOS_COLORES: { color: string | null; fg?: string; label: string; detalle: string }[] = [
+  { color: COLOR_QUIEBRE_ALTA, label: 'Amarillo', detalle: 'Mes con quiebre de stock en artículo de alta frecuencia (vendió en 9 o más de los 12 meses).' },
+  { color: COLOR_QUIEBRE_MEDIA, label: 'Naranja', detalle: 'Mes con quiebre en artículo de frecuencia media (vendió en 4 a 8 meses).' },
+  { color: COLOR_QUIEBRE_BAJA, label: 'Rojo', detalle: 'Mes con quiebre en artículo de baja frecuencia (vendió en 3 meses o menos).' },
+  { color: COLOR_SINSTOCK, label: 'Gris', detalle: 'Mes completo sin stock.' },
+  { color: COLOR_SINDATOS, label: 'Gris claro', detalle: 'Sin datos: el artículo no existía o no hay información de ese mes. La celda queda vacía.' },
+  { color: CRITERIO_FILL.historico.bg, fg: CRITERIO_FILL.historico.fg, label: 'Azul (VAj)', detalle: 'El valor ajustado usó el método Histórico.' },
+  { color: CRITERIO_FILL.promedio.bg, fg: CRITERIO_FILL.promedio.fg, label: 'Violeta (VAj)', detalle: 'El valor ajustado usó el método Promedio.' },
+  { color: CRITERIO_FILL.real_extrapolado.bg, fg: CRITERIO_FILL.real_extrapolado.fg, label: 'Verde azulado (VAj)', detalle: 'El valor ajustado usó Venta real o Extrapolación.' },
+];
+
+function addTituloSeccion(ws: ExcelJS.Worksheet, texto: string): void {
+  const row = ws.addRow([texto]);
+  row.height = 20;
+  const cell = row.getCell(1);
+  cell.font = { bold: true, size: 11, color: { argb: `FF${COLOR_SUMMARY_FG}` } };
+  ws.mergeCells(row.number, 1, row.number, 4);
+}
+
+function buildHojaCriterios(wb: ExcelJS.Workbook): void {
+  const ws = wb.addWorksheet('Criterios', { views: [{ state: 'frozen', ySplit: 1 }] });
+  ws.columns = [{ width: 22 }, { width: 10 }, { width: 52 }, { width: 78 }];
+
+  applyHeaderStyle(ws.addRow(['Columna', 'Hoja', 'Qué significa', 'Cómo se calcula']), 5);
+
+  const wrap = { vertical: 'top', wrapText: true } as const;
+  let hojaActual = '';
+  for (const c of CRITERIOS_COLUMNAS) {
+    if (c.hoja !== hojaActual) {
+      hojaActual = c.hoja;
+      addTituloSeccion(ws, hojaActual === 'Planilla'
+        ? 'Hoja 1 — Planilla de Reposición'
+        : 'Hoja 2 — Detalle de cálculo');
+    }
+    const row = ws.addRow([c.col, c.hoja, c.que, c.como]);
+    row.getCell(1).font = { bold: true, size: 10 };
+    [1, 2, 3, 4].forEach(i => { row.getCell(i).alignment = wrap; row.getCell(i).font = { ...row.getCell(i).font, size: 10 }; });
+  }
+
+  ws.addRow([]);
+  addTituloSeccion(ws, 'Método del valor ajustado según los tickets del mes');
+  for (const [banda, metodo, detalle] of CRITERIOS_BANDAS) {
+    const row = ws.addRow([banda, '', metodo, detalle]);
+    [1, 3, 4].forEach(i => { row.getCell(i).alignment = wrap; row.getCell(i).font = { size: 10 }; });
+    row.getCell(3).font = { bold: true, size: 10 };
+  }
+  const nota = ws.addRow(['', '', '', 'Los umbrales de tickets son los vigentes hoy; pueden ajustarse en la configuración del sistema.']);
+  nota.getCell(4).font = { italic: true, size: 9, color: { argb: 'FF6B7280' } };
+
+  ws.addRow([]);
+  addTituloSeccion(ws, 'Colores de las celdas mensuales');
+  for (const c of CRITERIOS_COLORES) {
+    const row = ws.addRow([c.label, '', '', c.detalle]);
+    const chip = row.getCell(1);
+    if (c.color) {
+      chip.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: `FF${c.color}` } };
+      chip.font = { size: 10, bold: true, color: { argb: c.fg ? `FF${c.fg}` : 'FF111827' } };
+    }
+    chip.alignment = { horizontal: 'center', vertical: 'middle' };
+    row.getCell(4).alignment = wrap;
+    row.getCell(4).font = { size: 10 };
+  }
+}
+
 // Construcción pura del workbook (testeable en node, sin fetch ni DOM).
 export function buildPlanillaWorkbook(
   items: PlanillaVentasDto[],
@@ -348,6 +463,7 @@ export function buildPlanillaWorkbook(
   wb.modified = new Date();
   buildHojaPlanilla(wb, items, sugerencias);
   buildHojaDetalle(wb, items);
+  buildHojaCriterios(wb);
   return wb;
 }
 

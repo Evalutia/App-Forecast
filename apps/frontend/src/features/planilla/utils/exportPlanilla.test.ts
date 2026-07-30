@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { Cell } from 'exceljs';
-import { buildPlanillaWorkbook } from './exportPlanilla';
+import { buildPlanillaWorkbook, CRITERIOS_COLUMNAS } from './exportPlanilla';
 import type { PlanillaMesDto, PlanillaSugerenciaDto, PlanillaVentasDto } from '../types/planilla';
 
 // Fixture mínima: ventana normalizada de 3 meses (may/jun/jul 2026, jul = mes
@@ -77,8 +77,8 @@ describe('buildPlanillaWorkbook (#107)', () => {
   const hoja1 = wb.getWorksheet('Planilla de Reposición')!;
   const hoja2 = wb.getWorksheet('Detalle de cálculo')!;
 
-  it('crea exactamente las dos hojas, en orden', () => {
-    expect(wb.worksheets.map(w => w.name)).toEqual(['Planilla de Reposición', 'Detalle de cálculo']);
+  it('crea exactamente las tres hojas, en orden', () => {
+    expect(wb.worksheets.map(w => w.name)).toEqual(['Planilla de Reposición', 'Detalle de cálculo', 'Criterios']);
   });
 
   it('hoja 1: headers idénticos al layout original del cliente + agregados a la derecha', () => {
@@ -159,5 +159,60 @@ describe('buildPlanillaWorkbook (#107)', () => {
     expect(filaB.getCell(12).value).toBe('');   // Crit.May sin etiqueta
     expect(filaB.getCell(15).value).toBeNull(); // VAj.May
     expect(fillColor(filaB.getCell(15))).toBe('FFF1F5F9'); // gris sin_datos, no color de criterio
+  });
+});
+
+describe('hoja Criterios (#109)', () => {
+  const wb = buildPlanillaWorkbook([skuA, skuB], sugerencias);
+  const hoja1 = wb.getWorksheet('Planilla de Reposición')!;
+  const hoja2 = wb.getWorksheet('Detalle de cálculo')!;
+  const criterios = wb.getWorksheet('Criterios')!;
+
+  // Header real 'Vta.May/26' → fila genérica 'Vta.[mes]', 'May/26' → '[mes]'
+  const MES_RE = /^([A-Z][a-zá-ú]{2}\/\d{2})$/i;
+  function normalizar(header: string): string {
+    if (MES_RE.test(header)) return '[mes]';
+    return header.replace(/[A-Z][a-zá-ú]{2}\/\d{2}$/i, '[mes]');
+  }
+
+  const filasCriterios = new Set(CRITERIOS_COLUMNAS.map(c => c.col));
+  const textoCompleto = criterios.getSheetValues().flat().map(String).join('\n');
+
+  it('toda columna de la hoja 1 tiene su fila en Criterios', () => {
+    for (const h of headerValues(hoja1.getRow(1).values).map(String)) {
+      expect(filasCriterios, `header sin explicar: ${h}`).toContain(normalizar(h));
+    }
+  });
+
+  it('toda columna de la hoja 2 tiene su fila en Criterios', () => {
+    for (const h of headerValues(hoja2.getRow(3).values).map(String)) {
+      expect(filasCriterios, `header sin explicar: ${h}`).toContain(normalizar(h));
+    }
+  });
+
+  it('las 5 columnas que el cliente preguntó están explicadas', () => {
+    for (const col of ['QBK (días)', 'ROT.S', 'Fiabilidad %', 'DDSTK', 'Estado Art.']) {
+      expect(filasCriterios).toContain(col);
+    }
+  });
+
+  it('incluye las bandas de tickets y la leyenda de colores con swatches pintados', () => {
+    expect(textoCompleto).toContain('2 tickets o menos');
+    expect(textoCompleto).toContain('5 tickets o más');
+    // swatch de quiebre alta frecuencia pintado en la sección de colores
+    let amarillo = false;
+    criterios.eachRow(row => {
+      const c = row.getCell(1);
+      if (c.value === 'Amarillo' && fillColor(c) === 'FFFFCA28') amarillo = true;
+    });
+    expect(amarillo).toBe(true);
+  });
+
+  it('lenguaje para el cliente: sin jerga interna ni nombres de tablas/enums', () => {
+    for (const jerga of ['planilla_ventas_calculada', 'ventas_historicas', 'stock_diario',
+                         'estado_mes', 'real_extrapolado', 'quiebre_parcial', 'NULL', 'null',
+                         'frecuencia_nivel', 'valor_ajustado', 'API', 'backend']) {
+      expect(textoCompleto, `jerga encontrada: ${jerga}`).not.toContain(jerga);
+    }
   });
 });

@@ -2153,6 +2153,18 @@ Selección real de producción hoy (criterio viejo, menor RMSE in-sample): RF ga
 
 ---
 
+### Hoja 3 "Criterios" en el export — Issue #109 (sesión 2026-07-29)
+
+| Decisión | Definición |
+|----------|-----------|
+| **Contenido como data exportada (`CRITERIOS_COLUMNAS`), no prosa embebida en el builder** | Array tipado `{col, hoja, que, como}` exportado desde `exportPlanilla.ts` — permite que el test recorra los headers reales de las hojas 1-2, normalice la parte del mes (`Vta.May/26` → `Vta.[mes]`) y falle si alguna columna queda sin explicar. La cobertura total de columnas es un test, no una promesa. |
+| **Fórmulas en palabras = las verificadas en #108** | Cada "cómo se calcula" refleja lo que el oráculo confirmó contra producción (VTA excluye mes en curso, DDSTK sobre los 13 meses, ROT.S ponderado con mínimo de 3 meses útiles, fiabilidad acotada 0-100%, tickets = días con venta). |
+| **Bandas de tickets hardcodeadas (≤2 / 3-4 / ≥5) con nota de vigencia** | Son los valores de `configuracion_sistema` de hoy; el export no consulta configuración (no hay endpoint). La nota "pueden ajustarse en la configuración del sistema" cubre el drift. Si #67 (UI de configuración) se implementa algún día, revisar esta hoja. |
+| **Test de lenguaje anti-jerga** | Asserta que el texto de la hoja no contiene nombres internos (`estado_mes`, `real_extrapolado`, `planilla_ventas_calculada`, `NULL`, etc.) — el criterio "legible por el cliente" también quedó como test. "Teal" → "Verde azulado". |
+| **Estructura de la hoja** | Secciones: columnas Hoja 1 → columnas Hoja 2 → bandas de método por tickets → leyenda de colores con swatches pintados (5 de quiebre/sin datos + 3 de método). Header congelado. |
+
+---
+
 ## Issues conocidos / TODOs en código
 
 | Issue | Ubicación | Descripción |
