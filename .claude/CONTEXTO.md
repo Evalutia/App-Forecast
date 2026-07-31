@@ -2740,6 +2740,40 @@ Retoma el hallazgo de #76 (1/7, 14% elegible en casos borde, contra 70% en pobla
 
 ---
 
+### Ejecución real del backfill histórico de 10 años, issue #104 (sesión 2026-07-27/31)
+
+Implementación del fix acordado en el `/grill-me` previo (mismo issue, ver más arriba) más la corrida real en producción -- varios días de duración real, dos incidentes de producción encontrados y resueltos en el camino, y un bug de datos real descubierto recién al verificar el resultado (no solo confiar en `jobs_historial`).
+
+**Fix de `cmd_check` (`backfill_jobs.py`):** ahora compara `grupo_id` + `fecha_desde` + `fecha_hasta`, no solo el grupo -- TDD real (test rojo confirmado contra el código sin el fix antes de implementarlo). Commit `ada1608`.
+
+**Chequeo operativo real antes de la corrida:** `WS_URL` no estaba en `.env` de producción -- el cron diario lo hardcodea inline como parámetro de Pentaho en `run_ofelia.sh`, invisible para el entorno del contenedor. `run_backfill_ventas.sh` sí lo exige como variable de entorno real. Mismo problema con `ID_EMPRESA`/`S_DEPOSITOS`. Los tres hay que pasarlos explícitos vía `-e` en el `docker compose exec` para cualquier corrida manual futura de este script.
+
+**Piloto (grupo 44, 1 SKU) exitoso** tras desplegar el fix -- confirmó el mecanismo end-to-end (10 años reales, `MIN(fecha)=2016-10-03`).
+
+**Grupo 76 confirmado parcial** (2 de 6 SKUs con historia real a 2016, artefacto de recategorización), no se excluyó de la corrida completa -- coincide con la decisión ya tomada en el `/grill-me` para el caso parcial.
+
+**Incidente 1 -- disco lleno en MySQL (binlog), ~8.5h de corrida trabada sin que nadie lo notara hasta el chequeo manual:** el volumen de datos de MySQL (`/dev/nvme1n1`, 98G) llegó a 0 bytes libres, dejando una transacción trabada en `COMMIT` (`waiting for handler commit`) durante horas. Causa real: 17GB de binlog generados en un día por el volumen de escrituras del backfill, con `binlog_expire_logs_seconds` en el default de 30 días (sin réplicas, sin necesidad real de retenerlos). Se resolvió matando la conexión trabada (`KILL`, no `PURGE BINARY LOGS` -- ese comando necesita el mismo lock que la conexión trabada retiene, deadlock clásico) y bajando la retención a 900s luego 900s→cuando se ajustó más. **Efecto colateral no buscado:** MySQL abortó con `SIGABRT` dos veces durante el incidente (asserts internos de InnoDB ante el disco lleno) -- se recuperó solo ambas veces vía `XA crash recovery`, sin indicios de corrupción, pero perdió el `SET GLOBAL` (no persiste un restart) hasta que se re-aplicó después de la segunda caída.
+
+**Hallazgo más grande: el disco no lo llenaba MySQL.** Investigando la discrepancia entre lo que medía `du` en `/var/lib/mysql` (25G reales) y lo que reportaba `df` del volumen compartido (76-80G usados), se encontró que `/srv/evalutia/data` (el mismo volumen NVMe) es el data-root completo de Docker/containerd de **toda la VM**, no exclusivo de `evalutia` -- comparte disco con `matcher` (proyecto del socio del usuario, corriendo en paralelo en la misma VM, sin relación con Evalutia). El grueso eran 49G de `containerd` (capas de imágenes) + 32G de `docker` (build cache, en gran parte de los rebuilds de `etl` para desplegar este mismo fix). Se limpió con `docker builder prune -af` + `docker image prune -f` (solo cache y dangling images, nunca `-a` ni `--volumes`, para no arriesgar ninguna imagen/volumen de `matcher` mientras sus 3 contenedores seguían corriendo) -- liberó ~62GB reales sin tocar nada del otro proyecto.
+
+**Corrida completa terminada** (65 grupos no-201, ~4 días de duración real incluyendo el incidente): grupo más grande (200, 2636 artículos) tardó 42612s (~11.8h) él solo, en línea con la estimación hecha a partir del precedente de #44 escalado a la ventana de 10 años.
+
+**Incidente 2 -- bug real de datos, encontrado solo al verificar (no confiar en `estado='exitoso'`):** `merge_y_truncar_stage()` (el paso final que mueve `ventas_historicas_stage` → `ventas_historicas`) se invocaba sin chequear su código de salida. Causa: 39 SKUs con ventas históricas reales pero **sin fila en `articulos`** (productos dados de baja del catálogo actual) hacían fallar el `INSERT` completo por la FK `fk_ventas_articulo` -- atómico, sin tolerancia parcial. El script seguía de largo y marcaba el grupo `exitoso` igual. Resultado real: **39 de los 65 grupos quedaron con los 2 años de siempre**, no los 10 años reales, pese a figurar `exitoso` en `jobs_historial` -- detectado recién al chequear `MIN(fecha)` por grupo, uno de los criterios de aceptación del issue que casi se salta por confiar en el estado del job.
+
+**Fix real (commit `e0fa813`):** el `INSERT` excluye SKUs sin fila en `articulos` (`WHERE sku IN (SELECT sku FROM articulos)`, ~1.4% de las filas en `stage`, se descartan en vez de reconstruir el catálogo histórico) y el call site ahora chequea el código de salida del merge, marcando el grupo `fallido` si revienta -- reusa el mecanismo de `FAILED_CHUNKS`/reintento ya existente para fallos de chunk.
+
+**Deploy complicado por el mismo motivo que #104 original diagnosticó en otro lado:** `/opt/evalutia` en la VM tiene archivos de `.git` con dueño mixto (`ssm-user` vs `ubuntu`, según quién se conectó last -- SSM Session Manager vs SSH directo), y la clave SSH de `ubuntu` no está registrada como deploy key en GitHub (`git@github.com: Permission denied`). Se resolvió copiando el archivo corregido directo por `scp` (bypass de `git pull` para ese único archivo) en vez de perseguir la causa de fondo -- pendiente si se repite: registrar la clave de `ubuntu` como deploy key, o estandarizar qué usuario opera el repo.
+
+**Recuperación de los 39 grupos atascados:** en vez de re-correr el backfill completo (habría vuelto a pegarle al WS sin necesidad, los datos ya estaban extraídos), se corrió el merge corregido **una sola vez** directo contra el `ventas_historicas_stage` acumulado (93.069.480 filas: 91.8M válidas + 1.272.600 huérfanas de 39 SKUs distintos). La transacción tardó ~95 minutos (`INSERT...SELECT...GROUP BY` sobre ese volumen, sin progreso visible tipo log -- monitoreado vía `information_schema.innodb_trx.trx_rows_locked/modified`) y terminó de commitear **apenas antes de que el disco volviera a quedarse sin espacio** (llegó a 2GB libres durante la transacción, se liberó margen extra con otra limpieza de Docker sobre la marcha). Verificado: `ventas_historicas_stage` en 0 filas, `MIN(fecha)=2016-10-03` confirmado en los 39 grupos.
+
+**Verificación final del criterio de aceptación** ("sin alterar el rango ya cargado"): snapshot `COUNT`+`SUM` por grupo antes/después. 5 grupos mostraron diferencias reales (61, 69, 76, 81, 200) -- todas incrementos, nunca bajas, consistentes con 2-3 noches reales de cron diario corriendo durante los ~4 días que duró la corrida completa (la ejecución del backfill nunca bloqueó el cron diario más allá de mientras su propio lock estaba activo). No hay indicio de que el backfill ni la recuperación hayan alterado indebidamente el rango 2024-2026 ya cargado.
+
+**Lección para la próxima corrida de este tipo:** setear `binlog_expire_logs_seconds` corto (o hacer `docker system prune` de rutina) **antes** de lanzar cualquier operación de escritura masiva en este VM, no reactivamente -- el disco compartido con `matcher` tiene menos margen real del que parece.
+
+**#104 cerrado.**
+
+---
+
 ## Documentación adicional
 
 | Archivo | Contenido |
