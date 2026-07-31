@@ -168,6 +168,11 @@ process_chunk_depositos() {
 }
 
 merge_y_truncar_stage() {
+  # Issue #104: excluye SKUs sin fila en articulos (productos dados de baja del
+  # catalogo actual, pero con ventas historicas reales que el WS sigue
+  # devolviendo) -- sin el filtro, el INSERT completo revienta por la FK
+  # fk_ventas_articulo y ninguna fila del grupo se mergea, aunque sean pocos
+  # SKUs huerfanos entre millones de filas validas.
   python3 - <<PY
 import os, pymysql
 conn = pymysql.connect(
@@ -184,6 +189,7 @@ try:
                    NOW(6), COALESCE(MIN(s.fuente),'ws_consstockventa')
             FROM ventas_historicas_stage s
             WHERE s.sku IS NOT NULL
+              AND s.sku IN (SELECT sku FROM articulos)
             GROUP BY DATE(s.fecha), TRIM(s.sku)
             ON DUPLICATE KEY UPDATE
               cantidad = VALUES(cantidad), ts_carga = VALUES(ts_carga), fuente = VALUES(fuente)
@@ -232,7 +238,10 @@ for G in ${GROUPS_LIST}; do
     cur_start_iso="$(date -d "${cur_end_iso} +1 day" +%F)"
   done
 
-  merge_y_truncar_stage
+  if ! merge_y_truncar_stage; then
+    echo "[ERROR] Grupo ${G}: fallo el merge final de stage -> ventas_historicas (ver traceback arriba) — se marca fallido, no se pierde silenciosamente."
+    FAILED_CHUNKS+=("grupo=${G} merge_final_fallido")
+  fi
 
   DURACION=$(( $(date +%s) - T0 ))
   if [[ ${#FAILED_CHUNKS[@]} -eq 0 ]]; then
