@@ -62,12 +62,27 @@ import json
 import os
 import subprocess
 from datetime import datetime
-from typing import Dict, Optional
+from typing import Dict, List, Optional
+
+from sqlalchemy import text
 
 from ioworker.db import DBConfig, get_engine, insert_job_start, update_job_end
 from ml.apply_elegibilidad import get_elegibilidad_summary
 
 TIPO_JOB = "eval_elegibilidad"
+
+# Issue #105: corrida real post-#104 (ventas_historicas paso a decenas de
+# millones de filas con el backfill de 10 anios) colgo la VM de produccion
+# (t3.medium, 3.7GB RAM) -- load_series_by_sku_mysql sin EVAL_ONLY_SKUS trae
+# la tabla entera a memoria de una. El fix de fondo (#105) empuja el filtro
+# de SKUs al SQL (ver ioworker/data.py), pero una corrida full-catalog SIN
+# EVAL_ONLY_SKUS igual carga todo de una. EVAL_BATCH_SIZE, si se setea (>0),
+# parte el catalogo completo en lotes de ese tamanio y corre eval_walkforward.py
+# una vez por lote (mismo EVAL_VERSION en todos, catalogo_modelos acumula sin
+# pisarse entre lotes -- ver fetch_catalogo en apply_elegibilidad.py, dedupea
+# por (sku, modelo) quedandose con la fecha_estimacion mas reciente). Default
+# "0" mantiene el comportamiento anterior (una sola corrida full-catalog).
+BATCH_SIZE = int(os.getenv("EVAL_BATCH_SIZE", "0"))
 
 
 # -------------------------------------------------------------------------
@@ -119,6 +134,40 @@ def run_eval_walkforward(env: Dict[str, str], cwd: Optional[str] = None) -> "sub
 
 
 # -------------------------------------------------------------------------
+# Modo por lotes (#105) -- puro (chunk_skus) + una query de lectura
+# -------------------------------------------------------------------------
+
+def chunk_skus(skus: List[str], batch_size: int) -> List[List[str]]:
+    """Puro, sin DB -- parte una lista de SKUs en lotes de tamanio batch_size
+    (el ultimo lote puede quedar mas chico). batch_size <= 0 devuelve un
+    unico lote con todos los SKUs (equivalente a no batchear)."""
+    if batch_size <= 0 or not skus:
+        return [skus] if skus else []
+    return [skus[i : i + batch_size] for i in range(0, len(skus), batch_size)]
+
+
+def fetch_all_skus(engine) -> List[str]:
+    """Universo completo de SKUs que procesaria una corrida full-catalog sin
+    EVAL_ONLY_SKUS -- mismo universo que ventas_historicas ve sin filtro
+    (ver ioworker.data.load_series_by_sku_mysql)."""
+    with engine.connect() as conn:
+        rows = conn.execute(text("SELECT DISTINCT sku FROM ventas_historicas ORDER BY sku"))
+        return [r[0] for r in rows]
+
+
+def build_env_for_batch(base_env: Dict[str, str], version: str, skus_batch: List[str]) -> Dict[str, str]:
+    """Como build_env, pero fija EVAL_ONLY_SKUS al lote en vez de eliminarlo
+    -- cada lote es una corrida acotada de eval_walkforward.py sobre ese
+    subconjunto, con el fix de #105 (filtro empujado al SQL) evita traer la
+    tabla completa a memoria por lote."""
+    env = dict(base_env)
+    env["EVAL_PERSIST_CATALOG"] = "1"
+    env["EVAL_VERSION"] = version
+    env["EVAL_ONLY_SKUS"] = ",".join(skus_batch)
+    return env
+
+
+# -------------------------------------------------------------------------
 # Construccion del detalle JSON para jobs_historial (puro, testeable)
 # -------------------------------------------------------------------------
 
@@ -149,15 +198,29 @@ def main() -> None:
     print(f"[run_eval_elegibilidad_dry_run] job_id={job_id} version={version} (full-catalog, dry-run)")
 
     try:
-        env = build_env(os.environ.copy(), version)
-        print("[run_eval_elegibilidad_dry_run] corriendo eval_walkforward.py (esto puede tardar bastante, es un job mensual)...")
-        proc = run_eval_walkforward(env, cwd=os.getcwd())
-        if proc.returncode != 0:
-            print(f"[WARN] eval_walkforward.py termino con returncode={proc.returncode} -- el resumen de abajo puede reflejar una corrida parcial (persistencia incremental, ver eval_walkforward.py).")
+        worst_returncode = 0
+        if BATCH_SIZE > 0:
+            skus = fetch_all_skus(engine)
+            batches = chunk_skus(skus, BATCH_SIZE)
+            print(f"[run_eval_elegibilidad_dry_run] EVAL_BATCH_SIZE={BATCH_SIZE} -- {len(skus)} SKUs en {len(batches)} lotes (issue #105, evita cargar ventas_historicas entera en memoria de una)")
+            for i, batch in enumerate(batches, start=1):
+                print(f"[run_eval_elegibilidad_dry_run] lote {i}/{len(batches)} ({len(batch)} SKUs)...")
+                env = build_env_for_batch(os.environ.copy(), version, batch)
+                proc = run_eval_walkforward(env, cwd=os.getcwd())
+                if proc.returncode != 0:
+                    worst_returncode = proc.returncode
+                    print(f"[WARN] lote {i}/{len(batches)} termino con returncode={proc.returncode}")
+        else:
+            env = build_env(os.environ.copy(), version)
+            print("[run_eval_elegibilidad_dry_run] corriendo eval_walkforward.py (esto puede tardar bastante, es un job mensual)...")
+            proc = run_eval_walkforward(env, cwd=os.getcwd())
+            worst_returncode = proc.returncode
+        if worst_returncode != 0:
+            print(f"[WARN] eval_walkforward.py termino con returncode={worst_returncode} -- el resumen de abajo puede reflejar una corrida parcial (persistencia incremental, ver eval_walkforward.py).")
 
         print(f"[run_eval_elegibilidad_dry_run] leyendo resumen dry-run de apply_elegibilidad para version={version!r}...")
         summary = get_elegibilidad_summary(engine, version)
-        detalle = build_detalle_exitoso(summary, version=version, eval_returncode=proc.returncode)
+        detalle = build_detalle_exitoso(summary, version=version, eval_returncode=worst_returncode)
 
         update_job_end(engine, job_id, estado="exitoso", detalle=detalle)
         print(f"[run_eval_elegibilidad_dry_run] jobs_historial id={job_id} estado=exitoso")
