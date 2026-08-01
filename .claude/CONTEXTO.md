@@ -2165,6 +2165,18 @@ Selección real de producción hoy (criterio viejo, menor RMSE in-sample): RF ga
 
 ---
 
+### `ml/run_eval_elegibilidad_dry_run.py` — Issue #105 (sesión 2026-07-31)
+
+| Decisión | Definición |
+|----------|-----------|
+| **Se acepta pisar la medición mensual de julio (`eval-mensual-2026-07`)** | El cron real ya corrió el 1° de julio, antes del backfill de `#104` -- correr esto ahora pisa esa fila en `jobs_historial`/el resumen agregado. No se pierde nada real: `catalogo_modelos` conserva el histórico completo por `fecha_estimacion`, y el baseline contra el que compara este issue es el ya documentado en texto (`skus_evaluados=58, elegibles=14` sobre 1482 totales, cierre de `#102`), no una fila de DB que dependa de no pisarse. |
+| **Se lanza ahora, sin monitoreo activo tipo `#104`** | El sistema está sano (16G libres, MySQL sano hace 46hs, confirmado antes de lanzar). A diferencia del backfill, este job es de **lectura pura** hacia `articulos_elegibilidad_econometrico` (nunca escribe ahí) y solo agrega filas a `catalogo_modelos` (histórico puro) -- sin writes masivos a `ventas_historicas`/`stock_diario`, sin el mismo riesgo de disco que justificó el monitoreo constante de `#104`. Se corre en background (`nohup`), se chequea cuando haga falta en vez de vigilarlo. |
+| **Duración esperada: más que el precedente de ~10 min (`#102`)** | Ese precedente fue pre-backfill, con 1424 de 1482 SKUs sin historia suficiente para intentar walk-forward siquiera. Post-`#104`, muchos más SKUs van a tener 10 años reales en vez de 2 -- más folds por SKU y más SKUs llegando a la etapa cara (5 modelos × walk-forward). Sin estimación numérica cerrada, solo la expectativa de que va a tardar sensiblemente más. |
+
+> **Nota:** corre en el contenedor `etl` (no `python-worker`, pese al nombre) -- mismo patrón ya establecido y usado sin cambios en `#97`-`#103`, no se cuestionó de nuevo.
+
+---
+
 ## Issues conocidos / TODOs en código
 
 | Issue | Ubicación | Descripción |
@@ -2771,6 +2783,40 @@ Implementación del fix acordado en el `/grill-me` previo (mismo issue, ver más
 **Lección para la próxima corrida de este tipo:** setear `binlog_expire_logs_seconds` corto (o hacer `docker system prune` de rutina) **antes** de lanzar cualquier operación de escritura masiva en este VM, no reactivamente -- el disco compartido con `matcher` tiene menos margen real del que parece.
 
 **#104 cerrado.**
+
+---
+
+### Medición real de impacto en elegibilidad post-backfill, issue #105 (sesión 2026-07-31/08-01)
+
+Sin código nuevo previsto originalmente (reusar `ml/run_eval_elegibilidad_dry_run.py` de `#102`), pero terminó necesitando dos fixes reales de memoria y dos migraciones de producción pendientes descubiertas en el camino -- ver bitácora completa abajo.
+
+**Migración pendiente de `#102` nunca desplegada:** `jobs_historial.tipo_job` en producción no tenía el valor `'eval_elegibilidad'` en el ENUM (`infra/sql/18-jobs-historial-eval-elegibilidad.sql` se había aplicado local en su momento, nunca en la VM). Aplicada ahora, confirmado idempotente.
+
+**Incidente real -- la VM se colgó dos veces intentando la corrida full-catalog:** con el fix de `#104` aplicado, `ventas_historicas` pasó a tener 5559 SKUs con historia real (muchos con 10 años en vez de 2). `load_series_by_sku_mysql` (`ioworker/data.py`) traía la tabla **completa** a memoria con `pd.read_sql_query`, sin filtrar por SKU en el SQL -- el filtro de `only_skus` se aplicaba recién después en pandas. En una VM `t3.medium` (3.7GB RAM), esto agotó memoria+swap y colgó la instancia entera (no solo el contenedor -- SSH, HTTP/HTTPS y hasta AWS Session Manager dejaron de responder) **dos veces**, cada una requiriendo `Stop`/`Start` manual desde la consola de AWS (el usuario descartó explícitamente subir el tamaño de instancia por costo).
+
+**Fix real 1 (commit `d3233a0`):** `load_series_by_sku_mysql` ahora arma `WHERE sku IN (...)` en el propio SQL cuando se pasa `only_skus`, mismo patrón que `fetch_catalogo` en `apply_elegibilidad.py` (`text()` + params nombrados). Sin cambio de comportamiento para full-catalog ni para `top_n`. Tests nuevos contra MySQL real (`tests/test_data.py`).
+
+**Fix real 2 (commit `35a289e`):** el filtro de SQL no alcanza solo -- una corrida full-catalog (sin `only_skus`) sigue cargando todo de una. `EVAL_BATCH_SIZE` (opcional, default `0` = comportamiento anterior) parte el universo completo de SKUs en lotes y corre `eval_walkforward.py` una vez por lote, mismo `EVAL_VERSION` en todos (`catalogo_modelos` acumula sin pisarse entre lotes, dedupea por `(sku, modelo)` quedándose con la `fecha_estimacion` más reciente). Tests nuevos puros (`chunk_skus`, `build_env_for_batch`).
+
+**Segunda migración pendiente descubierta a mitad de la corrida ya con `EVAL_BATCH_SIZE` andando:** `catalogo_modelos` (`infra/sql/16-catalogo-modelos.sql`, de `#86`) **tampoco existía en producción** -- mismo patrón que la de `#102`, documentada como "paso humano separado" en su momento y nunca ejecutada. Aplicada en caliente sin frenar la corrida (`CREATE TABLE IF NOT EXISTS`, sin impacto en lo que ya estaba corriendo). Los primeros 1-2 lotes procesados antes de este fix probablemente no persistieron en `catalogo_modelos` (pérdida menor, ~150-300 SKUs de 5559, no perseguida).
+
+**Corrida real exitosa** (`EVAL_BATCH_SIZE=150`, 38 lotes, ~2h20min total, sin volver a colgar la VM -- memoria se mantuvo entre 700MB-2GB disponibles todo el tramo, con picos de swap pero estables, no descontrolados como en los cuelgues anteriores): `jobs_historial` id=319, `estado='exitoso'`.
+
+**Resultado real, comparado contra el mismo universo del baseline de `#97`/`#102`** (los 1482 SKUs ya trackeados en `articulos_elegibilidad_econometrico`, no el catálogo completo de 5559):
+
+| Métrica | Antes (`#102`, pre-`#104`) | Después (post-`#104`) |
+|---|---|---|
+| Con historia suficiente para evaluar (`skus_evaluados`) | 58 / 1482 (3.9%) | **1026 / 1482 (69.2%)** |
+| Elegibles | 14 / 1482 (0.94%) | **244 / 1482 (16.5%)** |
+| Tasa de conversión evaluado→elegible | 24.1% (14/58) | 23.8% (244/1026) |
+
+**Hallazgo clave:** la tasa de conversión evaluado→elegible se mantuvo prácticamente igual (~24%) antes y después -- el salto de 14 a 244 elegibles no es porque el criterio de elegibilidad (`#70`) se haya vuelto más laxo, es enteramente porque el backfill de `#104` le dio historia real suficiente a muchísimos más SKUs para siquiera poder evaluarse (69.2% vs 3.9%). Confirma empíricamente la hipótesis de negocio que motivó `#104`.
+
+Full-catálogo (los 5559 SKUs de `ventas_historicas`, incluye grupo 201 y SKUs fuera del pool original de 1482 candidatos): `skus_evaluados=2194`, `elegibles=748`, `ganan=742`, `pierden=8`, `sin_cambio=1444`.
+
+**Decisión documentada (criterio de aceptación del issue):** aplicar este resultado a producción (`APPLY_PERSIST=true` en `apply_elegibilidad.py`) queda **explícitamente como paso humano separado, no implementado en esta sesión** -- exactamente lo que pedía el issue. `articulos_elegibilidad_econometrico` sigue en 14 elegibles reales en producción, sin tocar.
+
+**#105 cerrado.**
 
 ---
 
