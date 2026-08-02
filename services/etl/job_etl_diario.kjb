@@ -140,6 +140,17 @@ SELECT 1;
 -- MERGE corregido: suma cantidad por SKU+fecha a traves de todos los depositos
 -- (ventas_historicas no tiene deposito_id en su clave unica; sin el SUM/GROUP BY,
 -- cada deposito pisaba el valor del anterior en vez de acumularse - issue #39 ampliado).
+--
+-- Issue #113: el INNER JOIN con articulos NO es decorativo. ventas_historicas
+-- tiene la FK fk_ventas_articulo (sku -> articulos.sku) y esto es un unico
+-- statement: una sola fila con un SKU que todavia no esta en el catalogo
+-- aborta el INSERT ENTERO. Paso de verdad -- el 02/08/2026 habia 39 SKUs
+-- nuevos (456 filas) sin articulo, y tumbaron las 51.024 filas del dia; como
+-- todos los hops del job son unconditional=Y, el job seguia como si nada y
+-- ventas_historicas quedo congelada 10 dias sin que nadie se enterara (#111).
+-- Con el JOIN entran las filas buenas y se saltean las huerfanas, misma
+-- tolerancia que ya tenia run_calc_planilla.py (que ademas cuenta
+-- skus_omitidos en jobs_historial).
 INSERT INTO ventas_historicas
   (fecha, sku, cantidad, ts_carga, fuente)
 SELECT
@@ -149,6 +160,7 @@ SELECT
   NOW(6) AS ts_carga,
   COALESCE(MIN(s.fuente),'ws_consstockventa') AS fuente
 FROM ventas_historicas_stage s
+INNER JOIN articulos a ON a.sku = TRIM(s.sku)
 WHERE s.sku IS NOT NULL
 GROUP BY DATE(s.fecha), TRIM(s.sku)
 ON DUPLICATE KEY UPDATE

@@ -2219,6 +2219,21 @@ Selección real de producción hoy (criterio viejo, menor RMSE in-sample): RF ga
 
 ---
 
+### `job_etl_diario.kjb` — merge de ventas, Issue #113 (sesión 2026-08-02)
+
+**Tercera causa independiente de la planilla congelada** (junto con #111 y #112), encontrada al verificar el deploy: `ventas_historicas` no avanzaba desde el 23/07 **aunque la extracción funcionaba perfecto** — el staging tenía las 51.024 filas del 01/08 bien extraídas y 0 llegaban a destino.
+
+| Decisión | Definición |
+|----------|-----------|
+| **Causa: un solo SKU huérfano tumba el día entero** | `ventas_historicas` tiene la FK `fk_ventas_articulo` (`sku` → `articulos.sku`) y el merge es un único `INSERT ... SELECT`. El 02/08 había **39 SKUs nuevos vendidos que aún no estaban en `articulos`** (`I02722`, `I02781`-`I02787`…, 456 filas): violaban la FK y abortaban las 51.024 filas. Se perdía el 100% del día, no el 0.9% problemático. |
+| **Invisible por partida doble** | Todos los hops del `.kjb` son `unconditional=Y`, así que el job seguía después del merge fallido y terminaba "normal", con los pasos CALC recalculando sobre datos viejos. Y hasta #111 el cron no dejaba rastro en `jobs_historial`. |
+| **Fix: `INNER JOIN articulos` en el merge** | Misma tolerancia que **ya tenía** `run_calc_planilla.py` (que hace el JOIN y reporta `skus_omitidos` en `jobs_historial`) — el merge había quedado sin esa protección. Entran las filas buenas, se saltean las huérfanas. |
+| **Verificado con reproducción, no por lectura** | En local: se insertaron 3 filas válidas + 1 con SKU inexistente en el staging. Merge viejo → `ERROR 1452` y **0 filas insertadas** (se perdían también las 3 buenas). Merge nuevo → 3 filas insertadas, la huérfana salteada. Datos de prueba limpiados después. |
+
+> **Pendiente aparte (no bloquea):** investigar *por qué* hay SKUs vendidos que no llegan a `articulos` si `RUN EXTRACT ARTICULOS` corre antes que `RUN EXTRACT VENTAS` en el mismo job — probablemente pertenecen a grupos que la extracción de artículos no cubre. Sus ventas se siguen perdiendo (solo esos SKUs), pero el resto del día se salva.
+
+---
+
 ## Issues conocidos / TODOs en código
 
 | Issue | Ubicación | Descripción |
