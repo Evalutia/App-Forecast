@@ -2814,7 +2814,9 @@ Sin código nuevo previsto originalmente (reusar `ml/run_eval_elegibilidad_dry_r
 
 Full-catálogo (los 5559 SKUs de `ventas_historicas`, incluye grupo 201 y SKUs fuera del pool original de 1482 candidatos): `skus_evaluados=2194`, `elegibles=748`, `ganan=742`, `pierden=8`, `sin_cambio=1444`.
 
-**Decisión documentada (criterio de aceptación del issue):** aplicar este resultado a producción (`APPLY_PERSIST=true` en `apply_elegibilidad.py`) queda **explícitamente como paso humano separado, no implementado en esta sesión** -- exactamente lo que pedía el issue. `articulos_elegibilidad_econometrico` sigue en 14 elegibles reales en producción, sin tocar.
+**Decisión documentada (criterio de aceptación del issue):** aplicar este resultado a producción (`APPLY_PERSIST=true` en `apply_elegibilidad.py`) quedó explícitamente como paso humano separado, no implementado en la sesión de medición -- exactamente lo que pedía el issue.
+
+**Aplicado a producción, decisión explícita del usuario, misma sesión:** `APPLY_VERSION=eval-mensual-2026-08 APPLY_PERSIST=true python3 -m ml.apply_elegibilidad` -- `upsert_elegibilidad` es solo `UPDATE` (nunca `INSERT`, ver docstring de `#73`), así que se autolimitó solo a los 1482 SKUs ya trackeados pese a que la medición cubrió 2194 (incluye grupo 201 y SKUs fuera del pool original): **1026 filas actualizadas**, exactamente el subconjunto restringido calculado arriba, los otros 1168 SKUs medidos (fuera del pool) no tenían fila previa y no se tocaron -- sin riesgo de contaminar la tabla con SKUs fuera de su alcance. `revocados_sin_medicion` vacío, sin revocaciones. Confirmado en producción: `articulos_elegibilidad_econometrico` pasó de **14 a 244 elegibles** sobre 1482 filas totales.
 
 **#105 cerrado.**
 
