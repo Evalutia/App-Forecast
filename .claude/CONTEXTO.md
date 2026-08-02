@@ -2232,6 +2232,22 @@ Selección real de producción hoy (criterio viejo, menor RMSE in-sample): RF ga
 
 > **Pendiente aparte (no bloquea):** investigar *por qué* hay SKUs vendidos que no llegan a `articulos` si `RUN EXTRACT ARTICULOS` corre antes que `RUN EXTRACT VENTAS` en el mismo job — probablemente pertenecen a grupos que la extracción de artículos no cubre. Sus ventas se siguen perdiendo (solo esos SKUs), pero el resto del día se salva.
 
+**Deploy y verificación en producción (2026-08-02, cierra #111/#112/#113):** corrida completa del cron con los tres fixes desplegados (`docker compose build etl` + `up -d --force-recreate etl`). Resultado: `ventas_historicas` 23/07 → **01/08**, planilla jul → **ago/2026** (72.010 filas), sugerencias regeneradas, **atraso de 10 días → 1 día** (lo normal). El job quedó registrado punta a punta (`322 | exitoso | exit_code 0`) y arrancó emitiendo `[CRON][ATRASO] ventas_historicas tiene 10 dias de atraso` — la señal que faltaba las 10 noches anteriores.
+
+| Paso | Duración real | Referencia previa (22-23/07) |
+|---|---|---|
+| Extracción + merge | ~11 min | — |
+| `predict.py` | ~15 min | — |
+| `calc_planilla` | **3.971 s (66 min)** | 482 s |
+| `calc_sugerencias` | 6 s | 7 s |
+| `calc_stock_resumen` | **3.829 s (64 min)** | 586 s |
+| `ventas_mensuales` (último, ventana 3 meses) | **36 s** | >60 min bloqueando todo |
+| **Total** | **2h36m** | ~50 min |
+
+> **Riesgo nuevo a vigilar:** `calc_planilla` y `calc_stock_resumen` se volvieron **7x más lentos** (66 y 64 min) por `stock_diario` en 107.8M filas tras el backfill de #104 — son los nuevos cuellos de botella, no `ventas_mensuales`. El job arranca 03:00 y termina ~05:36: entra en la ventana nocturna, pero no hay mucho margen antes de tocar horario laboral. Ambos ya usan ventana de fechas (13 meses y 365 días), así que el costo viene del tamaño del índice, no de un escaneo completo.
+>
+> **Nota operativa del deploy:** `/opt/evalutia/.git` había quedado con owner `ubuntu` (residuo de un deploy anterior) y hubo que alinearlo a `ssm-user`, que es quien tiene las credenciales de GitHub. Además había 4 archivos modificados sin commitear en la VM: se respaldaron en `/tmp/vm_local_changes_20260802_080044/` (patch + copias) antes del `stash`/`pull`/`pop`; 3 ya venían commiteados en el pull y `caddy/Caddyfile` **sigue modificado solo en la VM** — conviene commitearlo.
+
 ---
 
 ## Issues conocidos / TODOs en código
