@@ -2177,6 +2177,32 @@ Selección real de producción hoy (criterio viejo, menor RMSE in-sample): RF ga
 
 ---
 
+### `run_ofelia.sh` + `cron_jobs.py` — Issue #111 (sesión 2026-08-02)
+
+**Diagnóstico (corrige la hipótesis inicial del issue):** el reporte de #111 atribuía la planilla congelada a inestabilidad de MySQL. **Falso.** `docker inspect` da `oomkilled=false`, `RestartCount=0`, cero entradas `Aborted`, y todos los reinicios tienen `Shutdown complete` limpio (29/07 y 01/08 coinciden con deploys/mantenimiento). Los 10 días sin actualizar se explican por cuatro causas distintas encadenadas:
+
+| Noche | Causa real |
+|---|---|
+| 24-27/07 | Sin rastro — el job no registra nada antes de los pasos CALC y `docker logs` se perdió al recrear ofelia |
+| 28/07 | `Communications link failure` en el primer paso (TRUNCATE del staging) |
+| 29-31/07 | Salteadas **por diseño**: lock del backfill de 10 años (#104), comportamiento correcto |
+| 01/08 | Contenedor `ofelia` caído (arrancó recién 15:25) — el cron nunca disparó |
+| 02/08 | Corre, pero **se traba >60 min** en `CALC_UPSERT_VENTAS_MENSUALES` → **#112** |
+
+| Decisión | Definición |
+|----------|-----------|
+| **Causa raíz derivada a #112, no parchada acá** | La query de `ventas_mensuales` recalcula el histórico completo cada noche sin ventana de fechas: `UNION` sobre ~127M filas (`stock_diario` 107.8M/8.1GB + `ventas_historicas` 19.2M) para producir 152k. El backfill de #104 la volvió inviable. Estaba anticipado en la sesión de #34/#35 ("si se dispara, issue nuevo con datos reales") — estos son esos datos. |
+| **El cron registra su propia corrida (`cron_jobs.py`, hermano de `backfill_jobs.py`)** | `start`/`end`/`skip`/`stale` invocados desde `run_ofelia.sh`. Cierra el agujero que dejó las noches 24-27/07 sin diagnóstico: antes, todo lo anterior a los pasos CALC (truncate, extracción SOAP, merges) fallaba en silencio. |
+| **Sin estado `omitido` nuevo: `jobs_historial.estado` es un ENUM cerrado** | `ENUM('en_cola','ejecutando','exitoso','fallido')`. Una noche salteada se registra como `exitoso` + `detalle.resultado='omitido'` en vez de exigir migración (que además habría que aplicar a mano en producción: los volúmenes ya creados no re-ejecutan `docker-entrypoint-initdb.d`). |
+| **El atraso se mide sobre el DATO, no sobre el bookkeeping** | `stale` usa `DATEDIFF(CURDATE(), MAX(fecha))` de `ventas_historicas`: una noche salteada o un job que muere antes del merge dejan el dato viejo igual, y eso es lo que ve el cliente. Umbral default 2 días (el cron extrae "ayer", 1 día de atraso es lo normal). |
+| **Auto-sanado de corridas zombi** | Si el contenedor muere a mitad de corrida (pasó el 01/08), la fila queda `'ejecutando'` para siempre y el registro miente. `start` cierra las anteriores como `fallido` + `resultado='interrumpido'`, acotado a `tipo_job='etl'` + subtipo del cron para no tocar backfills. Seguro porque ofelia corre este job con `no-overlap=true`. |
+| **El bookkeeping nunca puede voltear el ETL** | Cada llamada se aísla y su fallo solo se loguea; el `exit code` del `kitchen.sh` se preserva tal cual para que ofelia siga viendo la corrida como fallida. Se quitó el `exec` (impedía capturar el código de salida). |
+| **Costura `KITCHEN` para testear sin Pentaho** | `tests/test_run_ofelia.py` inyecta stubs por env y verifica la orquestación (registro de inicio/fin, preservación del exit code, ruta de skip, y que un `start` fallido no invente un job_id desde el stderr — ese bug existió y habría actualizado una fila ajena de `jobs_historial`). |
+
+> **Nota:** los 2 fallos de `tests/test_run_calc_planilla.py::test_cargar_configuracion_*` son **preexistentes** y ambientales: la `configuracion_sistema` local está vacía, el setup del test falla antes de asignar `valor_original` y el `finally` lo enmascara con `UnboundLocalError`. No los introdujo esta sesión (reproducen aislados sin los archivos nuevos).
+
+---
+
 ## Issues conocidos / TODOs en código
 
 | Issue | Ubicación | Descripción |
