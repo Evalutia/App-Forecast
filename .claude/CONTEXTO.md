@@ -2203,6 +2203,22 @@ Selección real de producción hoy (criterio viejo, menor RMSE in-sample): RF ga
 
 ---
 
+### `job_etl_diario.kjb` — Issue #112 (sesión 2026-08-02)
+
+**Hallazgo que reordenó la solución:** `ventas_mensuales` es hoy una tabla **de solo escritura**. La escriben el step nocturno y `AdminService.RecalcForSku`; el único método de lectura (`VentasMensualesRepository.GetBySkuYearMonth`) **no lo invoca nadie**, y ni `predict.py` ni los tres `run_calc_*.py` la tocan (`GetVentasMensualesTrend`, pese al nombre, lee `ventas_historicas`). O sea: el job gastaba >60 min por noche manteniendo datos que nadie consume, y lo hacía **justo antes** de todo lo que el cliente sí ve.
+
+| Decisión | Definición |
+|----------|-----------|
+| **Fix principal: reordenar, no solo optimizar** | `CALC_UPSERT_VENTAS_MENSUALES` se movió del medio de la cadena al final (después de `CALC_STOCK_RESUMEN`). Ahora `predict` → `calc_planilla` → `calc_sugerencias` → `calc_stock_resumen` corren primero: la planilla del cliente se actualiza aunque el paso pesado tarde o falle. Verificado que ningún paso posterior lee `ventas_mensuales`. Validado programáticamente que la cadena sigue lineal, sin referencias rotas y con los 15 pasos alcanzables desde START hasta SUCCESS. |
+| **Ventana de 3 meses, elegida por medición — la de 13 era PEOR** | Medido en la DB local (25.2M filas en `stock_diario`), variante `SELECT COUNT(*)` de la misma query: **sin ventana 353 s · ventana 13 meses (46% de las filas) 453 s · ventana 3 meses (5.8%) 34 s**. Con poca selectividad el rango por índice pierde contra el scan secuencial, así que la ventana "generosa" que proponía el issue habría sido contraproducente. 3 meses cubre de sobra lo único que la operación diaria puede cambiar (el cron extrae "ayer"). El `INSERT` real completo con esa ventana: **19 s**. |
+| **Corte alineado al primer día del mes** | Con un corte a mitad de mes (`DATE_SUB(CURDATE(), INTERVAL n MONTH)`) el mes del borde se recalcularía con días incompletos y `dias_con_stock` quedaría subcontado. Verificado empíricamente sobre el borde real (2026-06-01): ventas y días con stock dan **idénticos** con y sin filtro. |
+| **Expresión repetida en las 4 subqueries, sin variable de sesión** | Un `SET @desde := ...` previo al `INSERT` habría sido más legible, pero el step SQL de Pentaho parte el script por `;` y no está garantizado que los statements compartan conexión: si la variable llegara NULL, `fecha >= NULL` no matchea nada y el `INSERT` sería un **no-op silencioso**. Dentro de un mismo statement `CURDATE()` se evalúa una sola vez, así que las 4 copias son consistentes entre sí. |
+| **Filas fuera de la ventana quedan intactas (verificado)** | Snapshot antes/después del `INSERT` real: total 153.404 sin cambios; las 142.316 filas fuera de ventana conservan `SUM(ventas_cantidad)=1030521` y su `actualizado_en` original; solo las 11.088 de la ventana se refrescaron. Los meses del decenio backfilleado (#104) **no** están en `ventas_mensuales` y no se van a poblar solos: si algún día aparece un consumidor que los necesite, hay que correr esta misma query una vez sin el filtro de fecha. |
+
+> **Nota:** la medición es sobre volumen local (25.2M), no sobre los 107.8M de producción — el issue pedía medir contra producción, pero la VM estaba con el ETL nocturno en curso y no correspondía sumarle carga. La proporción en producción es **más favorable** (la ventana de 3 meses cae ~3% de la tabla contra 5.8% local), pero eso se confirma recién con el deploy. La verificación end-to-end (corrida completa + `MAX(fecha)` avanzando) queda en **#111**, que sigue abierto.
+
+---
+
 ## Issues conocidos / TODOs en código
 
 | Issue | Ubicación | Descripción |
