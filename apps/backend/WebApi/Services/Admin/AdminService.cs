@@ -46,11 +46,26 @@ namespace Services.Admin
       try
       {
         var months = GetMonthsWithinRange(fromDate, toDate);
+        if (months.Count == 0)
+          return;
+
+        // Una sola consulta por SKU para todo el rango: sumamos ventas_historicas.cantidad
+        // (neto de devoluciones) agrupado por year/month, en vez de recorrer mes a mes.
+        var rangeStart = new DateOnly(months[0].Year, months[0].Month, 1);
+        var rangeEndExclusive = new DateOnly(months[^1].Year, months[^1].Month, 1).AddMonths(1);
+
+        var ventasPorMes = _ventaRepository.GetVentasBySku(sku)
+          .Where(v => v.Fecha >= rangeStart && v.Fecha < rangeEndExclusive)
+          .GroupBy(v => new { v.Fecha.Year, v.Fecha.Month })
+          .Select(g => new { g.Key.Year, g.Key.Month, Total = g.Sum(v => (long)v.Cantidad) })
+          .ToDictionary(x => (x.Year, x.Month), x => x.Total);
+
         foreach (var (year, month) in months)
         {
           try
           {
-            _stockService.UpsertVentasMensualesCalculated(sku, year, month, 0);
+            ventasPorMes.TryGetValue((year, month), out var ventasCantidad);
+            _stockService.UpsertVentasMensualesCalculated(sku, year, month, ventasCantidad);
             result.MonthsRecalculated++;
           }
           catch (Exception ex)
