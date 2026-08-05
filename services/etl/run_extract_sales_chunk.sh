@@ -121,8 +121,11 @@ XML
 
   export TMP_JSON_PATH="$TMP_JSON"
   export __FORCED_DEPOSITO="${dep}"
+  # Issue #114: se propaga el grupo para que la fila quede trazable (de que
+  # llamada vino) -- no participa de la clave unica, solo es diagnostico.
+  export __FORCED_GRUPO="${grupo}"
   python3 /app/services/etl/run_extract_sales_chunk.py
-  unset __FORCED_DEPOSITO
+  unset __FORCED_DEPOSITO __FORCED_GRUPO
 
   rm -f "$TMP_REQ" "$TMP_HDR" "$TMP_XML" "$TMP_JSON"
 }

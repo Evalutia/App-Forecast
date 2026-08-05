@@ -2250,6 +2250,74 @@ Selección real de producción hoy (criterio viejo, menor RMSE in-sample): RF ga
 
 ---
 
+### Plan de reparación de ventas duplicadas — Issue #114 (sesión 2026-08-04)
+
+**Causa raíz (confirmada, no hipótesis).** `ventas_historicas_stage` **no tiene clave única** (solo `PRIMARY(id)` y un índice **no único** sobre `sku,fecha`), y la ingesta usa un `INSERT` pelado. Desde el commit `19f2dc0` (23/06/2026, #42) la extracción llama al WS **una vez por grupo × depósito** (66 × 6 = 396 llamadas). Un artículo que pertenece a varios grupos en el sistema del cliente vuelve en varias respuestas → una fila por respuesta → el merge (`SUM(cantidad) GROUP BY fecha, sku`) **multiplica la venta por la cantidad de grupos**.
+
+La asimetría delatora está en el mismo `run_extract_sales_chunk.py`: `stock_diario` se escribe con `ON DUPLICATE KEY UPDATE` sobre `uq_stock_sku_fecha_deposito` (**idempotente**, quedó sano) y el staging con `INSERT` sin clave (**acumula**). Por eso el contraste venta-contra-caída-de-stock detecta el problema.
+
+| Evidencia | Dato |
+|---|---|
+| Ratio venta/caída de stock por mes | feb/26 **0 %** · abr/26 **0 %** · jun/26 **10 %** · jul/26 **84 %** inflado |
+| Factor por grupo (jul/26) | grupos bajos (69/78/79) **0 %** · grupo 200 **99 %** (×2) · grupo 201 **99 %** (×3) |
+| Contraste con el `.xlsm` del cliente (ago/25–abr/26, período limpio) | **75 %** de 1.077 pares coincide exacto |
+| Alcance del daño | 23/06 → hoy: 4.156 filas con venta, 1.014 SKUs, 42 días |
+
+Descartado explícitamente: no es el `INNER JOIN articulos` de #113 (`articulos.sku` es PK, 0 duplicados, y el daño es anterior a ese deploy); no son filas duplicadas en `ventas_historicas` (0 pares `(fecha,sku)` repetidos, una sola `fuente`) — el valor de la propia fila ya viene sumado de más.
+
+| Decisión | Definición |
+|----------|-----------|
+| **Fix: clave única en el staging, igual que `stock_diario`** | Agregar `deposito_id` + `grupo_id` a `ventas_historicas_stage`, `UNIQUE (fecha, sku, deposito_id)`, y pasar la ingesta a `ON DUPLICATE KEY UPDATE cantidad = VALUES(cantidad)`. La repetición **por grupo** se sobrescribe; el `SUM` **por depósito** del merge sigue siendo correcto (preserva #39, que sigue siendo necesario). `grupo_id` va como columna de trazabilidad, no en la clave: hoy es imposible saber de qué llamada vino cada fila, y esa ceguera obligó a deducir la causa por correlación. |
+| **Cubre los dos caminos sin tocarlos** | El backfill (`run_backfill_ventas.sh`) usa el mismo `run_extract_sales_chunk.py` y tiene **su propio merge** (con `s.sku IN (SELECT sku FROM articulos)` — ya tenía la protección de huérfanos que #113 recién le dio al `.kjb`). Ambos merges suman igual, así que la idempotencia del staging los cura a los dos. Cura además la contaminación de staging documentada en #39/#104. |
+| **Reparación por re-extracción, no por corrección aritmética** | Dividir en SQL exigiría *inferir* el factor desde `grupo_id`, que es justamente el campo ambiguo → se grabaría un número inventado sobre otro, sin forma de verificarlo. La re-extracción cuesta las mismas **396 llamadas** de una noche (el script toma `FORCE_START`/`FORCE_END` como rango, no itera por día) y el merge sobrescribe vía `ON DUPLICATE KEY UPDATE`. **Requisito previo: truncar el staging**, o el merge vuelve a sumar de más. Verificable: el contraste debe bajar de 84 % a ~0 %. |
+| **Control de coherencia automático y NO bloqueante** | El % de filas con ratio ≠ 1 se registra cada noche en el `detalle` JSON de `jobs_historial`, reusando el bookkeeping de #111. Da serie histórica (hoy hubo que reconstruirla a mano) y detecta al día siguiente en vez de a los 42 días. No corta el pipeline: el costo de un falso positivo (planilla congelada de nuevo) es peor que un día de demora en detectar. **Alcance honesto:** detecta duplicación de ventas contrastada contra stock, no es un validador universal. |
+| **`grupo_id` corrompido: ticket aparte, posterior** | El mismo bug corrompió la taxonomía: `get_grupos.py` recorre ascendente y `articulos.grupo_id` guarda **el último** grupo que devolvió el artículo, así que los multi-grupo quedan etiquetados con el id más alto (200/201). Corrige un diagnóstico previo: los grupos "muertos" (PERIFÉRICOS 744 SKUs con 0 % de ventas) **no están muertos, les robaron los artículos** — los periféricos que venden están en 200/201, y el grupo 200 ni siquiera es visible en el desplegable. No se modela many-to-many ahora: no bloquea lo urgente y falta saber qué significan 200/201 para el cliente. |
+| **#110 espera la reparación completa, con límite de ~3 días** | No se manda el documento con cifras infladas: afirma "valores verificados artículo por artículo" y va dirigido justo al cliente que descubrió el corrimiento revisando a mano. Si la reparación se traba más de ~3 días, ahí sí corresponde un aviso interino. Al regenerarlo hay que **rehacer las capturas**, no solo editar los números: las imágenes muestran los valores de julio en pantalla. |
+
+> **Nota:** la lección de fondo es que todas las verificaciones internas daban `TODO OK` porque comparaban la planilla contra `ventas_historicas`, y el insumo ya venía roto. Lo detectó una pregunta de negocio del usuario ("930 notebooks del mismo modelo no tiene sentido"), no un test. De ahí que el control de coherencia se contraste contra una magnitud **independiente** (el stock) y no contra la misma fuente.
+
+---
+
+### Verificación profunda de datos crudos — sesión 2026-08-04 (pre-plan #114)
+
+**Método:** comparación TOTAL contra el `.xlsm` del cliente (verdad de referencia: 407 SKUs × 13 meses = 5.291 celdas, Abr/25–Abr/26) + 2 subagentes de auditoría de código (extracción/merge y cálculos) + mediciones de cada hallazgo contra producción + cobertura cruzada con el grafo graphify.
+
+**Veredicto ventas crudas (período limpio):** **91,2% idéntico, 95,7% a ±1 unidad**. Las diferencias restantes en 4 familias explicadas: (1) merchandising HX* y similares que el cliente no trackea (39 celdas, +463 uds — sus celdas están VACÍAS, no en 0); (2) **devoluciones que él registra y nosotros no** (42 celdas negativas suyas, 85 uds — ninguna reflejada; único gap real nuestro en el período; ojo: post-#80 sí capturamos negativos en jul/26, el gap es del backfill histórico); (3) ajustes de fin de mes en números redondos (fechados día 28-31, esp. 30/04) que su reporte no cuenta (+87 uds); (4) resto ±1% concentrado en Abr/26, borde de SU ventana de actualización. **Stock crudo: VALIDADO** — cobertura 361/361 días en todos los SKUs, coherencia venta-vs-caída-de-stock ≈100% en meses limpios, C/STK del cliente reproducido en mediana exacta (su 2ª col. SIN STOCK ≈ días sin stock del depósito 8).
+
+**Hallazgos nuevos de las auditorías (dimensionados):**
+
+| Sev. | Hallazgo | Dimensión medida |
+|---|---|---|
+| ALTA | `run_calc_sugerencias.py` excluye meses con rotación 0 (`> 0`) → ROT.S/Fiabilidad inflados en SKUs intermitentes, QBK subestimado; el oráculo QA replica el mismo filtro (se valida a sí mismo) | **17% de los SKUs con ROT.S dan ROT.S > 2× su propio DDSTK** |
+| ALTA | Fallo de la llamada SOAP del depósito 5 → el merge escribe 0 sobre ventas reales (overwrite silencioso, los depósitos logísticos sí responden con Venta=0) | 181 días candidatos en mar-abr (mezcla transferencias; falta separar) |
+| ALTA (latente) | `clamp_signed_int` no entiende coma decimal/miles (el parser de stockxml sí, con docstring que documenta `'3.800.000'`) | datos actuales sanos (max stock 10.723); riesgo si el WS cambia formato |
+| MEDIA | `AdminService.RecalcForSku` escribe `ventas_cantidad=0` (literal) — el endpoint admin de recálculo BORRA ventas de `ventas_mensuales` | tabla sin lectores hoy; corrupción igual |
+| MEDIA | Rot.DesEstac mezcla escalas cuando falta factor estacional (mes quiebre entra crudo, mes normal se excluye) | 475 artículos (9%) sin ningún factor |
+| MEDIA | `ConsStockXml` corrido manual sin FORCE re-estampa el snapshot 7 días hacia atrás pisando stock real | operativo, no automático |
+| MEDIA | Lock de backfill unidireccional (el nocturno no lo crea) + merge del backfill filtra sin TRIM (diverge del kjb) | concurrencia operativa |
+| MEDIA | Dashboard resultados: stockout con denominador días-con-fila (contradice a la planilla), `Math.Ceiling` sobre tasa diaria (0.02→1, 50×), `SkusActivos` sin `cantidad!=0` (pariente de #64) | página /resultados |
+| BAJA | SKU sin normalizar en ventas/stock vs normalizado en articulos (**medido: 0 filas afectadas hoy**, endurecer igual); orden del `sed` de entidades; `FORCE_START` solo se ignora mudo; `deposito_id` NULL anula la unique; `ts_carga` UTC vs local mixto; QBK con stock congelado por SKU (1 SKU hoy); `InsertarBatch` de stock con `[Authorize]` sin rol; rot 0.0000 en export para sin_stock (Criterios dice "vacía"); tooltip dice ×factor y el código divide; MAX_MESES=13 inalcanzable | — |
+| — | **Cero tests** de `run_extract_*.py` (donde están 3 de los 4 hallazgos más graves) | — |
+
+> **Nota de método:** el hallazgo del auditor sobre el fix de #114 confirmó el plan acordado: el atajo `UNIQUE(fecha,sku)` sin `deposito_id` reintroduciría #39; hay que agregar la columna y propagarla en el INSERT. Los detalles finos de cada hallazgo están en los reportes de los issues que salgan de `/to-tickets`.
+
+---
+
+### `ventas_historicas_stage` — Issue #114 (sesión 2026-08-04)
+
+| Decisión | Definición |
+|----------|-----------|
+| **Diagnóstico del diseño original** | `04-etl-staging.sql` le saca a propósito la UNIQUE que el staging heredaría de `ventas_historicas` vía `LIKE` — el diseño original quería que el `INSERT` plano acumulara una fila por depósito para que el merge las sumara (fix de #39). Este ticket revierte esa decisión a propósito, no "agrega una clave que faltaba". Dejar esto explícito en el commit. |
+| **`deposito_id` sin NULL, con sentinel** | `VARCHAR(64) NOT NULL DEFAULT ''`. MySQL no colisiona `NULL` contra `NULL` en una clave única — si `S_DEPOSITOS` viniera vacío (hoy nunca pasa en producción, pero el `.sh` tiene la rama), un `deposito_id` `NULL` reabriría exactamente el mismo bug por otra puerta. El script normaliza `__FORCED_DEPOSITO` vacío al mismo sentinel `''` antes de insertar. |
+| **`grupo_id` fuera de la clave, solo trazabilidad** | `INT UNSIGNED NULL`, no participa en `UNIQUE`. Es a propósito: la segunda llamada que devuelve el mismo artículo desde otro grupo debe pisar la fila (`ON DUPLICATE KEY UPDATE`), no crear una nueva. Resuelve además la ceguera que obligó a diagnosticar #114 por correlación en vez de leer directamente de qué llamada vino cada fila. |
+| **Migración** | `infra/sql/19-ventas-stage-deposito-grupo.sql`, mismo patrón defensivo que `04-etl-staging.sql` (chequeo por `information_schema` antes de cada `ALTER`, re-corrible). `UNIQUE KEY uq_ventas_stage_fecha_sku_deposito (fecha, sku, deposito_id)`. |
+| **Precedente ya existente del mismo landmine, no tocado acá** | `stock_diario.deposito_id` es `VARCHAR(64) NULL` en su propia `UNIQUE(sku, fecha, deposito_id)` — mismo agujero, ya ticketeado como hallazgo menor en #122. No se toca en #114: esa tabla tiene datos reales en producción, cambiar el tipo de columna ahí es una migración de más riesgo que la de un staging vacío. |
+| **El merge (`.kjb` + backfill) queda intacto** | El `SUM(cantidad) GROUP BY fecha, sku` nunca fue el bug — sumaba correctamente sobre lo que el staging le daba. Con el staging idempotente, cada depósito aporta una sola fila real, y la suma vuelve a ser exactamente la venta total del día (el objetivo original de #39). Tocar el merge en el mismo ticket mezclaría capas y arriesgaría reintroducir #39 sin necesidad. La asimetría de `TRIM` entre el merge del `.kjb` y el del backfill sigue en #119, no acá. |
+| **Ingesta: `ON DUPLICATE KEY UPDATE`, mismo patrón que ya usa el INSERT de `stock_diario` en el mismo script** | `cantidad=VALUES(cantidad), stock=VALUES(stock), fuente=VALUES(fuente), ts_carga=VALUES(ts_carga)`. `grupo_id` se propaga vía un `export` nuevo en `run_extract_sales_chunk.sh` (hoy la variable de grupo solo vive en el loop de bash), reusando el mecanismo que ya existe para `__FORCED_DEPOSITO`. |
+| **Refactor a función testeable, no test por subprocess** | Se extrae la lógica de inserción a una función (`procesar_payload` o similar), mismo criterio que ya se usó para `cargar_tickets` en `run_calc_planilla.py`. Permite el test directo que le falta a este bug: insertar la misma fila dos veces (mismo grupo devolviendo el mismo artículo/depósito/fecha) y verificar que queda una sola fila con el valor correcto, no que se duplique. Contra DB real de test (`localhost:3307`, `pytest.skip` si no hay DB — patrón de `test_backfill_jobs.py`/`test_cron_jobs.py`), no subprocess (ese patrón, usado en `test_run_ofelia.py` para bash, aquí sería más lento y no aislaría la lógica de conexión/lectura de archivo). |
+
+---
+
 ## Issues conocidos / TODOs en código
 
 | Issue | Ubicación | Descripción |
