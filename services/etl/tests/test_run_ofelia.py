@@ -9,6 +9,7 @@ Se saltan si no hay bash disponible (el script es bash, no sh).
 """
 
 import os
+import re
 import shutil
 import subprocess
 import textwrap
@@ -129,6 +130,47 @@ def test_bookkeeping_caido_no_impide_la_corrida(entorno, tmp_path):
 
     assert "kitchen" in registro, "el ETL corre aunque el bookkeeping falle"
     assert proc.returncode == 0
+
+
+def test_coherencia_corre_despues_de_end_con_el_job_id(entorno):
+    """
+    Issue #115: el chequeo de coherencia venta-vs-stock corre despues de
+    `end` (para no perder su escritura al JSON_SET) y con el mismo job_id
+    que devolvio `start`.
+    """
+    proc, registro = _correr(entorno, FAKE_ETL_RC="0")
+
+    assert proc.returncode == 0
+    idx_end = next(i for i, ln in enumerate(registro) if ln.startswith("cron:end"))
+    idx_coherencia = next(i for i, ln in enumerate(registro) if ln.startswith("cron:coherencia"))
+    assert idx_coherencia > idx_end, "coherencia debe correr despues de end"
+    partes = registro[idx_coherencia].split()
+    assert partes[1] == "4242"  # job_id devuelto por start
+    # fecha ISO explicita (mismo "ayer" que FORCE_START/FORCE_END), no una
+    # recalculada por cron_jobs.py despues de que corrio KITCHEN.
+    assert re.fullmatch(r"\d{4}-\d{2}-\d{2}", partes[2])
+
+
+def test_coherencia_caida_no_impide_que_ofelia_devuelva_el_rc_del_etl(entorno, tmp_path):
+    """Igual que `stale`: si el chequeo de coherencia esta roto, no debe alterar el resultado."""
+    cron_roto_coherencia = _escribir(tmp_path / "cron_stub2.py", f"""
+        import sys
+        with open(r"{entorno['llamadas']}", "a", encoding="utf-8") as fh:
+            fh.write("cron:" + " ".join(sys.argv[1:]) + "\\n")
+        sub = sys.argv[1]
+        if sub == "start":
+            print("4242")
+            sys.exit(0)
+        if sub == "coherencia":
+            sys.stderr.write("boom: no se pudo conectar a MySQL\\n")
+            sys.exit(1)
+        sys.exit(0)
+        """)
+
+    proc, registro = _correr(entorno, CRON_JOBS=str(cron_roto_coherencia), FAKE_ETL_RC="0")
+
+    assert proc.returncode == 0, "un chequeo de coherencia roto no debe voltear la corrida"
+    assert any(ln.startswith("cron:coherencia") for ln in registro)
 
 
 def test_start_que_falla_no_inventa_job_id_desde_el_stderr(entorno, tmp_path):

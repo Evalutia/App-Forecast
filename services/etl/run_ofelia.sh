@@ -44,6 +44,11 @@ fi
 T0=${SECONDS}
 
 Y=$(date -d "yesterday" +%d/%m/%Y)
+# Mismo "ayer" que arriba, en ISO -- se lo pasamos explicito a `coherencia`
+# en vez de dejar que lo recalcule sola despues de KITCHEN. Si una corrida
+# alguna vez cruzara la medianoche, dos "yesterday" calculados en momentos
+# distintos podrian discrepar y el chequeo mediria el dia equivocado.
+Y_ISO=$(date -d "yesterday" +%Y-%m-%d)
 
 set +e
 "${KITCHEN}" \
@@ -61,6 +66,13 @@ set -e
 if [[ -n "${JOB_ID}" ]]; then
   python3 "${CRON_JOBS}" end "${JOB_ID}" "${RC}" "$((SECONDS - T0))" >/dev/null \
     || echo "[OFELIA][WARN] no se pudo cerrar el registro ${JOB_ID} en jobs_historial." >&2
+
+  # Issue #115: coherencia venta-vs-stock del dia que se acaba de cargar.
+  # Va DESPUES de `end` a proposito -- `end` reescribe todo el detalle de la
+  # fila, asi que si corriera antes este resultado se perderia. Igual que
+  # `stale`, es informativo: si el chequeo mismo esta roto (DB abajo,
+  # consulta rota) no debe frenar una corrida que ya termino.
+  python3 "${CRON_JOBS}" coherencia "${JOB_ID}" "${Y_ISO}" || true
 fi
 
 exit "${RC}"

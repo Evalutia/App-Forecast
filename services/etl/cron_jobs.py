@@ -30,8 +30,22 @@ Subcomandos:
       Imprime cuantos dias de atraso tiene el dato de ventas
       (CURDATE() - MAX(fecha) de ventas_historicas) y sale con codigo 1
       si supera el umbral (default 2). Read-only.
+
+  coherencia <job_id|-> [fecha_desde [fecha_hasta]]
+      Issue #115. Compara, para cada sku-dia con venta en el rango, la venta
+      registrada contra la caida real de stock (stock_diario) de un dia
+      para el otro -- la firma que destapo #114 (SKU duplicado en el merge
+      -> venta ~2x o ~3x la caida real). Guarda el resultado bajo
+      detalle.coherencia de la fila <job_id> en jobs_historial (JSON_SET,
+      no pisa exit_code/duracion_seg que ya escribio `end`). Si <job_id> es
+      "-" no escribe nada -- sirve para correrlo a mano sobre un rango
+      arbitrario (ej. verificar la reparacion de #123). Sin fechas, mide el
+      dia de ayer (lo que el cron acaba de cargar). No bloqueante: un
+      chequeo caido (DB abajo, consulta rota) se loguea y devuelve !=0, pero
+      nunca levanta una excepcion que corte la corrida.
 """
 
+import datetime as dt
 import json
 import os
 import sys
@@ -40,6 +54,7 @@ import pymysql
 
 SUBTIPO = "cron_diario"
 UMBRAL_ATRASO_DIAS = 2  # el cron extrae "ayer": 1 dia de atraso es lo normal
+TOLERANCIA_RATIO = 0.1  # ratio venta/caida fuera de [0.9, 1.1] cuenta como anomalo
 
 
 def db_connect():
@@ -178,9 +193,115 @@ def cmd_stale(umbral_dias: str = str(UMBRAL_ATRASO_DIAS)) -> int:
     return 0
 
 
+def _calcular_coherencia(conn, fecha_desde: str, fecha_hasta: str) -> dict:
+    """
+    Para cada sku-dia con venta en [fecha_desde, fecha_hasta] donde el stock
+    bajo de un dia para el otro, compara venta contra caida de stock. Query
+    de referencia: issue #115 / diagnostico #114. Alcance honesto: detecta
+    duplicacion o perdida de venta contrastada contra el stock -- no valida
+    que el stock mismo este bien.
+
+    stock_diario se consulta desde un dia antes de fecha_desde porque cada
+    fila de venta necesita el stock del dia anterior (sp) ademas del propio
+    (sh).
+    """
+    with conn.cursor() as cur:
+        cur.execute(
+            """
+            SELECT v.cantidad AS venta, (sp.st - sh.st) AS caida
+            FROM ventas_historicas v
+            JOIN (
+                SELECT sku, fecha, SUM(cantidad) AS st
+                FROM stock_diario
+                WHERE fecha BETWEEN DATE_SUB(%(desde)s, INTERVAL 1 DAY) AND %(hasta)s
+                GROUP BY sku, fecha
+            ) sh ON sh.sku = v.sku AND sh.fecha = v.fecha
+            JOIN (
+                SELECT sku, fecha, SUM(cantidad) AS st
+                FROM stock_diario
+                WHERE fecha BETWEEN DATE_SUB(%(desde)s, INTERVAL 1 DAY) AND %(hasta)s
+                GROUP BY sku, fecha
+            ) sp ON sp.sku = v.sku AND sp.fecha = DATE_SUB(v.fecha, INTERVAL 1 DAY)
+            WHERE v.fecha BETWEEN %(desde)s AND %(hasta)s
+              AND v.cantidad > 0
+              AND (sp.st - sh.st) > 0
+            """,
+            {"desde": fecha_desde, "hasta": fecha_hasta},
+        )
+        filas = cur.fetchall()
+
+    total = len(filas)
+    anomalos = sum(
+        1 for venta, caida in filas
+        if abs((float(venta) / float(caida)) - 1.0) > TOLERANCIA_RATIO
+    )
+    pct = round(100.0 * anomalos / total, 2) if total else None
+
+    return {
+        "fecha_desde": fecha_desde,
+        "fecha_hasta": fecha_hasta,
+        "num_observaciones": total,
+        "num_anomalos": anomalos,
+        "pct_anomalo": pct,
+    }
+
+
+def cmd_coherencia(job_id: str, fecha_desde: str = None, fecha_hasta: str = None) -> int:
+    """
+    No bloqueante (#115): un chequeo caido -- DB abajo, tabla renombrada, lo
+    que sea -- se loguea y jamas propaga una excepcion. El costo de un falso
+    positivo frenando el pipeline es peor que un dia de demora en detectar
+    (la leccion de #111/#114).
+    """
+    if fecha_desde is None:
+        fecha_desde = fecha_hasta = (dt.date.today() - dt.timedelta(days=1)).isoformat()
+    elif fecha_hasta is None:
+        fecha_hasta = fecha_desde
+
+    try:
+        conn = db_connect()
+    except Exception as e:
+        print(f"[CRON][COHERENCIA] no se pudo conectar a MySQL: {e}", file=sys.stderr)
+        return 1
+
+    try:
+        resultado = _calcular_coherencia(conn, fecha_desde, fecha_hasta)
+    except Exception as e:
+        print(f"[CRON][COHERENCIA] chequeo fallo (no bloquea el ETL): {e}", file=sys.stderr)
+        conn.close()
+        return 1
+
+    if job_id and job_id != "-":
+        try:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "UPDATE jobs_historial "
+                    "   SET detalle = JSON_SET(COALESCE(detalle, JSON_OBJECT()), "
+                    "                          '$.coherencia', CAST(%s AS JSON)) "
+                    " WHERE id = %s",
+                    (json.dumps(resultado, ensure_ascii=False), job_id),
+                )
+            conn.commit()
+        except Exception as e:
+            print(f"[CRON][COHERENCIA] no se pudo guardar en jobs_historial (job {job_id}): {e}",
+                  file=sys.stderr)
+    conn.close()
+
+    if resultado["num_observaciones"] == 0:
+        print(f"[CRON][COHERENCIA] {fecha_desde}..{fecha_hasta}: sin observaciones "
+              f"(ningun sku con caida de stock en el rango).")
+        return 0
+
+    print(f"[CRON][COHERENCIA] {fecha_desde}..{fecha_hasta}: "
+          f"{resultado['pct_anomalo']}% anomalo "
+          f"({resultado['num_anomalos']}/{resultado['num_observaciones']} filas, "
+          f"ratio venta/caida fuera de [{1 - TOLERANCIA_RATIO:.1f}, {1 + TOLERANCIA_RATIO:.1f}]).")
+    return 0
+
+
 def main() -> int:
     if len(sys.argv) < 2:
-        print("[ERROR] Uso: cron_jobs.py start|end|skip|stale ...", file=sys.stderr)
+        print("[ERROR] Uso: cron_jobs.py start|end|skip|stale|coherencia ...", file=sys.stderr)
         return 2
     sub, args = sys.argv[1], sys.argv[2:]
     if sub == "start" and not args:
@@ -191,6 +312,8 @@ def main() -> int:
         return cmd_skip(*args)
     if sub == "stale" and len(args) <= 1:
         return cmd_stale(*args)
+    if sub == "coherencia" and 1 <= len(args) <= 3:
+        return cmd_coherencia(*args)
     print(f"[ERROR] Subcomando/args invalidos: {sys.argv[1:]}", file=sys.stderr)
     return 2
 

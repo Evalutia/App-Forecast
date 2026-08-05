@@ -224,3 +224,198 @@ def test_stale_no_escribe_nada(conn):
     with conn.cursor() as cur:
         cur.execute("SELECT COUNT(*) FROM jobs_historial")
         assert cur.fetchone()[0] == antes
+
+
+# ---------------------------------------------------------------------------
+# coherencia (Issue #115) -- ratio venta/caida-de-stock, la firma de #114.
+#
+# Fechas en 2030 y un SKU sintetico para no pisar datos reales de produccion
+# (la DB local esta sincronizada de produccion, no es una tabla de scratch).
+# ---------------------------------------------------------------------------
+
+SKU_TEST = "TEST-COHERENCIA-115"
+
+
+@pytest.fixture
+def sku_articulo(conn):
+    """Fila minima en articulos: ventas_historicas tiene FK a articulos(sku)."""
+    with conn.cursor() as cur:
+        # Idempotente por si una corrida anterior murio a mitad de camino
+        # (mismo patron que test_run_calc_planilla.py).
+        cur.execute("DELETE FROM ventas_historicas WHERE sku = %s", (SKU_TEST,))
+        cur.execute("DELETE FROM stock_diario WHERE sku = %s", (SKU_TEST,))
+        cur.execute("DELETE FROM articulos WHERE sku = %s", (SKU_TEST,))
+        cur.execute(
+            "INSERT INTO articulos (sku, descripcion, grupo_id) VALUES (%s, %s, %s)",
+            (SKU_TEST, "SKU de prueba -- issue #115, no es un articulo real", 201),
+        )
+    conn.commit()
+
+    yield SKU_TEST
+
+    with conn.cursor() as cur:
+        cur.execute("DELETE FROM ventas_historicas WHERE sku = %s", (SKU_TEST,))
+        cur.execute("DELETE FROM stock_diario WHERE sku = %s", (SKU_TEST,))
+        cur.execute("DELETE FROM articulos WHERE sku = %s", (SKU_TEST,))
+    conn.commit()
+
+
+def _cargar_stock(conn, sku, fecha, cantidad):
+    with conn.cursor() as cur:
+        cur.execute(
+            "INSERT INTO stock_diario (sku, fecha, cantidad, deposito_id, fuente) "
+            "VALUES (%s, %s, %s, 'D1', 'test')",
+            (sku, fecha, cantidad),
+        )
+    conn.commit()
+
+
+def _cargar_venta(conn, sku, fecha, cantidad):
+    with conn.cursor() as cur:
+        cur.execute(
+            "INSERT INTO ventas_historicas (sku, fecha, cantidad, fuente) VALUES (%s, %s, %s, 'test')",
+            (sku, fecha, cantidad),
+        )
+    conn.commit()
+
+
+def test_coherencia_caso_limpio_ratio_uno_no_marca_nada(conn, sku_articulo):
+    """Stock cae 10, se vende 10: ratio 1.0, sano."""
+    _cargar_stock(conn, sku_articulo, "2030-01-14", 100)
+    _cargar_stock(conn, sku_articulo, "2030-01-15", 90)
+    _cargar_venta(conn, sku_articulo, "2030-01-15", 10)
+
+    resultado = cron_jobs._calcular_coherencia(conn, "2030-01-15", "2030-01-15")
+
+    assert resultado["num_observaciones"] == 1
+    assert resultado["num_anomalos"] == 0
+    assert resultado["pct_anomalo"] == 0.0
+
+
+def test_coherencia_caso_duplicado_ratio_dos_lo_marca(conn, sku_articulo):
+    """La firma de #114: la venta registrada da el doble de la caida real de stock."""
+    _cargar_stock(conn, sku_articulo, "2030-01-14", 100)
+    _cargar_stock(conn, sku_articulo, "2030-01-15", 90)
+    _cargar_venta(conn, sku_articulo, "2030-01-15", 20)  # 2x la caida (10)
+
+    resultado = cron_jobs._calcular_coherencia(conn, "2030-01-15", "2030-01-15")
+
+    assert resultado["num_observaciones"] == 1
+    assert resultado["num_anomalos"] == 1
+    assert resultado["pct_anomalo"] == 100.0
+
+
+def test_coherencia_sin_caidas_de_stock_da_sin_observaciones(conn, sku_articulo):
+    """
+    Ningun dia con caida de stock en el rango (stock sube o se mantiene):
+    no hay filas que comparar, no un ratio de 0 -- son cosas distintas.
+    """
+    _cargar_stock(conn, sku_articulo, "2030-02-14", 50)
+    _cargar_stock(conn, sku_articulo, "2030-02-15", 60)  # sube, no baja
+    _cargar_venta(conn, sku_articulo, "2030-02-15", 5)
+
+    resultado = cron_jobs._calcular_coherencia(conn, "2030-02-15", "2030-02-15")
+
+    assert resultado["num_observaciones"] == 0
+    assert resultado["num_anomalos"] == 0
+    assert resultado["pct_anomalo"] is None
+
+
+def test_coherencia_rango_totalmente_vacio_da_sin_observaciones(conn):
+    """Rango sin ninguna fila cargada -- caso trivial, no debe explotar."""
+    resultado = cron_jobs._calcular_coherencia(conn, "2031-01-01", "2031-01-01")
+    assert resultado["num_observaciones"] == 0
+    assert resultado["pct_anomalo"] is None
+
+
+def test_cmd_coherencia_guarda_bajo_detalle_coherencia_sin_pisar_lo_de_end(conn, sku_articulo, capsys):
+    """
+    coherencia corre despues de `end` en run_ofelia.sh -- tiene que fusionar
+    (JSON_SET) en vez de reemplazar, o se perderia exit_code/duracion_seg.
+    """
+    cron_jobs.cmd_start()
+    job_id = int(capsys.readouterr().out.strip())
+    cron_jobs.cmd_end(str(job_id), "0", "42.0")
+    capsys.readouterr()
+
+    _cargar_stock(conn, sku_articulo, "2030-01-14", 100)
+    _cargar_stock(conn, sku_articulo, "2030-01-15", 90)
+    _cargar_venta(conn, sku_articulo, "2030-01-15", 20)
+
+    rc = cron_jobs.cmd_coherencia(str(job_id), "2030-01-15", "2030-01-15")
+    assert rc == 0
+
+    fila = _fila(conn, job_id)
+    assert fila["detalle"]["exit_code"] == 0  # lo que escribio `end` sigue ahi
+    assert fila["detalle"]["duracion_seg"] == 42.0
+    assert fila["detalle"]["coherencia"]["num_observaciones"] == 1
+    assert fila["detalle"]["coherencia"]["pct_anomalo"] == 100.0
+
+
+def test_cmd_coherencia_con_job_id_guion_no_escribe_nada(conn, sku_articulo, capsys):
+    """job_id='-' es el modo manual (#115): correr sobre un rango arbitrario
+    (ej. verificar la reparacion de #123) sin tocar jobs_historial."""
+    with conn.cursor() as cur:
+        cur.execute("SELECT COUNT(*) FROM jobs_historial")
+        antes = cur.fetchone()[0]
+
+    _cargar_stock(conn, sku_articulo, "2030-01-14", 100)
+    _cargar_stock(conn, sku_articulo, "2030-01-15", 90)
+    _cargar_venta(conn, sku_articulo, "2030-01-15", 10)
+
+    rc = cron_jobs.cmd_coherencia("-", "2030-01-15", "2030-01-15")
+    assert rc == 0
+    assert "0.0% anomalo" in capsys.readouterr().out
+
+    conn.commit()
+    with conn.cursor() as cur:
+        cur.execute("SELECT COUNT(*) FROM jobs_historial")
+        assert cur.fetchone()[0] == antes
+
+
+def test_cmd_coherencia_default_sin_fechas_usa_ayer(conn, monkeypatch):
+    """Sin fechas explicitas, mide el dia que el cron acaba de cargar (ayer)."""
+    capturado = {}
+
+    def _fake_calcular(conn_, desde, hasta):
+        capturado["desde"] = desde
+        capturado["hasta"] = hasta
+        return {"fecha_desde": desde, "fecha_hasta": hasta,
+                "num_observaciones": 0, "num_anomalos": 0, "pct_anomalo": None}
+
+    monkeypatch.setattr(cron_jobs, "_calcular_coherencia", _fake_calcular)
+
+    cron_jobs.cmd_coherencia("-")
+
+    ayer = (dt.date.today() - dt.timedelta(days=1)).isoformat()
+    assert capturado["desde"] == ayer
+    assert capturado["hasta"] == ayer
+
+
+def test_cmd_coherencia_chequeo_roto_no_propaga_excepcion(conn, monkeypatch, capsys):
+    """
+    Criterio de aceptacion de #115: un chequeo caido (DB abajo, consulta
+    rota) se loguea pero jamas debe interrumpir el ETL con una excepcion.
+    """
+    def _explota(conn_, desde, hasta):
+        raise Exception("Table 'evalutia.stock_diario' doesn't exist")
+
+    monkeypatch.setattr(cron_jobs, "_calcular_coherencia", _explota)
+
+    rc = cron_jobs.cmd_coherencia("-", "2030-01-15", "2030-01-15")
+
+    assert rc == 1
+    assert "no bloquea el ETL" in capsys.readouterr().err
+
+
+def test_cmd_coherencia_conexion_caida_no_propaga_excepcion(monkeypatch, capsys):
+    """Mismo criterio, pero fallando un paso antes: ni siquiera conecta a MySQL."""
+    def _explota_conexion():
+        raise Exception("Can't connect to MySQL server")
+
+    monkeypatch.setattr(cron_jobs, "db_connect", _explota_conexion)
+
+    rc = cron_jobs.cmd_coherencia("-", "2030-01-15", "2030-01-15")
+
+    assert rc == 1
+    assert "no se pudo conectar" in capsys.readouterr().err
