@@ -2318,6 +2318,33 @@ Descartado explícitamente: no es el `INNER JOIN articulos` de #113 (`articulos.
 
 ---
 
+### `run_backfill_ventas.sh` — re-extracción de reparación, Issue #123 (sesión 2026-08-05)
+
+| Decisión | Definición |
+|----------|-----------|
+| **Grupo 201 forzado a entrar, no dejarlo en el default** | `get_grupos_backfill.py` excluye por defecto los grupos con `aplica_modelo_econometrico=TRUE` (hoy solo el 201) — correcto para el backfill histórico de #104 (ya tenía 10 años cargados), pero el 201 es el grupo con **peor duplicación** (99% inflado, factor ×3). Se invoca con `GROUPS="$(python3 get_grupos.py)"` (la lista del cron diario, sin exclusiones) en vez de dejar que el script resuelva su lista por defecto. |
+| **Rango: 2026-06-23 → 2026-08-04** | Desde el día del deploy que causó el bug (`19f2dc0`, #42) hasta ayer — nunca "hoy", mismo criterio que #106 de no tratar un día en curso como completo. El 05/08 en adelante ya lo cubre la operación normal con el fix activo. |
+| **`BACKFILL_CHUNK_DAYS=45`** | Un solo chunk por combinación grupo×depósito en vez de 2 (default 30 partiría el rango de 43 días). Reduce las llamadas SOAP totales de ~792 a ~396 — importante porque el backfill toma el lock y puede chocar con el cron de esta noche. |
+| **Colisión con el cron aceptada, con catch-up manual** | Si el backfill sigue corriendo a las 03:00 Montevideo, el cron nocturno se saltea entero (no solo el rango reparado — también la extracción normal de "ayer"). Se acepta el riesgo; si pasa, catch-up manual de ese día específico apenas termine el backfill, en vez de esperar al cron de mañana. |
+| **Recálculo manual inmediato, no esperar al cron** | `run_calc_planilla.py` lee `ventas_historicas` como foto completa (TRUNCATE+INSERT) — correrlo a mitad del backfill mezclaría grupos reparados con no reparados, peor que no correrlo. Se corre a mano (planilla → sugerencias → stock_resumen) recién cuando el loop de grupos termine entero, sin esperar al cron (el cliente lleva 13 días esperando y #110 depende de esto; precedente en #64/#112). |
+| **Criterio de aceptación corregido: sin contraste contra el `.xlsm` del cliente para jun-jul** | Su archivo de referencia (`Reposicion Mes 07-2026...xlsm`) solo tiene columnas de venta hasta Abr/26 — no hay con qué comparar el período reparado contra su archivo. La verificación de jun-jul se apoya enteramente en el ratio venta-vs-caída-de-stock (~84%→~0% esperado) + el caso puntual de `I02418` (930→~465 en julio) + snapshot de un rango de control anterior a 23/06 sin cambios. |
+
+> **Nota:** en paralelo, dos subagentes trabajan #115 (control de coherencia nocturno) y #118 (RecalcForSku deja de borrar ventas) — elegidos por no compartir archivos entre sí ni con lo que toca #123/#119/#124/#125 (scripts de extracción, en los que no conviene trabajar en paralelo mientras el backfill corre en vivo).
+
+**Resultado de la corrida (2026-08-05, ~48 min):** 66/66 grupos exitosos, cero fallidos. Verificación contra los tres criterios acordados arriba:
+
+| Criterio | Esperado | Medido |
+|----------|----------|--------|
+| Rango de control (01/04 → 22/06) sin tocar | idéntico al snapshot previo | **idéntico**: 459.405 filas / suma 87.422 en `ventas_historicas`; 2.756.430 / 20.873.297 en `stock_diario` |
+| Ratio venta-vs-caída-de-stock en 23/06 → 04/08 | ~84% → ~0% de anomalías | **3,21%** (177 anómalas sobre 5.509 observaciones, tolerancia 10% de `_calcular_coherencia`) — ruido residual, no el patrón del bug |
+| `I02418` en julio | 930 → ~465 | **472** |
+
+Recálculo posterior (manual, en el orden acordado): `run_calc_planilla.sh` OK en 3920s (5.583 SKUs / 72.085 filas) → `run_calc_sugerencias.sh` OK en 6,8s (1.270 SKUs con sugerencia) → `run_calc_stock_resumen.sh` OK en 3778s (5.583 SKUs, ventana de 365 días).
+
+> **Hallazgo de performance, no bloqueante (candidato a issue propio):** los ~65 min de `run_calc_planilla.py` y los ~63 min de `run_calc_stock_resumen.py` son casi enteramente **una sola query** cada uno — el `GROUP BY sku, fecha` sobre `stock_diario` en una ventana de 12-13 meses, que MySQL resuelve con tabla temporal en disco (`converting HEAP to ondisk` visible en el `PROCESSLIST`). El proceso Python queda a 0% de CPU esperándola. No es consecuencia de la reparación de #123 (la ventana es fija, no depende del rango reparado); es el costo de correr el recálculo completo, que hasta ahora nadie había cronometrado a mano. Línea de ataque si se convierte en issue: índice de cobertura sobre `stock_diario(sku, fecha, cantidad)`, o materializar el agregado diario por SKU en vez de recalcularlo entero cada vez.
+
+---
+
 ## Issues conocidos / TODOs en código
 
 | Issue | Ubicación | Descripción |
