@@ -49,3 +49,29 @@ api.evalutia.net {
     }
 }
 
+# Bloque de sitio para AGREGAR al Caddyfile del stack vecino (Evalutia).
+# NO reemplaza nada: se pega al final del Caddyfile existente, junto a los otros sitios.
+#
+# Sigue el mismo estilo que los bloques app./api.evalutia.net del vecino (gzip, forwarded
+# headers, log a stdout). A diferencia de ellos, Matcher usa UN solo subdominio: matcher-web
+# (nginx) sirve el SPA y ya reenvía /api/ al backend, así que todo el subdominio va a un
+# único reverse_proxy — no hace falta un subdominio aparte para el API.
+#
+# Requisitos:
+#   1. El subdominio ecologic.evalutia.net debe tener un registro DNS A apuntando a
+#      la IP de la VM (Caddy saca el certificado TLS solo, por Let's Encrypt).
+#   2. El contenedor matcher-web debe estar en la misma red que Caddy
+#      (la red externa `edge` del docker-compose.prod.yml de Matcher).
+
+ecologic.evalutia.net {
+	encode gzip
+	reverse_proxy matcher-web:80 {
+		header_up X-Forwarded-Proto {scheme}
+		header_up X-Forwarded-Host {host}
+		header_up X-Forwarded-For {remote_host}
+	}
+	log {
+		output stdout
+		level INFO
+	}
+}
