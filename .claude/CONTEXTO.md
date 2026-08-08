@@ -2687,6 +2687,14 @@ Hallazgo de severidad ALTA de la verificación profunda del 2026-08-04. Diagnost
 
 **Post-mortem:** lo que hubiera prevenido esto es cobertura de test sobre el flujo de orquestación (bash + `.kjb`), inexistente hoy en el repo -- candidato directo para `/improve-codebase-architecture` si se retoma. El patrón `unconditional=Y` copiado en cadena por los 10 hops del job original es la causa estructural de la capa 3; vale revisarlo si se agregan pasos nuevos al mismo `.kjb`.
 
+**`/code-review` post-fix (rango `eb6caf8..HEAD` + working tree) encontró 2 hallazgos reales, corregidos en el mismo commit:**
+- `run_backfill_ventas.sh` compartía `run_extract_sales_chunk.py` y el mismo patrón de merge que `run_extract_sales_chunk.sh`, pero su `call_chunk()` nunca había recibido el chequeo de `<MensError>` -- mismo agujero del "caso hermano" de la AC de #124, sin cerrar en el segundo punto de entrada. Agregado el mismo chequeo, mismo código de retorno (13).
+- El chequeo de `MensError` en `run_extract_sales_chunk.sh` usaba `echo "$MENS_ERROR" | tr -d ...`, vulnerable a que un mensaje de error del WS que empezara con un flag de `echo` (ej. `-n`) se tragara en silencio -- reemplazado por `printf '%s'`. Sin este fix, un `MensError` adversarial hubiera reproducido el bug original que #124 cerró.
+
+**Hallazgos del mismo review, dejados sin tocar a propósito (fuera de scope de #124, riesgo de introducir un bug nuevo si se apuran):**
+- `run_backfill_ventas.sh`: `merge_y_truncar_stage()` corre sin condición al final de cada grupo, incluso con `FAILED_CHUNKS` no vacío -- mismo patrón de Capa 2 (merge sobre datos parciales), pero en el backfill. Arreglarlo bien requiere pensar la interacción con el truncate/retry (saltear el merge sin truncar el stage duplicaría filas en el próximo reintento) -- no es un cambio de una línea.
+- `PlanillaTable.tsx`: el chequeo `user?.role === 'administrador'` está repetido en ≥5 lugares del frontend sin un hook compartido (`useIsAdmin()`), y `frecuenciaEntries()` duplica ~70 líneas de estructura entre la rama admin/no-admin. Duplicación pre-existente en el patrón del repo, no introducida por este fix específicamente más que por extensión del mismo patrón.
+
 **#124 cerrado.**
 
 ---

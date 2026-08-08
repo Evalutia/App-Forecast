@@ -125,6 +125,18 @@ XML
     return 10
   fi
 
+  # Issue #124: mismo chequeo que run_extract_sales_chunk.sh -- una respuesta
+  # bien formada puede ser igual un error del WS (no datos). Sin esto, ese
+  # chunk se trata como "0 ventas genuinas" y backfill_jobs.py puede marcar
+  # el grupo como exitoso sin haber cargado nada.
+  local MENS_ERROR
+  MENS_ERROR="$(perl -0777 -ne 'print $1 if m{<MensError>(.*?)</MensError>}is' "$TMP_XML" || true)"
+  if [[ -n "$(printf '%s' "$MENS_ERROR" | tr -d '[:space:]')" ]]; then
+    echo "[ERROR] MensError (grupo ${grupo}, deposito ${dep}, ${desde_fmt}-${hasta_fmt}): ${MENS_ERROR}"
+    rm -f "$TMP_REQ" "$TMP_HDR" "$TMP_XML" "$TMP_JSON"
+    return 13
+  fi
+
   local JSON
   JSON="$(perl -0777 -ne "print \$1 if m{<${WS_METHOD}Result>([\\s\\S]*?)</${WS_METHOD}Result>}i" "$TMP_XML" || true)"
   [[ -z "$JSON" ]] && JSON="$(perl -0777 -ne 'print $1 if m{<string[^>]*>([\s\S]*?)</string>}i'      "$TMP_XML" || true)"

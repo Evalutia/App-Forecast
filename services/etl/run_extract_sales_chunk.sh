@@ -109,7 +109,7 @@ XML
   # reales sin ningún rastro. Se chequea ANTES de buscar el resultado normal.
   local MENS_ERROR
   MENS_ERROR="$(perl -0777 -ne 'print $1 if m{<MensError>(.*?)</MensError>}is' "$TMP_XML" || true)"
-  if [[ -n "$(echo "$MENS_ERROR" | tr -d '[:space:]')" ]]; then
+  if [[ -n "$(printf '%s' "$MENS_ERROR" | tr -d '[:space:]')" ]]; then
     echo "[ERROR] MensError en ConsStockVenta (grupo ${grupo}, deposito ${dep}): ${MENS_ERROR}"
     rm -f "$TMP_REQ" "$TMP_HDR" "$TMP_XML" "$TMP_JSON"
     return 13
