@@ -2666,6 +2666,31 @@ Retoma el hallazgo de #76 (1/7, 14% elegible en casos borde, contra 70% en pobla
 
 ---
 
+### #124: un fallo de la llamada SOAP de ventas escribía cero de forma permanente y silenciosa (sesión 2026-08-08)
+
+Hallazgo de severidad ALTA de la verificación profunda del 2026-08-04. Diagnosticado con `/diagnosing-bugs`: tres capas independientes, las tres necesarias para que el bug ocurra, las tres confirmadas con repros reales antes de tocar código (Docker local, MySQL real con FK, sin dejar rastro).
+
+**Capa 1 -- `run_extract_sales_chunk.sh` tragaba el fallo.** Respuesta vacía, JSON ilegible o `<MensError>` del WS terminaban en `[WARN]... continuando` y el script siempre salía con `exit 0`. Peor de lo que sugiere el issue original: incluso un **crash real de Python** (`JSONDecodeError`) quedaba invisible, por una sutileza de bash -- `call_for_grupo_deposito` se invoca como `... || echo`, y eso suspende `set -e` para *toda* la función (no solo el último comando), así que el `rm -f` final (que casi siempre da 0) terminaba pisando el código de salida real. Reproducido con un `curl` mockeado dentro del contenedor `etl`: respuesta vacía, JSON malformado y `MensError` bien formado, los tres casos daban `EXIT_CODE=0`.
+
+**Capa 2 -- el merge SQL pisaba sin preguntar.** El paso `MERGE STAGING -> VENTAS (con snapshot)` de `job_etl_diario.kjb` hace `SUM(cantidad) GROUP BY fecha,sku` sobre lo que haya en staging esa noche, `ON DUPLICATE KEY UPDATE cantidad = VALUES(cantidad)` -- sin chequear si faltó algún depósito. Reproducido contra `evalutia-mysql` real (transacción + rollback, SKU descartable `__TEST124__`): una venta real de 50 quedó en 0 tras correr ese SQL exacto con staging simulando solo los depósitos de logística.
+
+**Capa 3, no estaba en el issue original -- los hops del `.kjb` eran `unconditional=Y`.** Aunque se arreglara el script para salir con error, Pentaho corría el MERGE igual: el flujo no estaba configurado para frenar ante un fallo del paso anterior. Sin esta capa, el fix de la capa 1 no alcanza para cumplir el criterio de aceptación del issue ("no se toca el día, o la corrida queda marcada como fallida").
+
+**Fix (3 archivos):**
+- `run_extract_sales_chunk.sh`: detecta `<MensError>` (mismo patrón que ya usaba `run_extract_articulos.py`, que sí lo miraba), captura el `rc` de Python explícitamente en vez de dejarlo pisar por el `rm -f`, acumula fallos por grupo/depósito y sale con `exit 1` si hubo alguno.
+- `run_extract_sales_chunk.py`: `json.loads` envuelto en `try/except` -- error `[ERROR]` limpio en vez de traceback crudo.
+- `job_etl_diario.kjb`: el hop `RUN EXTRACT VENTAS -> MERGE` pasa a condicional (`evaluation=Y`, solo si el script salió con éxito); rama nueva `MARK VENTAS EXTRACT FAILED` que no toca `ventas_historicas` y deja un registro `fallido` en `jobs_historial`, y después reincorpora el flujo normal (predict/planilla siguen corriendo con el dato del día anterior, no se frena todo el pipeline nocturno).
+
+**Verificado (contenedor `etl` + MySQL real, no solo lectura de código):** los 3 escenarios de la AC, antes en verde falso (`exit 0`) ahora en rojo correcto (`exit 1`, mensaje `[ERROR]` claro, cero traceback). Happy path confirmado sin falsos positivos: datos reales válidos y el caso legítimo "0 ventas hoy" (array vacío del WS) siguen dando `exit 0` -- la distinción es entre "no hubo venta" y "no se pudo saber si hubo venta", no un endurecimiento genérico. Datos de prueba (`__TEST124__`) limpiados en las 4 tablas afectadas tras cada repro.
+
+**Sin seam de test previo:** `services/etl/tests/` solo cubre los scripts `calc_*`, nada de extracción u orquestación Pentaho. No se agregó test automatizado nuevo -- los repros de arriba (curl mockeado + MySQL real con rollback) quedan como la verificación documentada, siguiendo la disciplina de `/diagnosing-bugs` cuando no existe un seam correcto.
+
+**Post-mortem:** lo que hubiera prevenido esto es cobertura de test sobre el flujo de orquestación (bash + `.kjb`), inexistente hoy en el repo -- candidato directo para `/improve-codebase-architecture` si se retoma. El patrón `unconditional=Y` copiado en cadena por los 10 hops del job original es la causa estructural de la capa 3; vale revisarlo si se agregan pasos nuevos al mismo `.kjb`.
+
+**#124 cerrado.**
+
+---
+
 ## Documentación adicional
 
 | Archivo | Contenido |

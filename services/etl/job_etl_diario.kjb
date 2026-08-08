@@ -133,6 +133,27 @@ SELECT 1;
     </entry>
 
     <entry>
+      <name>MARK VENTAS EXTRACT FAILED</name>
+      <type>SQL</type>
+      <connection>MYSQL_EVALUTIA</connection>
+      <sql><![CDATA[
+-- Issue #124: rama de fallo de RUN EXTRACT VENTAS. Antes el hop era
+-- unconditional y corria el MERGE igual aunque el extractor hubiera fallado
+-- (respuesta vacia, JSON ilegible, o MensError del WS) -- ahora esa rama NO
+-- toca ventas_historicas, solo deja registro explicito de que la noche fallo.
+INSERT INTO jobs_historial (tipo_job, estado, fecha_inicio, fecha_fin, detalle)
+VALUES (
+  'etl', 'fallido', NOW(6), NOW(6),
+  JSON_OBJECT(
+    'paso', 'RUN EXTRACT VENTAS',
+    'motivo', 'Fallo en uno o mas grupos/depositos de ConsStockVenta (respuesta vacia, JSON ilegible o MensError del WS) -- ver log de la corrida. ventas_historicas NO se tocó esta noche.'
+  )
+);
+      ]]></sql>
+      <xloc>1560</xloc><yloc>200</yloc><draw>Y</draw>
+    </entry>
+
+    <entry>
       <name>MERGE STAGING -> VENTAS (con snapshot)</name>
       <type>SQL</type>
       <connection>MYSQL_EVALUTIA</connection>
@@ -290,8 +311,15 @@ DELETE FROM ventas_historicas_stage;
     <hop><from>TRUNCATE STOCK_DIARIO_STAGE (opcional)</from><to>RUN EXTRACT STOCKXML</to><enabled>Y</enabled><unconditional>Y</unconditional></hop>
     <hop><from>RUN EXTRACT STOCKXML</from><to>MERGE STAGING -> STOCK_DIARIO</to><enabled>Y</enabled><unconditional>Y</unconditional></hop>
     <hop><from>MERGE STAGING -> STOCK_DIARIO</from><to>RUN EXTRACT VENTAS</to><enabled>Y</enabled><unconditional>Y</unconditional></hop>
-    <hop><from>RUN EXTRACT VENTAS</from><to>MERGE STAGING -> VENTAS (con snapshot)</to><enabled>Y</enabled><unconditional>Y</unconditional></hop>
+    <!-- Issue #124: antes este hop era unconditional, el MERGE corria aunque
+         la extracción hubiera fallado. Ahora solo sigue a MERGE si RUN EXTRACT
+         VENTAS salió con éxito (exit 0); si falló, va a MARK VENTAS EXTRACT
+         FAILED, que no toca ventas_historicas y deja el fallo registrado en
+         jobs_historial. -->
+    <hop><from>RUN EXTRACT VENTAS</from><to>MERGE STAGING -> VENTAS (con snapshot)</to><enabled>Y</enabled><evaluation>Y</evaluation><unconditional>N</unconditional></hop>
+    <hop><from>RUN EXTRACT VENTAS</from><to>MARK VENTAS EXTRACT FAILED</to><enabled>Y</enabled><evaluation>N</evaluation><unconditional>N</unconditional></hop>
     <hop><from>MERGE STAGING -> VENTAS (con snapshot)</from><to>CALC_UPSERT_VENTAS_MENSUALES</to><enabled>Y</enabled><unconditional>Y</unconditional></hop>
+    <hop><from>MARK VENTAS EXTRACT FAILED</from><to>CALC_UPSERT_VENTAS_MENSUALES</to><enabled>Y</enabled><unconditional>Y</unconditional></hop>
     <hop><from>CALC_UPSERT_VENTAS_MENSUALES</from><to>RUN PREDICT.PY</to><enabled>Y</enabled><unconditional>Y</unconditional></hop>
     <hop><from>RUN PREDICT.PY</from><to>RUN CALC_PLANILLA</to><enabled>Y</enabled><unconditional>Y</unconditional></hop>
     <hop><from>RUN CALC_PLANILLA</from><to>RUN CALC_SUGERENCIAS</to><enabled>Y</enabled><unconditional>Y</unconditional></hop>

@@ -49,7 +49,12 @@ if not json_path or not os.path.exists(json_path):
     raise SystemExit(2)
 
 with open(json_path, "r", encoding="utf-8") as f:
-    payload = json.load(f)
+    raw = f.read()
+try:
+    payload = json.loads(raw)
+except json.JSONDecodeError as e:
+    print(f"[ERROR] JSON ilegible en respuesta del WS: {e}")
+    raise SystemExit(1)
 
 if isinstance(payload, dict):
     payload = [payload]

@@ -103,6 +103,18 @@ XML
     return 10
   fi
 
+  # Issue #124: una respuesta bien formada puede ser igual un error del WS (no
+  # datos). Mismo chequeo que ya hace run_extract_articulos.py -- ventas/stock
+  # nunca lo miraban, y ese silencio es lo que deja escribir cero sobre ventas
+  # reales sin ningún rastro. Se chequea ANTES de buscar el resultado normal.
+  local MENS_ERROR
+  MENS_ERROR="$(perl -0777 -ne 'print $1 if m{<MensError>(.*?)</MensError>}is' "$TMP_XML" || true)"
+  if [[ -n "$(echo "$MENS_ERROR" | tr -d '[:space:]')" ]]; then
+    echo "[ERROR] MensError en ConsStockVenta (grupo ${grupo}, deposito ${dep}): ${MENS_ERROR}"
+    rm -f "$TMP_REQ" "$TMP_HDR" "$TMP_XML" "$TMP_JSON"
+    return 13
+  fi
+
   local JSON
   JSON="$(perl -0777 -ne "print \$1 if m{<${WS_METHOD}Result>([\\s\\S]*?)</${WS_METHOD}Result>}i" "$TMP_XML" || true)"
   [[ -z "$JSON" ]] && JSON="$(perl -0777 -ne 'print $1 if m{<string[^>]*>([\s\S]*?)</string>}i'           "$TMP_XML" || true)"
@@ -122,9 +134,19 @@ XML
   export TMP_JSON_PATH="$TMP_JSON"
   export __FORCED_DEPOSITO="${dep}"
   python3 /app/services/etl/run_extract_sales_chunk.py
+  # Issue #124: capturar el rc ACA, ya. Esta funcion se invoca como
+  # `call_for_grupo_deposito ... || ...` desde process_grupo, y con `set -e`
+  # eso suspende errexit para TODA la funcion (no solo el ultimo comando) --
+  # sin este capture explicito, el "rm -f" de abajo (que casi siempre da 0)
+  # termina siendo el codigo de salida real de la funcion, y un crash de
+  # run_extract_sales_chunk.py (ej. JSON ilegible) queda invisible. Confirmado
+  # reproduciendo un JSONDecodeError real: sin este fix, el script terminaba
+  # en exit 0 pese al traceback.
+  local py_rc=$?
   unset __FORCED_DEPOSITO
 
   rm -f "$TMP_REQ" "$TMP_HDR" "$TMP_XML" "$TMP_JSON"
+  return "$py_rc"
 }
 
 process_grupo() {
@@ -136,11 +158,17 @@ process_grupo() {
       dep="$(echo "$dep" | tr -d '[:space:]')"
       [[ -z "$dep" ]] && continue
       echo "[INFO] Ejecutando ConsStockVenta para grupo ${grupo}, deposito: ${dep}"
-      call_for_grupo_deposito "${grupo}" "${dep}" || echo "[WARN] Fallo en grupo ${grupo} deposito ${dep}, continuando con el siguiente..."
+      if ! call_for_grupo_deposito "${grupo}" "${dep}"; then
+        echo "[WARN] Fallo en grupo ${grupo} deposito ${dep}, continuando con el siguiente..."
+        FAILED_GRUPO_DEPOSITO+=("grupo=${grupo} dep=${dep}")
+      fi
     done
     IFS="$OLD_IFS"
   else
-    call_for_grupo_deposito "${grupo}" "${S_DEPOSITOS:-}" || echo "[WARN] Fallo en grupo ${grupo}, continuando con el siguiente..."
+    if ! call_for_grupo_deposito "${grupo}" "${S_DEPOSITOS:-}"; then
+      echo "[WARN] Fallo en grupo ${grupo}, continuando con el siguiente..."
+      FAILED_GRUPO_DEPOSITO+=("grupo=${grupo} dep=${S_DEPOSITOS:-(ninguno)}")
+    fi
   fi
 }
 
@@ -152,7 +180,18 @@ fi
 
 echo "[INFO] Grupos a procesar: ${GROUPS_LIST}"
 
+# Issue #124: antes, un fallo de cualquier grupo/deposito quedaba en un
+# "[WARN] ... continuando" y el script SIEMPRE terminaba en exit 0 -- el
+# caller (Pentaho, o un humano) no tenia forma de saber que faltaron datos.
+FAILED_GRUPO_DEPOSITO=()
+
 for G in ${GROUPS_LIST}; do
   echo "[INFO] === Grupo ${G} ==="
   process_grupo "${G}"
 done
+
+if [[ ${#FAILED_GRUPO_DEPOSITO[@]} -gt 0 ]]; then
+  echo "[ERROR] ${#FAILED_GRUPO_DEPOSITO[@]} grupo(s)/deposito(s) fallaron esta corrida:"
+  printf '  %s\n' "${FAILED_GRUPO_DEPOSITO[@]}"
+  exit 1
+fi
