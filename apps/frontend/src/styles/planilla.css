@@ -126,6 +126,31 @@ thead .planilla-sticky-col {
 }
 .planilla-leyenda-sinstock::before { background: rgba(100,116,139,0.6); }
 
+/* Criterio de frecuencia: mismo mecanismo que en la tabla (borde izq., no
+   relleno) -- swatch con borde en vez de cuadrado solido, para que se lea
+   de un vistazo como "esto es un borde", distinto de los rellenos de quiebre.
+   Mismos colores base (azul/violeta/teal) que criterioFrecuenciaBorder() en
+   PlanillaTable.tsx, pero con más alpha (0.8 vs 0.55) a propósito: acá es un
+   swatch chico que necesita leerse de un vistazo, no un borde corriendo a lo
+   largo de toda la fila de la tabla. */
+.planilla-leyenda-frecuencia-historico,
+.planilla-leyenda-frecuencia-promedio,
+.planilla-leyenda-frecuencia-real {
+  background: rgba(255,255,255,0.05);
+  border: 1px solid rgba(255,255,255,0.08);
+  color: rgba(240,245,242,0.6);
+}
+.planilla-leyenda-frecuencia-historico::before,
+.planilla-leyenda-frecuencia-promedio::before,
+.planilla-leyenda-frecuencia-real::before {
+  background: transparent;
+  border-radius: 0;
+  border-left: 3px solid;
+}
+.planilla-leyenda-frecuencia-historico::before { border-left-color: rgba(37,99,235,0.8); }
+.planilla-leyenda-frecuencia-promedio::before  { border-left-color: rgba(139,92,246,0.8); }
+.planilla-leyenda-frecuencia-real::before      { border-left-color: rgba(20,184,166,0.8); }
+
 /* ── Badge fiabilidad (columna AE) ──────────────────────────────────────────── */
 .planilla-ae-cell {
   display: flex;

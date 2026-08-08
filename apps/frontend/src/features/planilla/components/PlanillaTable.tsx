@@ -3,6 +3,8 @@ import { useRef, useState } from 'react';
 import type { PlanillaMesDto, PlanillaSugerenciaDto, PlanillaVentasDto, PlanillaVentasParams } from '../types/planilla';
 import { usePlanillaVentas } from '../hooks/usePlanilla';
 import { exportPlanillaExcel } from '../utils/exportPlanilla';
+import { useUmbralesTickets } from '../../configuracion/hooks/useConfiguracion';
+import { useAuthUser } from '../../auth/hooks/useAuthUser';
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -157,15 +159,152 @@ function Tip({ label, tip, style }: { label: React.ReactNode; tip: string; style
 
 // ── Legend ────────────────────────────────────────────────────────────────────
 
+type LeyendaEntry = { className: string; label: string; tip: string };
+
+const ESTADO_ENTRIES: LeyendaEntry[] = [
+  {
+    className: 'planilla-leyenda-normal',
+    label: 'Normal (100% días con stock)',
+    tip: 'Estado: Normal\nEl artículo tuvo stock el 100% de los días naturales del mes.',
+  },
+  {
+    className: 'planilla-leyenda-quiebre-alta',
+    label: 'Quiebre alta freq',
+    tip:
+      'Estado: Quiebre, frecuencia alta\n' +
+      'Hubo días sin stock en el mes, pero el artículo vende casi todos\n' +
+      'los días del año (clasificación anual). La rotación ajustada usa\n' +
+      'ventas ÷ días con stock, igual que en un mes normal.',
+  },
+  {
+    className: 'planilla-leyenda-quiebre-media',
+    label: 'Quiebre media freq',
+    tip:
+      'Estado: Quiebre, frecuencia media\n' +
+      'Hubo días sin stock en el mes. El artículo tiene una frecuencia\n' +
+      'de venta anual intermedia. La rotación ajustada promedia\n' +
+      '(ventas÷días_con_stock) y (ventas÷días_naturales_mes).',
+  },
+  {
+    className: 'planilla-leyenda-quiebre-baja',
+    label: 'Quiebre baja freq',
+    tip:
+      'Estado: Quiebre, frecuencia baja\n' +
+      'Hubo días sin stock en el mes. El artículo vende pocas veces al\n' +
+      'año. La rotación ajustada usa ventas ÷ días naturales del mes\n' +
+      '(más conservador, evita sobreestimar por los pocos días con stock).',
+  },
+  {
+    className: 'planilla-leyenda-sinstock',
+    label: 'Sin stock (mes completo)',
+    tip: 'Estado: Sin stock\nEl artículo no tuvo stock ningún día del mes -- no hay rotación real calculable ese mes.',
+  },
+];
+
+// Los umbrales son configurables en runtime (/configuracion, admin-only) --
+// GET /configuracion/umbrales-tickets es admin-only en el backend (issue #22
+// fija el patrón: paginas con ambos roles deben pasar `enabled: isAdmin` en
+// vez de tocar el interceptor). Para duenoDeEmpresa no hay valor real
+// disponible sin violar ese límite -- en vez de arriesgar un número
+// hardcodeado que puede quedar mintiendo apenas un admin lo cambie, se
+// muestra el criterio sin número concreto.
+function frecuenciaEntries(umbrales: { bajoMax: number; altoMin: number } | null): LeyendaEntry[] {
+  if (!umbrales) {
+    return [
+      {
+        className: 'planilla-leyenda-frecuencia-historico',
+        label: 'Histórico (pocos tickets)',
+        tip:
+          'Criterio: Histórico\n' +
+          'El mes tuvo pocos tickets (días con venta) -- muy pocos datos para\n' +
+          'confiar en el mes solo. Se usa el promedio de los últimos 12\n' +
+          'meses cerrados. Umbral exacto visible para administrador en /configuracion.',
+      },
+      {
+        className: 'planilla-leyenda-frecuencia-promedio',
+        label: 'Promedio (tickets intermedios)',
+        tip:
+          'Criterio: Promedio\n' +
+          'El mes tuvo una cantidad intermedia de tickets. Se promedia el\n' +
+          'Histórico con el valor real del mes (o su extrapolación si hubo\n' +
+          'quiebre de stock).',
+      },
+      {
+        className: 'planilla-leyenda-frecuencia-real',
+        label: 'Venta real / Extrapolado (muchos tickets)',
+        tip:
+          'Criterio: Venta real / Extrapolado\n' +
+          'El mes tuvo suficientes días de venta para confiar en el número\n' +
+          'tal cual. Si hubo quiebre, se extrapola lo vendido en los días\n' +
+          'con stock a todo el mes.',
+      },
+    ];
+  }
+
+  const { bajoMax, altoMin } = umbrales;
+  const promedioDesde = bajoMax + 1;
+  const promedioHasta = altoMin - 1;
+  // Con umbrales adyacentes (ej. bajoMax=3, altoMin=4) no queda ningún valor
+  // entero de tickets en el medio -- el criterio "promedio" nunca se asigna
+  // con esa config. Se marca explícito en vez de mostrar un rango invertido
+  // como "4-3 tickets".
+  const hayPromedio = promedioDesde <= promedioHasta;
+  const rangoPromedio = promedioDesde === promedioHasta ? `${promedioDesde}` : `${promedioDesde}-${promedioHasta}`;
+  return [
+    {
+      className: 'planilla-leyenda-frecuencia-historico',
+      label: `Histórico (≤${bajoMax} tickets)`,
+      tip:
+        'Criterio: Histórico\n' +
+        `El mes tuvo ${bajoMax} tickets (días con venta) o menos -- muy pocos\n` +
+        'datos para confiar en el mes solo. Se usa el promedio de los\n' +
+        'últimos 12 meses cerrados.',
+    },
+    {
+      className: 'planilla-leyenda-frecuencia-promedio',
+      label: hayPromedio ? `Promedio (${rangoPromedio} tickets)` : 'Promedio (sin rango con estos umbrales)',
+      tip: hayPromedio
+        ? 'Criterio: Promedio\n' +
+          `El mes tuvo ${rangoPromedio} tickets. Se promedia el Histórico con el valor\n` +
+          'real del mes (o su extrapolación si hubo quiebre de stock).'
+        : 'Criterio: Promedio\n' +
+          `Con los umbrales actuales (≤${bajoMax} / ≥${altoMin}) no queda ningún valor\n` +
+          'de tickets en el medio -- este criterio no se asigna hoy.',
+    },
+    {
+      className: 'planilla-leyenda-frecuencia-real',
+      label: `Venta real / Extrapolado (≥${altoMin} tickets)`,
+      tip:
+        'Criterio: Venta real / Extrapolado\n' +
+        `El mes tuvo ${altoMin} tickets o más -- suficientes días de venta para\n` +
+        'confiar en el número tal cual. Si hubo quiebre, se extrapola lo\n' +
+        'vendido en los días con stock a todo el mes.',
+    },
+  ];
+}
+
 function Leyenda() {
+  // Patrón de #22: `enabled: isAdmin` en vez de tocar el interceptor Axios,
+  // que no se debe suprimir globalmente (es señal válida en otros casos).
+  const { user } = useAuthUser();
+  const isAdmin = user?.role === 'administrador';
+  const { data } = useUmbralesTickets(isAdmin);
+  const umbrales = isAdmin && data ? { bajoMax: data.ticketsBajoMax, altoMin: data.ticketsAltoMin } : null;
+
   return (
     <div className="planilla-leyenda">
       <span className="planilla-leyenda-titulo">Estado mensual:</span>
-      <span className="planilla-leyenda-item planilla-leyenda-normal">Normal (100% días con stock)</span>
-      <span className="planilla-leyenda-item planilla-leyenda-quiebre-alta">Quiebre alta freq</span>
-      <span className="planilla-leyenda-item planilla-leyenda-quiebre-media">Quiebre media freq</span>
-      <span className="planilla-leyenda-item planilla-leyenda-quiebre-baja">Quiebre baja freq</span>
-      <span className="planilla-leyenda-item planilla-leyenda-sinstock">Sin stock (mes completo)</span>
+      {ESTADO_ENTRIES.map((entry) => (
+        <span key={entry.className} className={`planilla-leyenda-item ${entry.className}`}>
+          <Tip label={entry.label} tip={entry.tip} />
+        </span>
+      ))}
+      <span className="planilla-leyenda-titulo">Criterio de frecuencia (borde izq.):</span>
+      {frecuenciaEntries(umbrales).map((entry) => (
+        <span key={entry.className} className={`planilla-leyenda-item ${entry.className}`}>
+          <Tip label={entry.label} tip={entry.tip} />
+        </span>
+      ))}
     </div>
   );
 }
