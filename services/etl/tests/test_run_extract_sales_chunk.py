@@ -198,6 +198,29 @@ def test_venta_negativa_preserva_el_signo(conn):
     assert filas[0]["cantidad"] == -3
 
 
+def test_venta_con_coma_decimal_no_cae_en_cero_silencioso(conn):
+    """Issue #125: clamp_signed_int hacia Decimal(str(x)) directo, sin pasar
+    por el reemplazo de coma que si tenia to_decimal -- 'Venta': '1,5' tiraba
+    InvalidOperation y el except devolvia 0, pisando en silencio cualquier
+    valor real. End-to-end contra la DB para confirmar que el fix llega
+    hasta la fila insertada, no solo al parser en aislamiento."""
+    rsc.procesar_payload(conn, [_item(venta="1,5")], deposito_forzado="5", grupo_id="30")
+
+    filas = _filas(conn)
+    assert len(filas) == 1
+    assert filas[0]["cantidad"] == 2
+
+
+def test_venta_con_miles_punto_no_se_trunca(conn):
+    """Issue #125: 'Venta': '3.800.000' (formato del WS con punto de miles,
+    igual al que ya manejaba bien el extractor de stock XML) debe llegar
+    completo, no interpretarse como decimal truncado."""
+    rsc.procesar_payload(conn, [_item(venta="3.800.000")], deposito_forzado="5", grupo_id="30")
+
+    filas = _filas(conn)
+    assert filas[0]["cantidad"] == 3800000
+
+
 def test_stock_diario_se_upsertea_con_grupo_pisando_igual(conn):
     """El camino de stock_diario ya era idempotente antes de #114 (upsert
     por sku,fecha,deposito_id) -- el refactor no debe cambiar eso."""

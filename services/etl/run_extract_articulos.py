@@ -9,7 +9,8 @@ import html
 import datetime
 import pymysql
 import xml.etree.ElementTree as ET
-from decimal import Decimal
+
+import parsers
 
 def trunc(s, maxlen):
     if s is None:
@@ -18,14 +19,9 @@ def trunc(s, maxlen):
     return s[:maxlen]
 
 def to_int_nullable(x):
-    if x is None:
-        return None
-    s = str(x).strip()
-    if s == "":
-        return None
     try:
-        return int(Decimal(s))
-    except Exception:
+        return parsers.parse_entero(x, signed=True, default=None)
+    except parsers.ParseError:
         return None
 
 def to_nonneg_int(x, default=0):
@@ -38,15 +34,7 @@ def localname(tag: str) -> str:
     return tag.split("}")[-1] if tag else tag
 
 def normalize_sku_from_value(raw):
-    if raw is None:
-        return None
-    s = str(raw)
-    s = "".join(ch for ch in s if ord(ch) >= 32)
-    s = " ".join(s.split())
-    s = s.strip().upper()
-    if s == "":
-        return None
-    return s[:128]
+    return parsers.normalize_sku(raw)
 
 def get_estado(it: dict) -> str:
     raw = it.get("Inactivo")
@@ -60,16 +48,14 @@ def get_estado(it: dict) -> str:
     return "activo"
 
 def _parse_factor(val) -> float | None:
-    if val is None:
-        return None
-    s = str(val).strip()
-    if s == "":
-        return None
     try:
-        f = float(Decimal(s))
-        return f if f > 0 else None
-    except Exception:
+        d = parsers.parse_decimal(val)
+    except parsers.ParseError:
         return None
+    if d is None:
+        return None
+    f = float(d)
+    return f if f > 0 else None
 
 def get_factor_estacional(it: dict):
     key = f"Mes{datetime.datetime.now().month:02d}"

@@ -1,47 +1,7 @@
 #!/usr/bin/env python3
-import json, os, pymysql, datetime as dt
-from decimal import Decimal, InvalidOperation
+import html, json, os, pymysql
 
-def norm_fecha(s):
-    if not s: return None
-    s = str(s).strip()[:19]
-    for f in ("%Y-%m-%dT%H:%M:%S","%d/%m/%Y","%Y-%m-%d"):
-        try:
-            d = dt.datetime.strptime(s, f)
-            if d.year < 1900 or d.year > 2100:
-                return None
-            return d.strftime("%Y-%m-%d")
-        except Exception:
-            pass
-    return None
-
-def to_decimal(x, default="0"):
-    if x is None: x = default
-    s = str(x).replace(",", ".").strip()
-    try:
-        return Decimal(s)
-    except (InvalidOperation, ValueError):
-        return Decimal(default)
-
-def clamp_nonneg_int(x):
-    try:
-        n = int(Decimal(str(x)).to_integral_value(rounding="ROUND_HALF_UP"))
-    except Exception:
-        n = 0
-    return max(0, n)
-
-def clamp_signed_int(x):
-    # Issue #80: a diferencia de clamp_nonneg_int, preserva el signo -- una
-    # nota de credito (venta neta negativa) no debe aplastarse a 0.
-    try:
-        n = int(Decimal(str(x)).to_integral_value(rounding="ROUND_HALF_UP"))
-    except Exception:
-        n = 0
-    return n
-
-def trunc(s, maxlen):
-    s = "" if s is None else str(s)
-    return s[:maxlen]
+import parsers
 
 
 def procesar_payload(conn, payload, deposito_forzado=None, grupo_id=None):
@@ -144,8 +104,14 @@ def procesar_payload(conn, payload, deposito_forzado=None, grupo_id=None):
             if not isinstance(it, dict):
                 rows_skip += 1
                 continue
-            fecha = norm_fecha(it.get('Fecha') or it.get('fecha'))
-            sku   = it.get('IdArticulo') or it.get('Articulo') or it.get('SKU') or it.get('sku')
+            sku_raw = it.get('IdArticulo') or it.get('Articulo') or it.get('SKU') or it.get('sku')
+            sku = parsers.normalize_sku(sku_raw)
+            try:
+                fecha = parsers.parse_fecha(it.get('Fecha') or it.get('fecha'))
+            except parsers.ParseError as e:
+                print(f"[WARN] fila descartada, fecha no interpretable sku={sku_raw!r}: {e}")
+                rows_skip += 1
+                continue
             venta = None
             for k in ['Venta','VentaQty','Cantidad','CantVenta','CantidadVta','CantVta','CantidadVenta','CANTIDAD','CANT_VENTA']:
                 if it.get(k) is not None:
@@ -157,19 +123,35 @@ def procesar_payload(conn, payload, deposito_forzado=None, grupo_id=None):
             if not fecha or not sku:
                 rows_skip += 1
                 continue
-            sku = trunc(sku, 128)
             fuente = "ws_consstockventa"
-            if cantidad_is_decimal:
-                cant_val = str(to_decimal(venta, "0"))
-            else:
-                cant_val = clamp_signed_int(venta)
+
+            # Issue #125: antes, un valor de venta no interpretable (p. ej.
+            # '1,5' vía el bypass que tenia clamp_signed_int) caia en un 0
+            # silencioso -- peor que perder la fila, porque ademas pisaba
+            # stock correcto ya cargado. Ahora la fila entera se descarta
+            # con un log visible en vez de escribir un 0 que nadie audita.
+            try:
+                if cantidad_is_decimal:
+                    venta_dec = parsers.parse_decimal(venta)
+                    cant_val = str(venta_dec) if venta_dec is not None else "0"
+                else:
+                    cant_val = parsers.parse_entero(venta, signed=True)
+            except parsers.ParseError as e:
+                print(f"[WARN] fila descartada, venta no interpretable sku={sku} fecha={fecha}: {e}")
+                rows_skip += 1
+                continue
 
             values = {"fecha": fecha, "sku": sku, "cantidad": cant_val, "fuente": fuente}
             if has_stock:
-                if stock_is_decimal:
-                    values["stock"] = str(to_decimal(stock, "0"))
-                else:
-                    values["stock"] = clamp_nonneg_int(stock)
+                try:
+                    if stock_is_decimal:
+                        stock_dec = parsers.parse_decimal(stock)
+                        values["stock"] = str(stock_dec) if stock_dec is not None else "0"
+                    else:
+                        values["stock"] = parsers.parse_entero(stock)
+                except parsers.ParseError as e:
+                    print(f"[WARN] stock no interpretable sku={sku} fecha={fecha}: {e}; fila sin stock (0)")
+                    values["stock"] = "0" if stock_is_decimal else 0
             if has_deposito:
                 values["deposito_id"] = deposito_id
             if has_grupo:
@@ -184,10 +166,15 @@ def procesar_payload(conn, payload, deposito_forzado=None, grupo_id=None):
 
             if stock is not None and deposito_forzado:
                 try:
-                    cur.execute(sql_stock_diario, (sku, fecha, clamp_nonneg_int(stock), deposito_forzado, fuente))
-                    rows_stock_ins += 1
-                except Exception:
-                    pass
+                    stock_diario_val = parsers.parse_entero(stock)
+                except parsers.ParseError as e:
+                    print(f"[WARN] stock_diario no actualizado, stock no interpretable sku={sku} fecha={fecha}: {e}")
+                else:
+                    try:
+                        cur.execute(sql_stock_diario, (sku, fecha, stock_diario_val, deposito_forzado, fuente))
+                        rows_stock_ins += 1
+                    except Exception:
+                        pass
         conn.commit()
 
     return rows_ins, rows_skip, rows_stock_ins
@@ -201,6 +188,10 @@ def main():
 
     with open(json_path, "r", encoding="utf-8") as f:
         raw = f.read()
+    # Issue #125: el desescape de entities HTML se centraliza aca (via
+    # html.unescape) en vez del sed en el .sh -- ese sed desescapaba de mas
+    # (orden quot/amp/lt/gt convertia &amp;lt; en < en vez de &lt;).
+    raw = html.unescape(raw)
     # Issue #124: una respuesta bien formada del punto de vista SOAP puede
     # ser JSON ilegible (el WS devuelve texto libre en el campo de error).
     # Sin este chequeo, un JSONDecodeError sin capturar quedaba invisible

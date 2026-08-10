@@ -1,0 +1,113 @@
+#!/usr/bin/env python3
+"""Parsers compartidos por los extractores del ETL (Issue #125).
+
+Antes cada extractor (stockxml, sales_chunk, articulos) reimplementaba su
+propia variante de numeros/fechas/codigos y las variantes divergian en
+silencio -- ver .claude/CONTEXTO.md, seccion #125, para el detalle de cada
+bug (el mas grave: sales_chunk perdia el signo/valor real de una venta
+ante '1.234' o '1,5' y lo pisaba con un 0 que ademas sobreescribia stock
+correcto ya cargado por el otro extractor).
+"""
+import datetime as dt
+from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
+
+FORMATOS_FECHA = (
+    "%Y-%m-%dT%H:%M:%S",
+    "%Y-%m-%d %H:%M:%S",
+    "%Y-%m-%d",
+    "%d/%m/%Y",
+    "%d-%m-%Y",
+)
+
+
+class ParseError(ValueError):
+    """Un valor no vacio no pudo interpretarse.
+
+    A diferencia del codigo que reemplaza, esto nunca se traduce a un 0 (o
+    a un None) en silencio: el caller decide como registrar el fallo de
+    forma visible (log + fila salteada), no se pierde en un try/except mudo.
+    """
+
+
+def parse_decimal(valor):
+    """Normaliza numeros como los manda el web service.
+
+    Formatos observados: '25.000' / '3.800.000' (puntos como separador de
+    miles -- heuristica: mas de un punto implica que son miles, se
+    remueven), '1,5' (coma como separador decimal), enteros y floats
+    nativos. None o '' -> None (ausencia de dato, no un fallo). Cualquier
+    otro valor no interpretable levanta ParseError.
+    """
+    if valor is None:
+        return None
+    if isinstance(valor, bool):
+        raise ParseError(f"valor booleano no interpretable como numero: {valor!r}")
+    if isinstance(valor, (int, float)):
+        return Decimal(str(valor))
+    s = str(valor).strip()
+    if s == "":
+        return None
+    s = s.replace(",", ".")
+    if s.count(".") > 1:
+        s = s.replace(".", "")
+    try:
+        return Decimal(s)
+    except (InvalidOperation, ValueError):
+        raise ParseError(f"numero no interpretable: {valor!r}")
+
+
+def parse_entero(valor, *, signed=False, default=0):
+    """Entero redondeado a partir de parse_decimal.
+
+    None/'' -> default. Si signed=False (caso por defecto: cantidades de
+    stock, nunca negativas) un resultado negativo se recorta a 0 -- esa es
+    una regla de negocio deliberada, no un fallo de parseo, y se preserva
+    tal cual la tenian los extractores originales. Un valor realmente no
+    interpretable (p. ej. 'abc') levanta ParseError, nunca cae a 0.
+    """
+    d = parse_decimal(valor)
+    if d is None:
+        return default
+    n = int(d.to_integral_value(rounding=ROUND_HALF_UP))
+    if not signed:
+        n = max(0, n)
+    return n
+
+
+def parse_fecha(valor):
+    """Fecha 'YYYY-MM-DD' a partir de cualquiera de los formatos observados
+    en el web service (incluye el separador con espacio en vez de 'T', que
+    ningun extractor aceptaba antes). None/'' -> None. No interpretable, o
+    fuera del rango 1900-2100, levanta ParseError.
+    """
+    if not valor:
+        return None
+    s = str(valor).strip()
+    if s == "":
+        return None
+    candidato = s[:19]
+    for fmt in FORMATOS_FECHA:
+        try:
+            d = dt.datetime.strptime(candidato, fmt)
+        except ValueError:
+            continue
+        if d.year < 1900 or d.year > 2100:
+            raise ParseError(f"fecha fuera de rango: {valor!r}")
+        return d.strftime("%Y-%m-%d")
+    raise ParseError(f"fecha no interpretable: {valor!r}")
+
+
+def normalize_sku(valor):
+    """Normaliza codigos de articulo: quita caracteres de control, colapsa
+    espacios (extremos e internos), pasa a mayusculas, trunca a 128 chars.
+    None, o vacio tras normalizar, -> None.
+    """
+    if valor is None:
+        return None
+    s = str(valor)
+    s = "".join(ch for ch in s if ord(ch) >= 32)
+    s = " ".join(s.split())
+    s = s.strip().upper()
+    if s == "":
+        return None
+    return s[:128]

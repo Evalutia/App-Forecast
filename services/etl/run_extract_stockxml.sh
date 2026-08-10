@@ -122,8 +122,11 @@ XML
     return 11
   fi
 
-  JSON="$(printf "%s" "$JSON" | sed -e 's/&quot;/"/g' -e 's/&amp;/\&/g' -e 's/&lt;/</g' -e 's/&gt;/>/g')"
-
+  # Issue #125: mismo bug que tenia run_extract_sales_chunk.sh -- este sed
+  # (orden quot/amp/lt/gt) desescapaba de mas (&amp;lt; -> &lt; -> < en vez
+  # de quedarse en &lt;). El desescape se centraliza en Python
+  # (run_extract_stockxml.py, via html.unescape); aca se escribe el
+  # contenido tal cual vino del WS.
   printf '%s' "$JSON" > "$TMP_JSON"
   export TMP_JSON_PATH="$TMP_JSON"
   export __FORCED_DEPOSITO="${dep}"

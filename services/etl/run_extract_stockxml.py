@@ -1,55 +1,16 @@
 #!/usr/bin/env python3
 import os
 import json
+import html
 import datetime as dt
-from decimal import Decimal, InvalidOperation
 import xml.etree.ElementTree as ET
 import pymysql
+
+import parsers
 
 def trunc(s, maxlen):
     s = "" if s is None else str(s)
     return s[:maxlen]
-
-def parse_stock_value(s):
-    """
-    Normaliza valores como '25.000', '3.800.000', '25,000' etc.
-    - Si hay >1 punto, asumimos separadores de miles y los removemos.
-    - Reemplazamos coma por punto para soportar decimales con coma.
-    Devuelve int (no-negativo).
-    """
-    if s is None:
-        return 0
-    s = str(s).strip()
-    if s == "":
-        return 0
-    s = s.replace(",", ".")
-    if s.count(".") > 1:
-        s = s.replace(".", "")
-    try:
-        d = Decimal(s)
-    except (InvalidOperation, ValueError):
-        digits = "".join(ch for ch in s if ch.isdigit())
-        try:
-            d = Decimal(digits or "0")
-        except Exception:
-            d = Decimal(0)
-    try:
-        n = int(d.to_integral_value(rounding="ROUND_HALF_UP"))
-    except Exception:
-        n = int(d)
-    return max(0, n)
-
-def parse_date_any(s):
-    if not s:
-        return None
-    s = str(s).strip()
-    for fmt in ("%Y-%m-%dT%H:%M:%S", "%Y-%m-%d", "%d/%m/%Y", "%d-%m-%Y"):
-        try:
-            d = dt.datetime.strptime(s[:19], fmt)
-            return d.date().strftime("%Y-%m-%d")
-        except Exception:
-            continue
-    return None
 
 json_path = os.environ.get("TMP_JSON_PATH")
 if not json_path or not os.path.exists(json_path):
@@ -59,8 +20,11 @@ if not json_path or not os.path.exists(json_path):
 with open(json_path, "r", encoding="utf-8") as f:
     content = f.read().strip()
 
-# Desescape mínimo si quedan entities HTML
-content = content.replace("&lt;", "<").replace("&gt;", ">").replace("&amp;", "&").replace("&quot;", '"')
+# Issue #125: el desescape de entities HTML se centraliza aca (via
+# html.unescape de la stdlib, igual que run_extract_articulos.py) en vez de
+# hacerse en el .sh con sed -- el orden manual de reemplazos en bash
+# desescapaba de mas (&amp;lt; -> &lt; -> < en vez de quedarse en &lt;).
+content = html.unescape(content)
 
 rows = []
 forced_dep = os.environ.get("__FORCED_DEPOSITO")
@@ -110,7 +74,12 @@ else:
 
 # Fecha de carga: preferir CHUNK_END (o CHUNK_START), sino hoy
 chunk_end = os.environ.get("CHUNK_END") or os.environ.get("CHUNK_START") or None
-fecha = parse_date_any(chunk_end) or dt.date.today().strftime("%Y-%m-%d")
+try:
+    fecha = parsers.parse_fecha(chunk_end)
+except parsers.ParseError as e:
+    print(f"[WARN] CHUNK_END/CHUNK_START no interpretable ({e}); uso fecha de hoy")
+    fecha = None
+fecha = fecha or dt.date.today().strftime("%Y-%m-%d")
 
 # DB connect
 conn = pymysql.connect(
@@ -217,7 +186,7 @@ with conn.cursor() as cur:
             rows_skip += 1
             continue
 
-        sku = trunc(sku, 128).strip()
+        sku = parsers.normalize_sku(sku)
         if not sku:
             rows_skip += 1
             continue
@@ -226,7 +195,12 @@ with conn.cursor() as cur:
             rows_skip += 1
             continue
 
-        cantidad_val = parse_stock_value(stock)
+        try:
+            cantidad_val = parsers.parse_entero(stock)
+        except parsers.ParseError as e:
+            print(f"[WARN] fila descartada, stock no interpretable sku={sku}: {e}")
+            rows_skip += 1
+            continue
         deposito_val = trunc(deposito, 64) if deposito else None
         fuente = "ConsStockXml"
 
