@@ -2691,8 +2691,25 @@ Hallazgo de severidad ALTA de la verificación profunda del 2026-08-04. Diagnost
 - `run_backfill_ventas.sh` compartía `run_extract_sales_chunk.py` y el mismo patrón de merge que `run_extract_sales_chunk.sh`, pero su `call_chunk()` nunca había recibido el chequeo de `<MensError>` -- mismo agujero del "caso hermano" de la AC de #124, sin cerrar en el segundo punto de entrada. Agregado el mismo chequeo, mismo código de retorno (13).
 - El chequeo de `MensError` en `run_extract_sales_chunk.sh` usaba `echo "$MENS_ERROR" | tr -d ...`, vulnerable a que un mensaje de error del WS que empezara con un flag de `echo` (ej. `-n`) se tragara en silencio -- reemplazado por `printf '%s'`. Sin este fix, un `MensError` adversarial hubiera reproducido el bug original que #124 cerró.
 
-**Hallazgos del mismo review, dejados sin tocar a propósito (fuera de scope de #124, riesgo de introducir un bug nuevo si se apuran):**
-- `run_backfill_ventas.sh`: `merge_y_truncar_stage()` corre sin condición al final de cada grupo, incluso con `FAILED_CHUNKS` no vacío -- mismo patrón de Capa 2 (merge sobre datos parciales), pero en el backfill. Arreglarlo bien requiere pensar la interacción con el truncate/retry (saltear el merge sin truncar el stage duplicaría filas en el próximo reintento) -- no es un cambio de una línea.
+**Retomado: `run_backfill_ventas.sh` -- `merge_y_truncar_stage()` sin condición ante `FAILED_CHUNKS` (sesión 2026-08-10)**
+
+El hallazgo de arriba se resolvió, en dos vueltas (la primera con un bug propio, corregido en la segunda tras un review multi-agente):
+
+1ra vuelta: se separó merge y truncate en dos llamadas independientes para poder saltear el merge cuando el grupo tuvo chunks fallidos -- sin eso, Capa 2 del daily se repetía acá (SUM/GROUP BY sobre datos parciales, sin distinguir "esto es todo" de "esto es lo que llegó a tiempo").
+
+2da vuelta, corrigiendo la 1ra: separarlas en dos conexiones/transacciones independientes rompía la atomicidad que el `merge_y_truncar_stage` original sí tenía -- un crash entre el commit del INSERT y el commit del DELETE (o un truncate que falla después) dejaba el merge ya escrito pero el stage sin vaciar, y el próximo reintento completo del grupo insertaría datos frescos ENCIMA de esas filas viejas (`ventas_historicas_stage` no tiene columna de grupo), duplicando cantidades en `ventas_historicas`. Por eso el camino de éxito volvió a ser una sola transacción atómica (mismo `merge_y_truncar_stage` original); `truncar_stage()` (DELETE solo, atómico por sí mismo) se usa nada más en el camino donde YA se decidió no mergear.
+
+**Diseño final de manejo de fallos** (validado con un review multi-agente de varios ángulos -- correctness, removed-behavior, cross-file, convenciones, altitude/depth-of-fix):
+- Un fallo de `merge_y_truncar_stage` o de `truncar_stage` se suma a `FAILED_CHUNKS` (mismo mecanismo que ya usan los chunks fallidos del WS) en vez de un `exit` directo -- así el grupo se marca `fallido` en `jobs_historial` (nunca queda colgado en `ejecutando`) y el backfill sigue con los demás ~64 grupos en vez de frenarse por un problema transitorio de uno solo.
+- Excepción deliberada: si el `truncar_stage` best-effort TAMBIÉN falla (no se puede garantizar que el stage quede limpio para el próximo grupo, que no tiene columna propia para filtrar), ahí sí se aborta todo el backfill (`truncar_stage_or_die`) -- mejor una fila colgada en "ejecutando" que un merge corrupto en el próximo grupo. El mensaje de error le dice al operador exactamente qué revisar (conexión + `SELECT COUNT(*) FROM ventas_historicas_stage`) antes de reintentar, no solo "revisar la conexión".
+- `conn.close()` en el `finally` de ambas funciones Python está envuelto en `try/except` -- si el `commit()` ya tuvo éxito, un `close()` que falla después no debe reportarse como si el merge hubiera fallado.
+- El guard duplicado (`if ! truncar_stage; then ...; exit 1; fi`, dos veces) se colapsó en un helper único `truncar_stage_or_die()`.
+
+**Verificado en Docker real** (mismo patrón de repro que el resto de #124): grupo con depósito parcial (1 OK, 5 falla) dos veces seguidas -- `ventas_historicas` queda intacto, stage queda vacío, el job se marca `fallido` con `fecha_fin` (no colgado); dos grupos en la misma corrida, ambos con fallo parcial, confirmado que el segundo grupo se procesa igual (no hay abort prematuro); grupo con éxito completo, confirmado el merge atómico normal.
+
+**Nota de proceso:** este review generó una tormenta de mensajes cruzados entre sub-agentes de una corrida anterior de `/code-review` que se cortó a mitad de camino por el límite de gasto mensual -- varios agentes reintentando entregar el mismo reporte a una dirección no resoluble ("general-purpose"). El contenido de fondo (real, verificado con las pruebas de arriba) se rescató a pesar del ruido; no se generaron acciones nuevas a partir del ruido de enrutamiento en sí.
+
+**Hallazgo restante, dejado sin tocar a propósito:**
 - `PlanillaTable.tsx`: el chequeo `user?.role === 'administrador'` está repetido en ≥5 lugares del frontend sin un hook compartido (`useIsAdmin()`), y `frecuenciaEntries()` duplica ~70 líneas de estructura entre la rama admin/no-admin. Duplicación pre-existente en el patrón del repo, no introducida por este fix específicamente más que por extensión del mismo patrón.
 
 **#124 cerrado.**

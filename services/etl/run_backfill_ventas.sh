@@ -179,6 +179,11 @@ process_chunk_depositos() {
   fi
 }
 
+# Issue #124 (hardening post-review): merge_y_truncar_stage() es atómico a
+# propósito (una sola transacción, igual que el original) -- ver ".claude/
+# CONTEXTO.md" (sección #124) para el porqué. truncar_stage() (DELETE solo)
+# se usa nada más en el camino donde YA se decidió no mergear, para dejar el
+# stage limpio antes del próximo grupo (que no tiene columna de grupo propia).
 merge_y_truncar_stage() {
   python3 - <<PY
 import os, pymysql
@@ -203,8 +208,47 @@ try:
         cur.execute("DELETE FROM ventas_historicas_stage")
     conn.commit()
 finally:
-    conn.close()
+    # Un close() que falla DESPUES de un commit exitoso no debe reportarse
+    # como si el merge hubiera fallado (el dato ya quedó escrito en MySQL).
+    try:
+        conn.close()
+    except Exception:
+        pass
 PY
+}
+
+truncar_stage() {
+  python3 - <<PY
+import os, pymysql
+conn = pymysql.connect(
+    host=os.environ["MYSQL_HOST"], port=int(os.environ.get("MYSQL_PORT","3306")),
+    user=os.environ["MYSQL_USER"], password=os.environ["MYSQL_PASSWORD"],
+    database=os.environ["MYSQL_DB"], autocommit=False, charset="utf8mb4",
+)
+try:
+    with conn.cursor() as cur:
+        cur.execute("DELETE FROM ventas_historicas_stage")
+    conn.commit()
+finally:
+    try:
+        conn.close()
+    except Exception:
+        pass
+PY
+}
+
+# Si truncar_stage() falla (nada garantiza ya que el stage esté limpio para
+# el próximo grupo -- no tiene columna de grupo propia, así que sus filas
+# se sumarían sin distinguir de dónde vinieron), aborta todo el backfill en
+# vez de seguir. Un grupo colgado en "ejecutando" es preferible a un merge
+# corrupto en el próximo grupo -- pero por eso el mensaje le dice al
+# operador exactamente qué revisar antes de reintentar, no solo "la conexión".
+truncar_stage_or_die() {
+  local grupo="$1"
+  if ! truncar_stage; then
+    echo "[ERROR CRÍTICO] Grupo ${grupo}: truncar_stage falló -- no se puede garantizar que ventas_historicas_stage quede limpio para el próximo grupo. Antes de volver a correr el backfill: 1) confirmar que MySQL está accesible, 2) inspeccionar 'SELECT COUNT(*) FROM ventas_historicas_stage' y vaciarla a mano si tiene filas de este grupo."
+    exit 1
+  fi
 }
 
 # ── Loop principal ────────────────────────────────────────────────────────────
@@ -244,7 +288,28 @@ for G in ${GROUPS_LIST}; do
     cur_start_iso="$(date -d "${cur_end_iso} +1 day" +%F)"
   done
 
-  merge_y_truncar_stage
+  # Un fallo de merge/truncate se suma a FAILED_CHUNKS -- mismo mecanismo que
+  # ya usan los chunks fallidos del WS -- en vez de un exit propio. exit
+  # frenaría los 65 grupos por un problema transitorio de UNO solo (el resto
+  # ni se intenta), y dejaría la fila de jobs_historial de este grupo colgada
+  # en "ejecutando" para siempre (el "end" de abajo nunca se alcanzaría).
+  # Sumarlo a FAILED_CHUNKS reusa el "end ... fallido" que ya existe: este
+  # grupo se reintenta completo la próxima corrida, los demás siguen.
+  if [[ ${#FAILED_CHUNKS[@]} -eq 0 ]]; then
+    if ! merge_y_truncar_stage; then
+      # Atómico: si esto falló, ni el INSERT ni el DELETE se aplicaron (misma
+      # transacción) -- las filas de stage siguen intactas. Igual se trunca
+      # después (best-effort) para no contaminar el próximo grupo -- perder
+      # la copia local extraída es recuperable re-corriendo el backfill; que
+      # el próximo grupo se contamine con estas filas no lo es tan fácil.
+      echo "[ERROR] Grupo ${G}: merge_y_truncar_stage falló (ver traceback arriba)."
+      FAILED_CHUNKS+=("grupo=${G} merge_y_truncar_stage_error")
+      truncar_stage_or_die "${G}"
+    fi
+  else
+    echo "[WARN] Grupo ${G} tuvo ${#FAILED_CHUNKS[@]} chunk(s) fallido(s) -- NO se mergea a ventas_historicas esta corrida (datos parciales pisarían datos completos; se reintenta el grupo completo la próxima vez)."
+    truncar_stage_or_die "${G}"
+  fi
 
   DURACION=$(( $(date +%s) - T0 ))
   if [[ ${#FAILED_CHUNKS[@]} -eq 0 ]]; then
