@@ -60,15 +60,15 @@ function calcRotDesEstac(meses: PlanillaMesDto[]): string {
 }
 
 function calcDdstk(meses: PlanillaMesDto[]): string {
-  const totalVentas = meses.reduce((s, m) => s + Number(m.ventasCantidad), 0);
-  const totalDias   = meses.reduce((s, m) => s + m.diasConStock, 0);
+  const totalVentas = meses.reduce((s, m) => s + (m.ventasCantidad ?? 0), 0);
+  const totalDias   = meses.reduce((s, m) => s + (m.diasConStock ?? 0), 0);
   if (totalDias === 0) return '—';
   return (totalVentas / totalDias).toFixed(4);
 }
 
 // VTA: suma de ventasCantidad de los 12 meses cerrados (excluye el mes de referencia)
 function calcVta(meses: PlanillaMesDto[]): number {
-  return meses.slice(0, -1).reduce((s, m) => s + Number(m.ventasCantidad), 0);
+  return meses.slice(0, -1).reduce((s, m) => s + (m.ventasCantidad ?? 0), 0);
 }
 
 function fiabilidadClass(pct: number): string {
@@ -537,10 +537,16 @@ export default function PlanillaTable({ params, onPageChange, sugerencias, suger
                           backgroundColor: estadoMesBg(mes.estadoMes, mes.frecuenciaNivel),
                           borderLeft: criterioFrecuenciaBorder(mes.criterioFrecuencia),
                         }}
-                        title={`Vta.${mesLabel(mes.year, mes.month)} · ${mes.ventasCantidad} uds. · Criterio: ${criterioFrecuenciaLabel(mes.criterioFrecuencia, mes.estadoMes)}`}
+                        title={
+                          mes.estadoMes === 'sin_datos'
+                            ? `Vta.${mesLabel(mes.year, mes.month)} · Sin datos (mes sin fila calculada)`
+                            : `Vta.${mesLabel(mes.year, mes.month)} · ${mes.ventasCantidad ?? 0} uds. · Criterio: ${criterioFrecuenciaLabel(mes.criterioFrecuencia, mes.estadoMes)}`
+                        }
                       >
                         <span style={idx === lastMesIdx ? { opacity: 0.6, fontStyle: 'italic' } : undefined}>
-                          {Number(mes.ventasCantidad).toLocaleString('es-UY')}
+                          {mes.estadoMes === 'sin_datos'
+                            ? <span className="muted">—</span>
+                            : (mes.ventasCantidad ?? 0).toLocaleString('es-UY')}
                         </span>
                       </td>
                     ))}
@@ -550,10 +556,16 @@ export default function PlanillaTable({ params, onPageChange, sugerencias, suger
                         key={`rot-${mes.year}-${mes.month}`}
                         className="planilla-col-mes"
                         style={{ backgroundColor: estadoMesBg(mes.estadoMes, mes.frecuenciaNivel) }}
-                        title={`${mesLabel(mes.year, mes.month)} · ${mes.diasConStock}/${mes.diasNaturalesMes} días con stock · ${mes.ventasCantidad} uds.`}
+                        title={
+                          mes.estadoMes === 'sin_datos'
+                            ? `${mesLabel(mes.year, mes.month)} · Sin datos (mes sin fila calculada)`
+                            : `${mesLabel(mes.year, mes.month)} · ${mes.diasConStock ?? 0}/${mes.diasNaturalesMes} días con stock · ${mes.ventasCantidad ?? 0} uds.`
+                        }
                       >
                         <span style={idx === lastMesIdx ? { opacity: 0.6, fontStyle: 'italic' } : undefined}>
-                          {mes.rotacionDiariaReal != null ? mes.rotacionDiariaReal.toFixed(4) : '0.0000'}
+                          {mes.estadoMes === 'sin_datos'
+                            ? <span className="muted">—</span>
+                            : mes.rotacionDiariaReal != null ? mes.rotacionDiariaReal.toFixed(4) : '0.0000'}
                         </span>
                       </td>
                     ))}

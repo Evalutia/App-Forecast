@@ -161,6 +161,17 @@ VALUES (
 -- MERGE corregido: suma cantidad por SKU+fecha a traves de todos los depositos
 -- (ventas_historicas no tiene deposito_id en su clave unica; sin el SUM/GROUP BY,
 -- cada deposito pisaba el valor del anterior en vez de acumularse - issue #39 ampliado).
+--
+-- Issue #113: el INNER JOIN con articulos NO es decorativo. ventas_historicas
+-- tiene la FK fk_ventas_articulo (sku -> articulos.sku) y esto es un unico
+-- statement: una sola fila con un SKU que todavia no esta en el catalogo
+-- aborta el INSERT ENTERO. Paso de verdad -- el 02/08/2026 habia 39 SKUs
+-- nuevos (456 filas) sin articulo, y tumbaron las 51.024 filas del dia; como
+-- todos los hops del job son unconditional=Y, el job seguia como si nada y
+-- ventas_historicas quedo congelada 10 dias sin que nadie se enterara (#111).
+-- Con el JOIN entran las filas buenas y se saltean las huerfanas, misma
+-- tolerancia que ya tenia run_calc_planilla.py (que ademas cuenta
+-- skus_omitidos en jobs_historial).
 INSERT INTO ventas_historicas
   (fecha, sku, cantidad, ts_carga, fuente)
 SELECT
@@ -170,6 +181,7 @@ SELECT
   NOW(6) AS ts_carga,
   COALESCE(MIN(s.fuente),'ws_consstockventa') AS fuente
 FROM ventas_historicas_stage s
+INNER JOIN articulos a ON a.sku = TRIM(s.sku)
 WHERE s.sku IS NOT NULL
 GROUP BY DATE(s.fecha), TRIM(s.sku)
 ON DUPLICATE KEY UPDATE
@@ -185,6 +197,41 @@ ON DUPLICATE KEY UPDATE
       <type>SQL</type>
       <connection>MYSQL_EVALUTIA</connection>
       <sql><![CDATA[
+-- Issue #112: ventana de 3 meses (mes en curso + 2 anteriores). Sin ella
+-- esta query recalculaba el historico COMPLETO todas las noches: un UNION
+-- sobre ~127M filas (stock_diario 107.8M + ventas_historicas 19.2M despues
+-- del backfill de 10 anios de #104) para producir ~152k filas. Medido en
+-- produccion el 02/08/2026: mas de 60 min en un solo INSERT, dejando la
+-- planilla del cliente congelada (#111).
+--
+-- Los meses viejos no cambian con la operacion diaria (el cron extrae solo
+-- "ayer"), asi que refrescarlos cada noche era trabajo puro perdido. Las
+-- filas fuera de la ventana quedan intactas: esto acota QUE se recalcula,
+-- no borra nada. Si un backfill historico reescribe meses viejos y hace
+-- falta reflejarlos aca, hay que correr esta misma query UNA vez sin el
+-- filtro de fecha (manual, fuera del cron); tambien existe el endpoint de
+-- recalculo por SKU del backend (AdminService.RecalcForSku).
+--
+-- Por que 3 y no 13 meses (medido, no estimado -- DB local, 25.2M filas en
+-- stock_diario, variante SELECT COUNT(*) de esta misma query):
+--     sin ventana ............................. 353 s
+--     ventana 13 meses (46% de las filas) ..... 453 s  <-- PEOR que sin ventana
+--     ventana  3 meses (5.8% de las filas) .....  34 s  <-- 10x mejor
+-- Con poca selectividad el rango por indice pierde contra el scan secuencial,
+-- asi que una ventana "generosa" era contraproducente. 3 meses cubre de
+-- sobra lo unico que la operacion diaria puede cambiar (ayer), con margen.
+--
+-- El corte se alinea al primer dia del mes a proposito: con un corte a
+-- mitad de mes (ej. DATE_SUB(CURDATE(), INTERVAL 13 MONTH)) el mes del
+-- borde se recalcularia con dias incompletos y dias_con_stock quedaria
+-- subcontado para ese mes.
+--
+-- La expresion va repetida en las 4 subqueries en vez de una variable de
+-- sesion a proposito: el step SQL de Pentaho parte el script por ';' y no
+-- esta garantizado que los statements compartan conexion. Si la variable
+-- llegara NULL, `fecha >= NULL` no matchea nada y el INSERT seria un no-op
+-- SILENCIOSO. Dentro de un mismo statement CURDATE() se evalua una sola vez,
+-- asi que las 4 copias son siempre consistentes entre si.
 INSERT INTO ventas_mensuales
   (sku, year, month, ventas_cantidad, dias_con_stock, fuente, ts_carga)
 SELECT
@@ -196,13 +243,16 @@ SELECT
 FROM (
   SELECT sku, YEAR(fecha) AS year, MONTH(fecha) AS month
   FROM ventas_historicas
+  WHERE fecha >= DATE_SUB(DATE_FORMAT(CURDATE(), '%Y-%m-01'), INTERVAL 2 MONTH)
   UNION
   SELECT sku, YEAR(fecha) AS year, MONTH(fecha) AS month
   FROM stock_diario
+  WHERE fecha >= DATE_SUB(DATE_FORMAT(CURDATE(), '%Y-%m-01'), INTERVAL 2 MONTH)
 ) u
 LEFT JOIN (
   SELECT sku, YEAR(fecha) AS year, MONTH(fecha) AS month, SUM(cantidad) AS ventas_cantidad
   FROM ventas_historicas
+  WHERE fecha >= DATE_SUB(DATE_FORMAT(CURDATE(), '%Y-%m-01'), INTERVAL 2 MONTH)
   GROUP BY sku, YEAR(fecha), MONTH(fecha)
 ) v ON v.sku = u.sku AND v.year = u.year AND v.month = u.month
 LEFT JOIN (
@@ -216,6 +266,7 @@ LEFT JOIN (
   FROM (
     SELECT sd.sku, sd.fecha, SUM(sd.cantidad) AS stock_total
     FROM stock_diario sd
+    WHERE sd.fecha >= DATE_SUB(DATE_FORMAT(CURDATE(), '%Y-%m-01'), INTERVAL 2 MONTH)
     GROUP BY sd.sku, sd.fecha
   ) agg
   JOIN articulos a ON a.sku = agg.sku
@@ -315,16 +366,25 @@ DELETE FROM ventas_historicas_stage;
          la extracción hubiera fallado. Ahora solo sigue a MERGE si RUN EXTRACT
          VENTAS salió con éxito (exit 0); si falló, va a MARK VENTAS EXTRACT
          FAILED, que no toca ventas_historicas y deja el fallo registrado en
-         jobs_historial. -->
+         jobs_historial. Las dos ramas reconvergen en RUN PREDICT.PY, no en
+         CALC_UPSERT_VENTAS_MENSUALES (ver el comentario de #112 mas abajo,
+         que movio ese paso al final de la cadena). -->
     <hop><from>RUN EXTRACT VENTAS</from><to>MERGE STAGING -> VENTAS (con snapshot)</to><enabled>Y</enabled><evaluation>Y</evaluation><unconditional>N</unconditional></hop>
     <hop><from>RUN EXTRACT VENTAS</from><to>MARK VENTAS EXTRACT FAILED</to><enabled>Y</enabled><evaluation>N</evaluation><unconditional>N</unconditional></hop>
-    <hop><from>MERGE STAGING -> VENTAS (con snapshot)</from><to>CALC_UPSERT_VENTAS_MENSUALES</to><enabled>Y</enabled><unconditional>Y</unconditional></hop>
-    <hop><from>MARK VENTAS EXTRACT FAILED</from><to>CALC_UPSERT_VENTAS_MENSUALES</to><enabled>Y</enabled><unconditional>Y</unconditional></hop>
-    <hop><from>CALC_UPSERT_VENTAS_MENSUALES</from><to>RUN PREDICT.PY</to><enabled>Y</enabled><unconditional>Y</unconditional></hop>
+    <!-- Issue #112: CALC_UPSERT_VENTAS_MENSUALES se movio del medio de la cadena
+         al final (despues de CALC_STOCK_RESUMEN). Estaba justo delante de todo lo
+         que ve el cliente y tardaba mas de 60 min, asi que calc_planilla y
+         calc_sugerencias no llegaban a correr y la planilla quedaba congelada
+         (#111). Ningun paso posterior lo necesita: ni predict.py ni los tres
+         run_calc_*.py leen ventas_mensuales (verificado). Corriendo ultimo, si
+         tarda o falla, los datos del cliente ya se actualizaron. -->
+    <hop><from>MERGE STAGING -> VENTAS (con snapshot)</from><to>RUN PREDICT.PY</to><enabled>Y</enabled><unconditional>Y</unconditional></hop>
+    <hop><from>MARK VENTAS EXTRACT FAILED</from><to>RUN PREDICT.PY</to><enabled>Y</enabled><unconditional>Y</unconditional></hop>
     <hop><from>RUN PREDICT.PY</from><to>RUN CALC_PLANILLA</to><enabled>Y</enabled><unconditional>Y</unconditional></hop>
     <hop><from>RUN CALC_PLANILLA</from><to>RUN CALC_SUGERENCIAS</to><enabled>Y</enabled><unconditional>Y</unconditional></hop>
     <hop><from>RUN CALC_SUGERENCIAS</from><to>RUN CALC_STOCK_RESUMEN</to><enabled>Y</enabled><unconditional>Y</unconditional></hop>
-    <hop><from>RUN CALC_STOCK_RESUMEN</from><to>TRUNCATE VENTAS_STAGE END</to><enabled>Y</enabled><unconditional>Y</unconditional></hop>
+    <hop><from>RUN CALC_STOCK_RESUMEN</from><to>CALC_UPSERT_VENTAS_MENSUALES</to><enabled>Y</enabled><unconditional>Y</unconditional></hop>
+    <hop><from>CALC_UPSERT_VENTAS_MENSUALES</from><to>TRUNCATE VENTAS_STAGE END</to><enabled>Y</enabled><unconditional>Y</unconditional></hop>
     <hop><from>TRUNCATE VENTAS_STAGE END</from><to>SUCCESS</to><enabled>Y</enabled><unconditional>Y</unconditional></hop>
   </hops>
 

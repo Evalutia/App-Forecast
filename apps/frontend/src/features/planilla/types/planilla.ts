@@ -1,16 +1,17 @@
 export interface PlanillaMesDto {
   year: number;
   month: number;
-  ventasCantidad: number;
-  diasConStock: number;
+  // Nullables desde #106: null = mes 'sin_datos' (sin fila calculada), no un 0 real.
+  ventasCantidad: number | null;
+  diasConStock: number | null;
   diasNaturalesMes: number;
   rotacionDiariaReal: number | null;
   rotacionDiariaBruta: number | null;
   rotacionDiariaDesestacionalizada: number | null;
-  estadoMes: 'normal' | 'quiebre_parcial' | 'sin_stock';
+  estadoMes: 'normal' | 'quiebre_parcial' | 'sin_stock' | 'sin_datos';
   frecuenciaNivel: 'alta' | 'media' | 'baja' | null;
   rotacionAjustada: number | null;
-  ticketsMes: number;
+  ticketsMes: number | null;
   valorHistorico: number | null;
   valorAjustado: number | null;
   criterioFrecuencia: 'historico' | 'promedio' | 'real_extrapolado' | null;

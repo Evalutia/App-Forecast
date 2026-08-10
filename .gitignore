@@ -57,3 +57,6 @@ scripts/.sync_tmp_dump.sql.gz
 ## Override local de docker-compose — ajustes especificos de esta maquina
 ## (ej. mounts que no aplican fuera de la VM de produccion), no se commitea.
 docker-compose.override.yml
+
+## Overrides personales de Claude Code (hooks/permisos propios, no del equipo)
+.claude/settings.local.json

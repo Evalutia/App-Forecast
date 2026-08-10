@@ -135,6 +135,28 @@ namespace DataAccess.Repositories.PlanillaDataAccess
       return (result, totalSkus);
     }
 
+    public ((int Year, int Month) Min, (int Year, int Month) Max)? GetVentanaMeses()
+    {
+      // year*12+month como índice lineal comparable (mismo truco que el filtro de
+      // criterioFrecuencia de arriba); se decompone con (idx-1)/12 y (idx-1)%12+1.
+      var rango = _db.PlanillasVentasCalculadas
+          .GroupBy(_ => 1)
+          .Select(g => new
+          {
+            MinIdx = g.Min(p => p.Year * 12 + p.Month),
+            MaxIdx = g.Max(p => p.Year * 12 + p.Month)
+          })
+          .FirstOrDefault();
+
+      if (rango == null)
+        return null;
+
+      return (
+          Min: ((rango.MinIdx - 1) / 12, (rango.MinIdx - 1) % 12 + 1),
+          Max: ((rango.MaxIdx - 1) / 12, (rango.MaxIdx - 1) % 12 + 1)
+      );
+    }
+
     public (List<(uint Id, string Nombre)> Marcas, List<(uint Id, string Nombre)> Generos, List<(uint Id, string Nombre)> Grupos, int SinMarca, int SinGenero) GetFiltros(uint? grupoId)
     {
       var skusEnPlanilla = _db.PlanillasVentasCalculadas.Select(p => p.Sku).Distinct();

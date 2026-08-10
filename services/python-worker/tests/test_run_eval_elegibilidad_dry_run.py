@@ -16,6 +16,8 @@ from datetime import datetime
 from ml.run_eval_elegibilidad_dry_run import (
     generate_version,
     build_env,
+    build_env_for_batch,
+    chunk_skus,
     build_detalle_exitoso,
     build_detalle_fallido,
     TIPO_JOB,
@@ -67,6 +69,33 @@ def test_build_env_sin_eval_only_skus_no_falla():
     env = build_env({}, version="v-test")
     assert "EVAL_ONLY_SKUS" not in env
     assert env["EVAL_VERSION"] == "v-test"
+
+
+# -------------------------------------------------------------------------
+# chunk_skus / build_env_for_batch -- modo por lotes (#105), evita cargar
+# ventas_historicas entera en memoria de una en una VM chica
+# -------------------------------------------------------------------------
+
+def test_chunk_skus_parte_en_lotes_del_tamanio_pedido():
+    lotes = chunk_skus(["A", "B", "C", "D", "E"], batch_size=2)
+    assert lotes == [["A", "B"], ["C", "D"], ["E"]]
+
+
+def test_chunk_skus_batch_size_cero_devuelve_un_solo_lote():
+    lotes = chunk_skus(["A", "B", "C"], batch_size=0)
+    assert lotes == [["A", "B", "C"]]
+
+
+def test_chunk_skus_lista_vacia_devuelve_lista_vacia():
+    assert chunk_skus([], batch_size=100) == []
+
+
+def test_build_env_for_batch_fija_only_skus_al_lote():
+    env = build_env_for_batch({"PATH": "/usr/bin"}, version="v-test", skus_batch=["A", "B"])
+    assert env["EVAL_ONLY_SKUS"] == "A,B"
+    assert env["EVAL_VERSION"] == "v-test"
+    assert env["EVAL_PERSIST_CATALOG"] == "1"
+    assert env["PATH"] == "/usr/bin"
 
 
 # -------------------------------------------------------------------------

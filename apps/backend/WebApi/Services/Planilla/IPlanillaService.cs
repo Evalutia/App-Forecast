@@ -53,8 +53,10 @@ namespace Services.Planilla
   {
     public int Year { get; init; }
     public int Month { get; init; }
-    public long VentasCantidad { get; init; }
-    public int DiasConStock { get; init; }
+    // Nullables desde #106: null = mes "sin_datos" (sin fila calculada en
+    // planilla_ventas_calculada), distinto de un 0 real.
+    public long? VentasCantidad { get; init; }
+    public int? DiasConStock { get; init; }
     public int DiasNaturalesMes { get; init; }
     public decimal? RotacionDiariaReal { get; init; }
     public decimal? RotacionDiariaBruta { get; init; }
@@ -62,7 +64,7 @@ namespace Services.Planilla
     public string EstadoMes { get; init; } = string.Empty;
     public string? FrecuenciaNivel { get; init; }
     public decimal? RotacionAjustada { get; init; }
-    public byte TicketsMes { get; init; }
+    public byte? TicketsMes { get; init; }
     public decimal? ValorHistorico { get; init; }
     public decimal? ValorAjustado { get; init; }
     public string? CriterioFrecuencia { get; init; }

@@ -2,6 +2,7 @@ from __future__ import annotations
 from typing import Dict, Iterable, Optional
 
 import pandas as pd
+from sqlalchemy import text
 
 def _prepare_series(df: pd.DataFrame, freq: str) -> pd.Series:
     """
@@ -96,16 +97,34 @@ def load_series_by_sku_mysql(
     """
     tbl = f"{schema}.{table}" if schema else table
 
+    # Filtra por SKU en el propio SQL cuando se pasan only_skus, en vez de
+    # traer la tabla completa y filtrar despues en pandas -- con el backfill
+    # de 10 anios de #104, ventas_historicas paso a tener decenas de millones
+    # de filas, y el filtro post-carga hacia que hasta una corrida de un
+    # puñado de SKUs (EVAL_ONLY_SKUS) cargara la tabla entera en memoria
+    # igual. Confirmado en produccion: esto colgo la VM (t3.medium, 3.7GB)
+    # corriendo el dry-run de #105 sobre el catalogo completo.
+    only: set[str] = set()
+    params: dict = {}
+    where_clause = ""
+    if only_skus:
+        only = {s.strip() for s in only_skus if s and s.strip()}
+        if only:
+            placeholders = ", ".join(f":sku{i}" for i in range(len(only)))
+            where_clause = f"WHERE sku IN ({placeholders})"
+            params = {f"sku{i}": s for i, s in enumerate(sorted(only))}
+
     q = f"""
         SELECT
             fecha,
             sku,
             SUM(cantidad) AS cantidad
         FROM {tbl}
+        {where_clause}
         GROUP BY fecha, sku
         ORDER BY sku, fecha
     """
-    df = pd.read_sql_query(q, con=engine, parse_dates=["fecha"])
+    df = pd.read_sql_query(text(q), con=engine, params=params, parse_dates=["fecha"])
 
     df = df.rename(columns={"Fecha": "fecha", "SKU": "sku", "Cantidad": "cantidad"})
 
@@ -114,12 +133,12 @@ def load_series_by_sku_mysql(
     df["cantidad"] = pd.to_numeric(df["cantidad"], errors="coerce").fillna(0).astype(float)
     df = df.sort_values(["sku", "fecha"])
 
-    # Si se pasaron skus explícitos, los usamos
-    if only_skus:
-        only = set(s.strip() for s in only_skus if s and s.strip())
-        df = df[df["sku"].isin(only)].copy()
-    # Si no, y se pidió top_n, calculamos top_n por suma histórica
-    elif top_n and isinstance(top_n, int) and top_n > 0:
+    # only_skus ya se aplico en el SQL -- si no vino nada (ej. only_skus
+    # vacio tras el strip), cae al mismo comportamiento de antes (catalogo
+    # completo). top_n si sigue calculandose en pandas: requiere agregar
+    # sobre toda la tabla para saber cuales son los top N, no hay forma de
+    # empujarlo al SQL sin duplicar la logica de suma historica.
+    if not only_skus and top_n and isinstance(top_n, int) and top_n > 0:
         sku_sums = df.groupby("sku", sort=False)["cantidad"].sum().nlargest(top_n).index
         df = df[df["sku"].isin(sku_sums)].copy()
 

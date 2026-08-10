@@ -2091,6 +2091,260 @@ Selección real de producción hoy (criterio viejo, menor RMSE in-sample): RF ga
 
 ---
 
+### `backfill_jobs.py` / `run_backfill_ventas.sh` — Issue #104 (sesión 2026-07-27)
+
+| Decisión | Definición |
+|----------|-----------|
+| **`cmd_check` compara rango por igualdad exacta de string, no "cubre"** | `grupo_id + fecha_desde == BACKFILL_FROM + fecha_hasta == BACKFILL_TO`, no `fecha_desde_guardada <= BACKFILL_FROM AND fecha_hasta_guardada >= BACKFILL_TO`. Cubre el único caso real (piloto de 2 años de #44 vs. este backfill de 10 años); una semántica "cubre" agrega complejidad no pedida por el issue (saltearía silenciosamente un reproceso puntual con rango más chico que uno ya corrido). |
+| **Grupo 76 se excluye a mano de la corrida completa** (vía `GROUPS=<lista sin 76>`, mecanismo de override ya existente en `get_grupos_backfill.py`), **pero solo tras confirmar con query real** que TODOS sus SKUs ya tienen `MIN(fecha) <= 2016-10-03` — no confiar ciegamente en el hallazgo documentado en la sesión anterior por si es parcial. Si es parcial, entra en la corrida completa igual (más simple que un backfill a medida). |
+| **Piloto reusa el grupo 44** (1 SKU, mismo grupo del piloto de #44) | Más rápido/barato para validar que el mecanismo (chunking/merge/lock/`jobs_historial`) aguanta la ventana de 10 años. Advertencia: 1 SKU no extrapola linealmente el timing del grupo más grande (200, 3.8h con ventana de 2 años) porque el payload depende del volumen de ventas, no de la cantidad de artículos — la corrida completa se monitorea día a día, no se estima de antemano. |
+| **Lanzamiento de la corrida completa: `nohup` + `disown`, log a archivo** | `docker compose exec -T etl ... > /app/data/backfill_10y_$(date +%F).log 2>&1 & disown` — el `-T` evita problemas de TTY al cerrar la sesión SSH, `disown` saca el proceso de la tabla de jobs de la shell (más allá de lo que ya cubre `nohup` contra `SIGHUP`). Monitoreo preferido: polling contra `jobs_historial` (`detalle->>'$.grupo_id'`, `estado`, fechas) en vez de solo `tail -f` del log, porque sobrevive aunque se pierda el archivo. |
+| **Test nuevo de `backfill_jobs.py`: conexión real a MySQL local, no mock** | Mismo patrón que `test_run_calc_planilla.py` (`localhost:3307`, `pytest.skip` si no hay DB, CI no levanta MySQL para `services/etl/tests`) — evita mockear la sintaxis JSON path real de MySQL (`detalle->>'$.campo'`), que un mock in-memory no reproduciría fielmente. |
+| **Verificación "sin alterar filas ya existentes": snapshot `COUNT(*)`+`SUM(cantidad)` por grupo, no checksum** | `SELECT a.grupo_id, COUNT(*), SUM(vh.cantidad) FROM ventas_historicas vh JOIN articulos a ON a.sku=vh.sku WHERE vh.fecha >= '2024-06-25' AND a.grupo_id <> 201 GROUP BY a.grupo_id`, corrido antes y después, guardado en archivo. Se descarta cualquier técnica tipo `GROUP_CONCAT`/`MD5` -- ya documentada como fuente de falsos positivos en el cierre de #102 (truncamiento por `group_concat_max_len`, orden no garantizado), y acá el volumen es mucho mayor que en #102. |
+| **Sin resumibilidad por chunk, solo por grupo** | Un grupo que falla a mitad de camino reintenta el rango completo desde el chunk 1 (5x más chunks que la corrida de 2 años). Aceptado sin cambios -- el issue no pide resumibilidad de chunk, el mecanismo ya es idempotente por `ON DUPLICATE KEY UPDATE` (solo gasta tiempo/llamadas WS, no corrompe datos). Si en la práctica se vuelve un problema real y recurrente, ticket aparte con datos reales. |
+| **Chequeo operativo previo a la corrida completa (no solo el piloto)** | Confirmar `docker compose exec etl printenv WS_URL` == `https://200.125.29.194:81` en la VM real antes de lanzar -- no asumir que el `.env` de producción sigue igual al que se usó manualmente en la verificación de la sesión anterior (el README ya estaba desactualizado en ese punto). |
+
+> **Nota:** ninguna de estas decisiones toca `predict.py`/webapi/frontend -- el alcance es estrictamente ETL (`services/etl/`). El piloto (grupo 44) y la corrida completa son pasos manuales en producción, no automatizables en esta sesión.
+
+---
+
+### Rediseño del export de planilla — retroalimentación del cliente 22/07, plan sin tickets aún (sesión 2026-07-29)
+
+**Diagnóstico central de la sesión:** los 7 valores "absurdos" que el cliente reportó (DDSTK=527, ROT.S=299, Fiabilidad=626%, QBK=0, Estado numérico, Crit.Jun/26=270, VAj.Jun/26=12) son **UN solo bug de desalineación de columnas en el export**, no errores de cálculo. `PlanillaService.GetVentas` devuelve `Meses` de largo variable por SKU (solo los meses existentes en `planilla_ventas_calculada`); `exportPlanilla.ts` arma headers y posiciones desde `items[0].meses` — si el primer SKU alfabético tiene 1 mes, los headers son 18 columnas (A–R) pero cada fila con 13 meses escribe 102 (A–CX) posicionalmente. Coincide 1:1 con la queja "hasta la R hay título, de la S a la CX no". Verificado además: `fiabilidad = max(0, (1−CV)×100)` está acotada [0,100] por construcción — el 626% era el corrimiento.
+
+**Referencia de layout confirmada:** la "planilla original" del cliente es `Reposicion Mes 07-2026 - Generos - Marcas FANTECH (4).xlsm`, hoja `Ventas` (NO los exports nuestros del 26/06). Estructura: `Articulo`, `Descripcion`, `Codigos Barras`, `Vta.<mes>`×13, `<mes>`×13 (rotación sin prefijo), `Rotacion DesEstac.`, `Rot. Manual`, `Estado Art.` (valor `'A'`), `SIN STOCK`×2, `TOT STK`, `C/STK`, `VTA`, `DDSTK`. Tiene una hoja `Compras` (importaciones/FOB) que no tocamos.
+
+| Decisión | Definición |
+|----------|-----------|
+| **Fix de desalineación: en backend, no en export** | `PlanillaService` normaliza la ventana: todo SKU devuelve exactamente los mismos N meses, faltantes con placeholder explícito (`estadoMes: 'sin_datos'`, valores null), ventana anclada a `MAX(year, month)` de `planilla_ventas_calculada` (mismo criterio anti-fecha-de-sistema que #35). Mata la clase entera de bugs: el export también asume `meses.slice(0, -1)` = "último mes es el vigente" en Rot.DesEstac./VTA/DDSTK — con ventana normalizada el supuesto pasa a ser válido. Incluye diagnóstico de por qué el primer SKU tenía 1 solo mes (¿alta reciente legítima o hueco que #104 seguirá produciendo?). |
+| **`SIN STOCK`/`TOT STK`/`C/STK`/`Rot. Manual`: siguen afuera** | Se sostiene #33 sin reabrir. El cliente no las mencionó en ninguno de los 4 audios; su problema eran títulos/criterios/orden. Ni siquiera van a la lista de preguntas al cliente. |
+| **Hoja 1 = layout del cliente + agregados a la derecha** | Bloque idéntico al suyo con **sus nombres exactos**: `Articulo` (no SKU), `Descripcion`, `Codigos Barras`, `Vta.<mes>`×13, `<mes>`×13 (rotación sin prefijo, su convención), `Rotacion DesEstac.`, `Estado Art.`, `VTA`, `DDSTK`. A la derecha lo nuestro: `ROT.S`, `Fiabilidad %`, `QBK (días)`, `Género` (desplazada desde la posición 4 — supersede la decisión de posición de #33 solo para el export; la web no cambia). `Estado Art.` conserva su nombre de header pero con valores `activo/inactivo/discontinuo` (pedido explícito del feedback, le gana a la letra `'A'` histórica). Colores de quiebre por mes se mantienen como hoy. |
+| **Hoja 2 "Detalle de cálculo"** | Se mudan ahí los 5 bloques ×13 de #66 (`Tick`, `Hist`, `V/E`, `Crit`, `VAj`) con `Articulo`+`Descripcion` repetidas como ancla. Señal de método: **fondo de color por criterio en las celdas `VAj`** (paleta fría de #65: azul=histórico, violeta=promedio, teal=venta real/extrapolado — no choca con los colores de quiebre de Vta/Rot) + bloque leyenda arriba de la hoja. Sin comentarios de celda (invisibles, no se imprimen, pesan con 70k+ celdas — el cliente dijo "da lo mismo" el mecanismo). |
+| **Hoja 3 "Criterios"** | Una fila por columna de las hojas 1-2: nombre, qué significa, fórmula en palabras, y para las de método los umbrales de tickets de #63. Contenido estático en el código del export (destilado de `Planilla_Reposicion_Guia_Cliente.docx`), versionado junto al cálculo que describe. Se escribe DESPUÉS del QA — se documenta lo comprobado, no lo que el código dice que hace. |
+| **QA formal post-fix (estilo #33/#64)** | SKU testigo obligatorio `I02418` (el notebook de su captura) + 3 perfiles (alta frecuencia estable, baja frecuencia con quiebre, SKU nuevo con historia corta). Oráculo: SQL contra producción reproduciendo cada columna resumen. Salida: Hoja 3 + **documento de respuesta punto por punto** a los 10 ítems del feedback, ninguno sin contestar. |
+| **Web: solo adaptación defensiva** | `PlanillaTable` renderiza `sin_datos` sin romperse y se corrige el supuesto último-mes-vigente si existe ahí; cero reorden/renombres en pantalla (el cliente dijo "nunca voy a usar la web"; el único usuario web es Nico para QA). |
+
+> **Nota:** plan partido en tickets con `/to-tickets` (misma sesión): **#106** (backend: ventana normalizada + defensa web) → **#107** (export a 2 hojas) → **#108** (QA I02418 + 3 perfiles) → **#109** (hoja Criterios) → **#110** (respuesta al cliente), cadena lineal con dependencias nativas de GitHub, todos `ready-for-agent`.
+>
+> **Diagnóstico ampliado antes de publicar (verificación de la misma sesión):** (a) la causa primera está en el ETL — `run_calc_planilla.py` solo escribe un (SKU, mes) si hubo ventas o stock ese mes (`todas_keys = ventas ∪ dias_stock`), así que los faltantes pueden ser prefijos, huecos en el medio o cola sin mes vigente (discontinuados) — la normalización de #106 cubre los tres; (b) `PlanillaTable.tsx` tiene el mismo bug que el export (headers desde `items[0]?.meses`, `slice(0, -1)` en resumen) — confirmado, no especulado; (c) el filtro `estadoMes` del repositorio solo selecciona SKUs, nunca recorta meses — el export de 741 SKUs × 1 mes del 26/06 fue estado real de la tabla (post-#42, pre-#44), no un artefacto de filtro; (d) `fiabilidad_porcentaje` está acotada [0,100] por construcción en `run_calc_sugerencias.py` — el 626% era solo el corrimiento.
+
+---
+
+### `exportPlanilla.ts` — Implementación Issue #107 (sesión 2026-07-29)
+
+| Decisión | Definición |
+|----------|-----------|
+| **Seam de testeo: `buildPlanillaWorkbook(items, sugerencias)` exportada** | Construcción pura del workbook (sin fetch ni DOM), testeable en node. `exportPlanillaExcel` queda como wrapper fetch+descarga. Primer test de frontend del repo: `exportPlanilla.test.ts` (11 asserts de layout/colores/sin_datos), script `npm test` (`vitest run`) agregado — vitest ya estaba en devDependencies sin usarse. |
+| **Hoja 1 idéntica al original del cliente** | `Articulo`/`Descripcion`/`Codigos Barras` + `Vta.<mes>`×13 + `<mes>`×13 (rotación sin prefijo, su convención) + `Rotacion DesEstac.`/`Estado Art.`/`VTA`/`DDSTK`, y a la derecha `ROT.S`/`Fiabilidad %`/`QBK (días)`/`Género`. 37 columnas — mismo ancho que el export que el cliente usó bien en junio. `Estado Art.` conserva su nombre de header con valores texto (`activo/inactivo/discontinuo`). |
+| **Hoja 2 "Detalle de cálculo"** | Anclas `Articulo`+`Descripcion` + 5 bloques ×13 (`Tick`/`Hist`/`V/E`/`Crit`/`VAj`). VAj con fondo por criterio (azul `BFDBFE` histórico, violeta `DDD6FE` promedio, teal `99F6E4` real/extrapolado — tintes claros de la paleta #65) y leyenda con chips mergeados en la fila 1; el resto de los bloques conserva el color de quiebre. Freeze en `xSplit:2, ySplit:3`. |
+| **`sin_datos` (#106) en el export** | Celda vacía con fondo gris claro `F1F5F9` en ambas hojas — nunca un 0 inventado. |
+| **Verificación de escala con la función real** | Script `vite-node` en scratchpad: 5550 SKUs × 13 meses → build 394ms, build+serialize ~4.9s, 2.6MB, heap 378MB. Verificado con openpyxl: hoja 1 `A1:AK5551` (37 cols), hoja 2 `A1:BO5553` (67 cols), headers exactos, placeholders null. |
+
+---
+
+### `scripts/qa_planilla_oracle.py` — QA de cuentas ejecutada, Issue #108 (sesión 2026-07-29)
+
+| Decisión | Definición |
+|----------|-----------|
+| **Oráculo como script versionado, no queries ad-hoc** | `scripts/qa_planilla_oracle.py`: recomputa desde tablas crudas cada campo mensual (10) + resumen del export + ROT.S/Fiabilidad/QBK (algoritmos replicados de `run_calc_planilla.py`/`run_calc_sugerencias.py`/`exportPlanilla.ts`) y compara contra lo persistido. Solo SELECTs. Se corre con `cat scripts/qa_planilla_oracle.py \| docker compose exec -T etl python3 -` (acepta SKUs por argv; sin args selecciona perfiles automáticamente). |
+| **Resultado: fórmulas 100% OK** | `I02418` (12/12 meses cerrados), `C00678` (alta estable, fiab 86.2%), `C00175` (baja c/quiebre, ROT.S NULL correcto), `02770` (1/13 meses, placeholders #106 correctos). Global: fiabilidad ∈ [0,100] sobre 1246 SKUs. Valores reales de `I02418` para la respuesta al cliente: VTA=1517, DDSTK=10.59, RotDesEstac=6.62, ROT.S=8.44, fiab=19.09%, QBK=1.3 días. |
+| **Hallazgo operativo → #111 (blocker)** | Los únicos mismatches (10, todos en el mes de referencia) revelaron que **la planilla está congelada al 23/07**: ningún job `etl` en `jobs_historial` desde entonces. 28/07 falló por `Communications link failure` (MySQL reinició ~8 veces en la semana), 29/07 salteado por `backfill.lock` (esperado, #104), 24-27/07 sin rastro (ofelia recreado el 28 se llevó los logs). Sin OOM de kernel. Familia #59/#60. No se parchó nada (criterio de #108): issue nuevo con evidencia. |
+| **Acceso a producción para QA** | SSH directo con la .pem de Descargas (ver memoria del proyecto), script por stdin al contenedor `etl` que ya tiene pymysql + credenciales en env — sin exponer passwords en comandos. |
+
+---
+
+### Hoja 3 "Criterios" en el export — Issue #109 (sesión 2026-07-29)
+
+| Decisión | Definición |
+|----------|-----------|
+| **Contenido como data exportada (`CRITERIOS_COLUMNAS`), no prosa embebida en el builder** | Array tipado `{col, hoja, que, como}` exportado desde `exportPlanilla.ts` — permite que el test recorra los headers reales de las hojas 1-2, normalice la parte del mes (`Vta.May/26` → `Vta.[mes]`) y falle si alguna columna queda sin explicar. La cobertura total de columnas es un test, no una promesa. |
+| **Fórmulas en palabras = las verificadas en #108** | Cada "cómo se calcula" refleja lo que el oráculo confirmó contra producción (VTA excluye mes en curso, DDSTK sobre los 13 meses, ROT.S ponderado con mínimo de 3 meses útiles, fiabilidad acotada 0-100%, tickets = días con venta). |
+| **Bandas de tickets hardcodeadas (≤2 / 3-4 / ≥5) con nota de vigencia** | Son los valores de `configuracion_sistema` de hoy; el export no consulta configuración (no hay endpoint). La nota "pueden ajustarse en la configuración del sistema" cubre el drift. Si #67 (UI de configuración) se implementa algún día, revisar esta hoja. |
+| **Test de lenguaje anti-jerga** | Asserta que el texto de la hoja no contiene nombres internos (`estado_mes`, `real_extrapolado`, `planilla_ventas_calculada`, `NULL`, etc.) — el criterio "legible por el cliente" también quedó como test. "Teal" → "Verde azulado". |
+| **Estructura de la hoja** | Secciones: columnas Hoja 1 → columnas Hoja 2 → bandas de método por tickets → leyenda de colores con swatches pintados (5 de quiebre/sin datos + 3 de método). Header congelado. |
+
+---
+
+### `ml/run_eval_elegibilidad_dry_run.py` — Issue #105 (sesión 2026-07-31)
+
+| Decisión | Definición |
+|----------|-----------|
+| **Se acepta pisar la medición mensual de julio (`eval-mensual-2026-07`)** | El cron real ya corrió el 1° de julio, antes del backfill de `#104` -- correr esto ahora pisa esa fila en `jobs_historial`/el resumen agregado. No se pierde nada real: `catalogo_modelos` conserva el histórico completo por `fecha_estimacion`, y el baseline contra el que compara este issue es el ya documentado en texto (`skus_evaluados=58, elegibles=14` sobre 1482 totales, cierre de `#102`), no una fila de DB que dependa de no pisarse. |
+| **Se lanza ahora, sin monitoreo activo tipo `#104`** | El sistema está sano (16G libres, MySQL sano hace 46hs, confirmado antes de lanzar). A diferencia del backfill, este job es de **lectura pura** hacia `articulos_elegibilidad_econometrico` (nunca escribe ahí) y solo agrega filas a `catalogo_modelos` (histórico puro) -- sin writes masivos a `ventas_historicas`/`stock_diario`, sin el mismo riesgo de disco que justificó el monitoreo constante de `#104`. Se corre en background (`nohup`), se chequea cuando haga falta en vez de vigilarlo. |
+| **Duración esperada: más que el precedente de ~10 min (`#102`)** | Ese precedente fue pre-backfill, con 1424 de 1482 SKUs sin historia suficiente para intentar walk-forward siquiera. Post-`#104`, muchos más SKUs van a tener 10 años reales en vez de 2 -- más folds por SKU y más SKUs llegando a la etapa cara (5 modelos × walk-forward). Sin estimación numérica cerrada, solo la expectativa de que va a tardar sensiblemente más. |
+
+> **Nota:** corre en el contenedor `etl` (no `python-worker`, pese al nombre) -- mismo patrón ya establecido y usado sin cambios en `#97`-`#103`, no se cuestionó de nuevo.
+
+---
+
+### `run_ofelia.sh` + `cron_jobs.py` — Issue #111 (sesión 2026-08-02)
+
+**Diagnóstico (corrige la hipótesis inicial del issue):** el reporte de #111 atribuía la planilla congelada a inestabilidad de MySQL. **Falso.** `docker inspect` da `oomkilled=false`, `RestartCount=0`, cero entradas `Aborted`, y todos los reinicios tienen `Shutdown complete` limpio (29/07 y 01/08 coinciden con deploys/mantenimiento). Los 10 días sin actualizar se explican por cuatro causas distintas encadenadas:
+
+| Noche | Causa real |
+|---|---|
+| 24-27/07 | Sin rastro — el job no registra nada antes de los pasos CALC y `docker logs` se perdió al recrear ofelia |
+| 28/07 | `Communications link failure` en el primer paso (TRUNCATE del staging) |
+| 29-31/07 | Salteadas **por diseño**: lock del backfill de 10 años (#104), comportamiento correcto |
+| 01/08 | Contenedor `ofelia` caído (arrancó recién 15:25) — el cron nunca disparó |
+| 02/08 | Corre, pero **se traba >60 min** en `CALC_UPSERT_VENTAS_MENSUALES` → **#112** |
+
+| Decisión | Definición |
+|----------|-----------|
+| **Causa raíz derivada a #112, no parchada acá** | La query de `ventas_mensuales` recalcula el histórico completo cada noche sin ventana de fechas: `UNION` sobre ~127M filas (`stock_diario` 107.8M/8.1GB + `ventas_historicas` 19.2M) para producir 152k. El backfill de #104 la volvió inviable. Estaba anticipado en la sesión de #34/#35 ("si se dispara, issue nuevo con datos reales") — estos son esos datos. |
+| **El cron registra su propia corrida (`cron_jobs.py`, hermano de `backfill_jobs.py`)** | `start`/`end`/`skip`/`stale` invocados desde `run_ofelia.sh`. Cierra el agujero que dejó las noches 24-27/07 sin diagnóstico: antes, todo lo anterior a los pasos CALC (truncate, extracción SOAP, merges) fallaba en silencio. |
+| **Sin estado `omitido` nuevo: `jobs_historial.estado` es un ENUM cerrado** | `ENUM('en_cola','ejecutando','exitoso','fallido')`. Una noche salteada se registra como `exitoso` + `detalle.resultado='omitido'` en vez de exigir migración (que además habría que aplicar a mano en producción: los volúmenes ya creados no re-ejecutan `docker-entrypoint-initdb.d`). |
+| **El atraso se mide sobre el DATO, no sobre el bookkeeping** | `stale` usa `DATEDIFF(CURDATE(), MAX(fecha))` de `ventas_historicas`: una noche salteada o un job que muere antes del merge dejan el dato viejo igual, y eso es lo que ve el cliente. Umbral default 2 días (el cron extrae "ayer", 1 día de atraso es lo normal). |
+| **Auto-sanado de corridas zombi** | Si el contenedor muere a mitad de corrida (pasó el 01/08), la fila queda `'ejecutando'` para siempre y el registro miente. `start` cierra las anteriores como `fallido` + `resultado='interrumpido'`, acotado a `tipo_job='etl'` + subtipo del cron para no tocar backfills. Seguro porque ofelia corre este job con `no-overlap=true`. |
+| **El bookkeeping nunca puede voltear el ETL** | Cada llamada se aísla y su fallo solo se loguea; el `exit code` del `kitchen.sh` se preserva tal cual para que ofelia siga viendo la corrida como fallida. Se quitó el `exec` (impedía capturar el código de salida). |
+| **Costura `KITCHEN` para testear sin Pentaho** | `tests/test_run_ofelia.py` inyecta stubs por env y verifica la orquestación (registro de inicio/fin, preservación del exit code, ruta de skip, y que un `start` fallido no invente un job_id desde el stderr — ese bug existió y habría actualizado una fila ajena de `jobs_historial`). |
+
+> **Nota:** los 2 fallos de `tests/test_run_calc_planilla.py::test_cargar_configuracion_*` son **preexistentes** y ambientales: la `configuracion_sistema` local está vacía, el setup del test falla antes de asignar `valor_original` y el `finally` lo enmascara con `UnboundLocalError`. No los introdujo esta sesión (reproducen aislados sin los archivos nuevos).
+
+---
+
+### `job_etl_diario.kjb` — Issue #112 (sesión 2026-08-02)
+
+**Hallazgo que reordenó la solución:** `ventas_mensuales` es hoy una tabla **de solo escritura**. La escriben el step nocturno y `AdminService.RecalcForSku`; el único método de lectura (`VentasMensualesRepository.GetBySkuYearMonth`) **no lo invoca nadie**, y ni `predict.py` ni los tres `run_calc_*.py` la tocan (`GetVentasMensualesTrend`, pese al nombre, lee `ventas_historicas`). O sea: el job gastaba >60 min por noche manteniendo datos que nadie consume, y lo hacía **justo antes** de todo lo que el cliente sí ve.
+
+| Decisión | Definición |
+|----------|-----------|
+| **Fix principal: reordenar, no solo optimizar** | `CALC_UPSERT_VENTAS_MENSUALES` se movió del medio de la cadena al final (después de `CALC_STOCK_RESUMEN`). Ahora `predict` → `calc_planilla` → `calc_sugerencias` → `calc_stock_resumen` corren primero: la planilla del cliente se actualiza aunque el paso pesado tarde o falle. Verificado que ningún paso posterior lee `ventas_mensuales`. Validado programáticamente que la cadena sigue lineal, sin referencias rotas y con los 15 pasos alcanzables desde START hasta SUCCESS. |
+| **Ventana de 3 meses, elegida por medición — la de 13 era PEOR** | Medido en la DB local (25.2M filas en `stock_diario`), variante `SELECT COUNT(*)` de la misma query: **sin ventana 353 s · ventana 13 meses (46% de las filas) 453 s · ventana 3 meses (5.8%) 34 s**. Con poca selectividad el rango por índice pierde contra el scan secuencial, así que la ventana "generosa" que proponía el issue habría sido contraproducente. 3 meses cubre de sobra lo único que la operación diaria puede cambiar (el cron extrae "ayer"). El `INSERT` real completo con esa ventana: **19 s**. |
+| **Corte alineado al primer día del mes** | Con un corte a mitad de mes (`DATE_SUB(CURDATE(), INTERVAL n MONTH)`) el mes del borde se recalcularía con días incompletos y `dias_con_stock` quedaría subcontado. Verificado empíricamente sobre el borde real (2026-06-01): ventas y días con stock dan **idénticos** con y sin filtro. |
+| **Expresión repetida en las 4 subqueries, sin variable de sesión** | Un `SET @desde := ...` previo al `INSERT` habría sido más legible, pero el step SQL de Pentaho parte el script por `;` y no está garantizado que los statements compartan conexión: si la variable llegara NULL, `fecha >= NULL` no matchea nada y el `INSERT` sería un **no-op silencioso**. Dentro de un mismo statement `CURDATE()` se evalúa una sola vez, así que las 4 copias son consistentes entre sí. |
+| **Filas fuera de la ventana quedan intactas (verificado)** | Snapshot antes/después del `INSERT` real: total 153.404 sin cambios; las 142.316 filas fuera de ventana conservan `SUM(ventas_cantidad)=1030521` y su `actualizado_en` original; solo las 11.088 de la ventana se refrescaron. Los meses del decenio backfilleado (#104) **no** están en `ventas_mensuales` y no se van a poblar solos: si algún día aparece un consumidor que los necesite, hay que correr esta misma query una vez sin el filtro de fecha. |
+
+> **Nota:** la medición es sobre volumen local (25.2M), no sobre los 107.8M de producción — el issue pedía medir contra producción, pero la VM estaba con el ETL nocturno en curso y no correspondía sumarle carga. La proporción en producción es **más favorable** (la ventana de 3 meses cae ~3% de la tabla contra 5.8% local), pero eso se confirma recién con el deploy. La verificación end-to-end (corrida completa + `MAX(fecha)` avanzando) queda en **#111**, que sigue abierto.
+
+---
+
+### `job_etl_diario.kjb` — merge de ventas, Issue #113 (sesión 2026-08-02)
+
+**Tercera causa independiente de la planilla congelada** (junto con #111 y #112), encontrada al verificar el deploy: `ventas_historicas` no avanzaba desde el 23/07 **aunque la extracción funcionaba perfecto** — el staging tenía las 51.024 filas del 01/08 bien extraídas y 0 llegaban a destino.
+
+| Decisión | Definición |
+|----------|-----------|
+| **Causa: un solo SKU huérfano tumba el día entero** | `ventas_historicas` tiene la FK `fk_ventas_articulo` (`sku` → `articulos.sku`) y el merge es un único `INSERT ... SELECT`. El 02/08 había **39 SKUs nuevos vendidos que aún no estaban en `articulos`** (`I02722`, `I02781`-`I02787`…, 456 filas): violaban la FK y abortaban las 51.024 filas. Se perdía el 100% del día, no el 0.9% problemático. |
+| **Invisible por partida doble** | Todos los hops del `.kjb` son `unconditional=Y`, así que el job seguía después del merge fallido y terminaba "normal", con los pasos CALC recalculando sobre datos viejos. Y hasta #111 el cron no dejaba rastro en `jobs_historial`. |
+| **Fix: `INNER JOIN articulos` en el merge** | Misma tolerancia que **ya tenía** `run_calc_planilla.py` (que hace el JOIN y reporta `skus_omitidos` en `jobs_historial`) — el merge había quedado sin esa protección. Entran las filas buenas, se saltean las huérfanas. |
+| **Verificado con reproducción, no por lectura** | En local: se insertaron 3 filas válidas + 1 con SKU inexistente en el staging. Merge viejo → `ERROR 1452` y **0 filas insertadas** (se perdían también las 3 buenas). Merge nuevo → 3 filas insertadas, la huérfana salteada. Datos de prueba limpiados después. |
+
+> **Pendiente aparte (no bloquea):** investigar *por qué* hay SKUs vendidos que no llegan a `articulos` si `RUN EXTRACT ARTICULOS` corre antes que `RUN EXTRACT VENTAS` en el mismo job — probablemente pertenecen a grupos que la extracción de artículos no cubre. Sus ventas se siguen perdiendo (solo esos SKUs), pero el resto del día se salva.
+
+**Deploy y verificación en producción (2026-08-02, cierra #111/#112/#113):** corrida completa del cron con los tres fixes desplegados (`docker compose build etl` + `up -d --force-recreate etl`). Resultado: `ventas_historicas` 23/07 → **01/08**, planilla jul → **ago/2026** (72.010 filas), sugerencias regeneradas, **atraso de 10 días → 1 día** (lo normal). El job quedó registrado punta a punta (`322 | exitoso | exit_code 0`) y arrancó emitiendo `[CRON][ATRASO] ventas_historicas tiene 10 dias de atraso` — la señal que faltaba las 10 noches anteriores.
+
+| Paso | Duración real | Referencia previa (22-23/07) |
+|---|---|---|
+| Extracción + merge | ~11 min | — |
+| `predict.py` | ~15 min | — |
+| `calc_planilla` | **3.971 s (66 min)** | 482 s |
+| `calc_sugerencias` | 6 s | 7 s |
+| `calc_stock_resumen` | **3.829 s (64 min)** | 586 s |
+| `ventas_mensuales` (último, ventana 3 meses) | **36 s** | >60 min bloqueando todo |
+| **Total** | **2h36m** | ~50 min |
+
+> **Riesgo nuevo a vigilar:** `calc_planilla` y `calc_stock_resumen` se volvieron **7x más lentos** (66 y 64 min) por `stock_diario` en 107.8M filas tras el backfill de #104 — son los nuevos cuellos de botella, no `ventas_mensuales`. El job arranca 03:00 y termina ~05:36: entra en la ventana nocturna, pero no hay mucho margen antes de tocar horario laboral. Ambos ya usan ventana de fechas (13 meses y 365 días), así que el costo viene del tamaño del índice, no de un escaneo completo.
+>
+> **Nota operativa del deploy:** `/opt/evalutia/.git` había quedado con owner `ubuntu` (residuo de un deploy anterior) y hubo que alinearlo a `ssm-user`, que es quien tiene las credenciales de GitHub. Además había 4 archivos modificados sin commitear en la VM: se respaldaron en `/tmp/vm_local_changes_20260802_080044/` (patch + copias) antes del `stash`/`pull`/`pop`; 3 ya venían commiteados en el pull y `caddy/Caddyfile` **sigue modificado solo en la VM** — conviene commitearlo.
+
+---
+
+### Plan de reparación de ventas duplicadas — Issue #114 (sesión 2026-08-04)
+
+**Causa raíz (confirmada, no hipótesis).** `ventas_historicas_stage` **no tiene clave única** (solo `PRIMARY(id)` y un índice **no único** sobre `sku,fecha`), y la ingesta usa un `INSERT` pelado. Desde el commit `19f2dc0` (23/06/2026, #42) la extracción llama al WS **una vez por grupo × depósito** (66 × 6 = 396 llamadas). Un artículo que pertenece a varios grupos en el sistema del cliente vuelve en varias respuestas → una fila por respuesta → el merge (`SUM(cantidad) GROUP BY fecha, sku`) **multiplica la venta por la cantidad de grupos**.
+
+La asimetría delatora está en el mismo `run_extract_sales_chunk.py`: `stock_diario` se escribe con `ON DUPLICATE KEY UPDATE` sobre `uq_stock_sku_fecha_deposito` (**idempotente**, quedó sano) y el staging con `INSERT` sin clave (**acumula**). Por eso el contraste venta-contra-caída-de-stock detecta el problema.
+
+| Evidencia | Dato |
+|---|---|
+| Ratio venta/caída de stock por mes | feb/26 **0 %** · abr/26 **0 %** · jun/26 **10 %** · jul/26 **84 %** inflado |
+| Factor por grupo (jul/26) | grupos bajos (69/78/79) **0 %** · grupo 200 **99 %** (×2) · grupo 201 **99 %** (×3) |
+| Contraste con el `.xlsm` del cliente (ago/25–abr/26, período limpio) | **75 %** de 1.077 pares coincide exacto |
+| Alcance del daño | 23/06 → hoy: 4.156 filas con venta, 1.014 SKUs, 42 días |
+
+Descartado explícitamente: no es el `INNER JOIN articulos` de #113 (`articulos.sku` es PK, 0 duplicados, y el daño es anterior a ese deploy); no son filas duplicadas en `ventas_historicas` (0 pares `(fecha,sku)` repetidos, una sola `fuente`) — el valor de la propia fila ya viene sumado de más.
+
+| Decisión | Definición |
+|----------|-----------|
+| **Fix: clave única en el staging, igual que `stock_diario`** | Agregar `deposito_id` + `grupo_id` a `ventas_historicas_stage`, `UNIQUE (fecha, sku, deposito_id)`, y pasar la ingesta a `ON DUPLICATE KEY UPDATE cantidad = VALUES(cantidad)`. La repetición **por grupo** se sobrescribe; el `SUM` **por depósito** del merge sigue siendo correcto (preserva #39, que sigue siendo necesario). `grupo_id` va como columna de trazabilidad, no en la clave: hoy es imposible saber de qué llamada vino cada fila, y esa ceguera obligó a deducir la causa por correlación. |
+| **Cubre los dos caminos sin tocarlos** | El backfill (`run_backfill_ventas.sh`) usa el mismo `run_extract_sales_chunk.py` y tiene **su propio merge** (con `s.sku IN (SELECT sku FROM articulos)` — ya tenía la protección de huérfanos que #113 recién le dio al `.kjb`). Ambos merges suman igual, así que la idempotencia del staging los cura a los dos. Cura además la contaminación de staging documentada en #39/#104. |
+| **Reparación por re-extracción, no por corrección aritmética** | Dividir en SQL exigiría *inferir* el factor desde `grupo_id`, que es justamente el campo ambiguo → se grabaría un número inventado sobre otro, sin forma de verificarlo. La re-extracción cuesta las mismas **396 llamadas** de una noche (el script toma `FORCE_START`/`FORCE_END` como rango, no itera por día) y el merge sobrescribe vía `ON DUPLICATE KEY UPDATE`. **Requisito previo: truncar el staging**, o el merge vuelve a sumar de más. Verificable: el contraste debe bajar de 84 % a ~0 %. |
+| **Control de coherencia automático y NO bloqueante** | El % de filas con ratio ≠ 1 se registra cada noche en el `detalle` JSON de `jobs_historial`, reusando el bookkeeping de #111. Da serie histórica (hoy hubo que reconstruirla a mano) y detecta al día siguiente en vez de a los 42 días. No corta el pipeline: el costo de un falso positivo (planilla congelada de nuevo) es peor que un día de demora en detectar. **Alcance honesto:** detecta duplicación de ventas contrastada contra stock, no es un validador universal. |
+| **`grupo_id` corrompido: ticket aparte, posterior** | El mismo bug corrompió la taxonomía: `get_grupos.py` recorre ascendente y `articulos.grupo_id` guarda **el último** grupo que devolvió el artículo, así que los multi-grupo quedan etiquetados con el id más alto (200/201). Corrige un diagnóstico previo: los grupos "muertos" (PERIFÉRICOS 744 SKUs con 0 % de ventas) **no están muertos, les robaron los artículos** — los periféricos que venden están en 200/201, y el grupo 200 ni siquiera es visible en el desplegable. No se modela many-to-many ahora: no bloquea lo urgente y falta saber qué significan 200/201 para el cliente. |
+| **#110 espera la reparación completa, con límite de ~3 días** | No se manda el documento con cifras infladas: afirma "valores verificados artículo por artículo" y va dirigido justo al cliente que descubrió el corrimiento revisando a mano. Si la reparación se traba más de ~3 días, ahí sí corresponde un aviso interino. Al regenerarlo hay que **rehacer las capturas**, no solo editar los números: las imágenes muestran los valores de julio en pantalla. |
+
+> **Nota:** la lección de fondo es que todas las verificaciones internas daban `TODO OK` porque comparaban la planilla contra `ventas_historicas`, y el insumo ya venía roto. Lo detectó una pregunta de negocio del usuario ("930 notebooks del mismo modelo no tiene sentido"), no un test. De ahí que el control de coherencia se contraste contra una magnitud **independiente** (el stock) y no contra la misma fuente.
+
+---
+
+### Verificación profunda de datos crudos — sesión 2026-08-04 (pre-plan #114)
+
+**Método:** comparación TOTAL contra el `.xlsm` del cliente (verdad de referencia: 407 SKUs × 13 meses = 5.291 celdas, Abr/25–Abr/26) + 2 subagentes de auditoría de código (extracción/merge y cálculos) + mediciones de cada hallazgo contra producción + cobertura cruzada con el grafo graphify.
+
+**Veredicto ventas crudas (período limpio):** **91,2% idéntico, 95,7% a ±1 unidad**. Las diferencias restantes en 4 familias explicadas: (1) merchandising HX* y similares que el cliente no trackea (39 celdas, +463 uds — sus celdas están VACÍAS, no en 0); (2) **devoluciones que él registra y nosotros no** (42 celdas negativas suyas, 85 uds — ninguna reflejada; único gap real nuestro en el período; ojo: post-#80 sí capturamos negativos en jul/26, el gap es del backfill histórico); (3) ajustes de fin de mes en números redondos (fechados día 28-31, esp. 30/04) que su reporte no cuenta (+87 uds); (4) resto ±1% concentrado en Abr/26, borde de SU ventana de actualización. **Stock crudo: VALIDADO** — cobertura 361/361 días en todos los SKUs, coherencia venta-vs-caída-de-stock ≈100% en meses limpios, C/STK del cliente reproducido en mediana exacta (su 2ª col. SIN STOCK ≈ días sin stock del depósito 8).
+
+**Hallazgos nuevos de las auditorías (dimensionados):**
+
+| Sev. | Hallazgo | Dimensión medida |
+|---|---|---|
+| ALTA | `run_calc_sugerencias.py` excluye meses con rotación 0 (`> 0`) → ROT.S/Fiabilidad inflados en SKUs intermitentes, QBK subestimado; el oráculo QA replica el mismo filtro (se valida a sí mismo) | **17% de los SKUs con ROT.S dan ROT.S > 2× su propio DDSTK** |
+| ALTA | Fallo de la llamada SOAP del depósito 5 → el merge escribe 0 sobre ventas reales (overwrite silencioso, los depósitos logísticos sí responden con Venta=0) | 181 días candidatos en mar-abr (mezcla transferencias; falta separar) |
+| ALTA (latente) | `clamp_signed_int` no entiende coma decimal/miles (el parser de stockxml sí, con docstring que documenta `'3.800.000'`) | datos actuales sanos (max stock 10.723); riesgo si el WS cambia formato |
+| MEDIA | `AdminService.RecalcForSku` escribe `ventas_cantidad=0` (literal) — el endpoint admin de recálculo BORRA ventas de `ventas_mensuales` | tabla sin lectores hoy; corrupción igual |
+| MEDIA | Rot.DesEstac mezcla escalas cuando falta factor estacional (mes quiebre entra crudo, mes normal se excluye) | 475 artículos (9%) sin ningún factor |
+| MEDIA | `ConsStockXml` corrido manual sin FORCE re-estampa el snapshot 7 días hacia atrás pisando stock real | operativo, no automático |
+| MEDIA | Lock de backfill unidireccional (el nocturno no lo crea) + merge del backfill filtra sin TRIM (diverge del kjb) | concurrencia operativa |
+| MEDIA | Dashboard resultados: stockout con denominador días-con-fila (contradice a la planilla), `Math.Ceiling` sobre tasa diaria (0.02→1, 50×), `SkusActivos` sin `cantidad!=0` (pariente de #64) | página /resultados |
+| BAJA | SKU sin normalizar en ventas/stock vs normalizado en articulos (**medido: 0 filas afectadas hoy**, endurecer igual); orden del `sed` de entidades; `FORCE_START` solo se ignora mudo; `deposito_id` NULL anula la unique; `ts_carga` UTC vs local mixto; QBK con stock congelado por SKU (1 SKU hoy); `InsertarBatch` de stock con `[Authorize]` sin rol; rot 0.0000 en export para sin_stock (Criterios dice "vacía"); tooltip dice ×factor y el código divide; MAX_MESES=13 inalcanzable | — |
+| — | **Cero tests** de `run_extract_*.py` (donde están 3 de los 4 hallazgos más graves) | — |
+
+> **Nota de método:** el hallazgo del auditor sobre el fix de #114 confirmó el plan acordado: el atajo `UNIQUE(fecha,sku)` sin `deposito_id` reintroduciría #39; hay que agregar la columna y propagarla en el INSERT. Los detalles finos de cada hallazgo están en los reportes de los issues que salgan de `/to-tickets`.
+
+---
+
+### `ventas_historicas_stage` — Issue #114 (sesión 2026-08-04)
+
+| Decisión | Definición |
+|----------|-----------|
+| **Diagnóstico del diseño original** | `04-etl-staging.sql` le saca a propósito la UNIQUE que el staging heredaría de `ventas_historicas` vía `LIKE` — el diseño original quería que el `INSERT` plano acumulara una fila por depósito para que el merge las sumara (fix de #39). Este ticket revierte esa decisión a propósito, no "agrega una clave que faltaba". Dejar esto explícito en el commit. |
+| **`deposito_id` sin NULL, con sentinel** | `VARCHAR(64) NOT NULL DEFAULT ''`. MySQL no colisiona `NULL` contra `NULL` en una clave única — si `S_DEPOSITOS` viniera vacío (hoy nunca pasa en producción, pero el `.sh` tiene la rama), un `deposito_id` `NULL` reabriría exactamente el mismo bug por otra puerta. El script normaliza `__FORCED_DEPOSITO` vacío al mismo sentinel `''` antes de insertar. |
+| **`grupo_id` fuera de la clave, solo trazabilidad** | `INT UNSIGNED NULL`, no participa en `UNIQUE`. Es a propósito: la segunda llamada que devuelve el mismo artículo desde otro grupo debe pisar la fila (`ON DUPLICATE KEY UPDATE`), no crear una nueva. Resuelve además la ceguera que obligó a diagnosticar #114 por correlación en vez de leer directamente de qué llamada vino cada fila. |
+| **Migración** | `infra/sql/19-ventas-stage-deposito-grupo.sql`, mismo patrón defensivo que `04-etl-staging.sql` (chequeo por `information_schema` antes de cada `ALTER`, re-corrible). `UNIQUE KEY uq_ventas_stage_fecha_sku_deposito (fecha, sku, deposito_id)`. |
+| **Precedente ya existente del mismo landmine, no tocado acá** | `stock_diario.deposito_id` es `VARCHAR(64) NULL` en su propia `UNIQUE(sku, fecha, deposito_id)` — mismo agujero, ya ticketeado como hallazgo menor en #122. No se toca en #114: esa tabla tiene datos reales en producción, cambiar el tipo de columna ahí es una migración de más riesgo que la de un staging vacío. |
+| **El merge (`.kjb` + backfill) queda intacto** | El `SUM(cantidad) GROUP BY fecha, sku` nunca fue el bug — sumaba correctamente sobre lo que el staging le daba. Con el staging idempotente, cada depósito aporta una sola fila real, y la suma vuelve a ser exactamente la venta total del día (el objetivo original de #39). Tocar el merge en el mismo ticket mezclaría capas y arriesgaría reintroducir #39 sin necesidad. La asimetría de `TRIM` entre el merge del `.kjb` y el del backfill sigue en #119, no acá. |
+| **Ingesta: `ON DUPLICATE KEY UPDATE`, mismo patrón que ya usa el INSERT de `stock_diario` en el mismo script** | `cantidad=VALUES(cantidad), stock=VALUES(stock), fuente=VALUES(fuente), ts_carga=VALUES(ts_carga)`. `grupo_id` se propaga vía un `export` nuevo en `run_extract_sales_chunk.sh` (hoy la variable de grupo solo vive en el loop de bash), reusando el mecanismo que ya existe para `__FORCED_DEPOSITO`. |
+| **Refactor a función testeable, no test por subprocess** | Se extrae la lógica de inserción a una función (`procesar_payload` o similar), mismo criterio que ya se usó para `cargar_tickets` en `run_calc_planilla.py`. Permite el test directo que le falta a este bug: insertar la misma fila dos veces (mismo grupo devolviendo el mismo artículo/depósito/fecha) y verificar que queda una sola fila con el valor correcto, no que se duplique. Contra DB real de test (`localhost:3307`, `pytest.skip` si no hay DB — patrón de `test_backfill_jobs.py`/`test_cron_jobs.py`), no subprocess (ese patrón, usado en `test_run_ofelia.py` para bash, aquí sería más lento y no aislaría la lógica de conexión/lectura de archivo). |
+
+---
+
+### `run_backfill_ventas.sh` — re-extracción de reparación, Issue #123 (sesión 2026-08-05)
+
+| Decisión | Definición |
+|----------|-----------|
+| **Grupo 201 forzado a entrar, no dejarlo en el default** | `get_grupos_backfill.py` excluye por defecto los grupos con `aplica_modelo_econometrico=TRUE` (hoy solo el 201) — correcto para el backfill histórico de #104 (ya tenía 10 años cargados), pero el 201 es el grupo con **peor duplicación** (99% inflado, factor ×3). Se invoca con `GROUPS="$(python3 get_grupos.py)"` (la lista del cron diario, sin exclusiones) en vez de dejar que el script resuelva su lista por defecto. |
+| **Rango: 2026-06-23 → 2026-08-04** | Desde el día del deploy que causó el bug (`19f2dc0`, #42) hasta ayer — nunca "hoy", mismo criterio que #106 de no tratar un día en curso como completo. El 05/08 en adelante ya lo cubre la operación normal con el fix activo. |
+| **`BACKFILL_CHUNK_DAYS=45`** | Un solo chunk por combinación grupo×depósito en vez de 2 (default 30 partiría el rango de 43 días). Reduce las llamadas SOAP totales de ~792 a ~396 — importante porque el backfill toma el lock y puede chocar con el cron de esta noche. |
+| **Colisión con el cron aceptada, con catch-up manual** | Si el backfill sigue corriendo a las 03:00 Montevideo, el cron nocturno se saltea entero (no solo el rango reparado — también la extracción normal de "ayer"). Se acepta el riesgo; si pasa, catch-up manual de ese día específico apenas termine el backfill, en vez de esperar al cron de mañana. |
+| **Recálculo manual inmediato, no esperar al cron** | `run_calc_planilla.py` lee `ventas_historicas` como foto completa (TRUNCATE+INSERT) — correrlo a mitad del backfill mezclaría grupos reparados con no reparados, peor que no correrlo. Se corre a mano (planilla → sugerencias → stock_resumen) recién cuando el loop de grupos termine entero, sin esperar al cron (el cliente lleva 13 días esperando y #110 depende de esto; precedente en #64/#112). |
+| **Criterio de aceptación corregido: sin contraste contra el `.xlsm` del cliente para jun-jul** | Su archivo de referencia (`Reposicion Mes 07-2026...xlsm`) solo tiene columnas de venta hasta Abr/26 — no hay con qué comparar el período reparado contra su archivo. La verificación de jun-jul se apoya enteramente en el ratio venta-vs-caída-de-stock (~84%→~0% esperado) + el caso puntual de `I02418` (930→~465 en julio) + snapshot de un rango de control anterior a 23/06 sin cambios. |
+
+> **Nota:** en paralelo, dos subagentes trabajan #115 (control de coherencia nocturno) y #118 (RecalcForSku deja de borrar ventas) — elegidos por no compartir archivos entre sí ni con lo que toca #123/#119/#124/#125 (scripts de extracción, en los que no conviene trabajar en paralelo mientras el backfill corre en vivo).
+
+**Resultado de la corrida (2026-08-05, ~48 min):** 66/66 grupos exitosos, cero fallidos. Verificación contra los tres criterios acordados arriba:
+
+| Criterio | Esperado | Medido |
+|----------|----------|--------|
+| Rango de control (01/04 → 22/06) sin tocar | idéntico al snapshot previo | **idéntico**: 459.405 filas / suma 87.422 en `ventas_historicas`; 2.756.430 / 20.873.297 en `stock_diario` |
+| Ratio venta-vs-caída-de-stock en 23/06 → 04/08 | ~84% → ~0% de anomalías | **3,21%** (177 anómalas sobre 5.509 observaciones, tolerancia 10% de `_calcular_coherencia`) — ruido residual, no el patrón del bug |
+| `I02418` en julio | 930 → ~465 | **472** |
+
+Recálculo posterior (manual, en el orden acordado): `run_calc_planilla.sh` OK en 3920s (5.583 SKUs / 72.085 filas) → `run_calc_sugerencias.sh` OK en 6,8s (1.270 SKUs con sugerencia) → `run_calc_stock_resumen.sh` OK en 3778s (5.583 SKUs, ventana de 365 días).
+
+> **Hallazgo de performance, no bloqueante (candidato a issue propio):** los ~65 min de `run_calc_planilla.py` y los ~63 min de `run_calc_stock_resumen.py` son casi enteramente **una sola query** cada uno — el `GROUP BY sku, fecha` sobre `stock_diario` en una ventana de 12-13 meses, que MySQL resuelve con tabla temporal en disco (`converting HEAP to ondisk` visible en el `PROCESSLIST`). El proceso Python queda a 0% de CPU esperándola. No es consecuencia de la reparación de #123 (la ventana es fija, no depende del rango reparado); es el costo de correr el recálculo completo, que hasta ahora nadie había cronometrado a mano. Línea de ataque si se convierte en issue: índice de cobertura sobre `stock_diario(sku, fecha, cantidad)`, o materializar el agregado diario por SKU en vez de recalcularlo entero cada vez.
+
+---
+
 ## Issues conocidos / TODOs en código
 
 | Issue | Ubicación | Descripción |
@@ -2715,6 +2969,76 @@ El hallazgo de arriba se resolvió, en dos vueltas (la primera con un bug propio
 - `PlanillaTable.tsx`: el chequeo `user?.role === 'administrador'` está repetido en ≥5 lugares del frontend sin un hook compartido (`useIsAdmin()`), y `frecuenciaEntries()` duplica ~70 líneas de estructura entre la rama admin/no-admin. Duplicación pre-existente en el patrón del repo, no introducida por este fix específicamente más que por extensión del mismo patrón.
 
 **#124 cerrado.**
+
+---
+
+### Ejecución real del backfill histórico de 10 años, issue #104 (sesión 2026-07-27/31)
+
+Implementación del fix acordado en el `/grill-me` previo (mismo issue, ver más arriba) más la corrida real en producción -- varios días de duración real, dos incidentes de producción encontrados y resueltos en el camino, y un bug de datos real descubierto recién al verificar el resultado (no solo confiar en `jobs_historial`).
+
+**Fix de `cmd_check` (`backfill_jobs.py`):** ahora compara `grupo_id` + `fecha_desde` + `fecha_hasta`, no solo el grupo -- TDD real (test rojo confirmado contra el código sin el fix antes de implementarlo). Commit `ada1608`.
+
+**Chequeo operativo real antes de la corrida:** `WS_URL` no estaba en `.env` de producción -- el cron diario lo hardcodea inline como parámetro de Pentaho en `run_ofelia.sh`, invisible para el entorno del contenedor. `run_backfill_ventas.sh` sí lo exige como variable de entorno real. Mismo problema con `ID_EMPRESA`/`S_DEPOSITOS`. Los tres hay que pasarlos explícitos vía `-e` en el `docker compose exec` para cualquier corrida manual futura de este script.
+
+**Piloto (grupo 44, 1 SKU) exitoso** tras desplegar el fix -- confirmó el mecanismo end-to-end (10 años reales, `MIN(fecha)=2016-10-03`).
+
+**Grupo 76 confirmado parcial** (2 de 6 SKUs con historia real a 2016, artefacto de recategorización), no se excluyó de la corrida completa -- coincide con la decisión ya tomada en el `/grill-me` para el caso parcial.
+
+**Incidente 1 -- disco lleno en MySQL (binlog), ~8.5h de corrida trabada sin que nadie lo notara hasta el chequeo manual:** el volumen de datos de MySQL (`/dev/nvme1n1`, 98G) llegó a 0 bytes libres, dejando una transacción trabada en `COMMIT` (`waiting for handler commit`) durante horas. Causa real: 17GB de binlog generados en un día por el volumen de escrituras del backfill, con `binlog_expire_logs_seconds` en el default de 30 días (sin réplicas, sin necesidad real de retenerlos). Se resolvió matando la conexión trabada (`KILL`, no `PURGE BINARY LOGS` -- ese comando necesita el mismo lock que la conexión trabada retiene, deadlock clásico) y bajando la retención a 900s luego 900s→cuando se ajustó más. **Efecto colateral no buscado:** MySQL abortó con `SIGABRT` dos veces durante el incidente (asserts internos de InnoDB ante el disco lleno) -- se recuperó solo ambas veces vía `XA crash recovery`, sin indicios de corrupción, pero perdió el `SET GLOBAL` (no persiste un restart) hasta que se re-aplicó después de la segunda caída.
+
+**Hallazgo más grande: el disco no lo llenaba MySQL.** Investigando la discrepancia entre lo que medía `du` en `/var/lib/mysql` (25G reales) y lo que reportaba `df` del volumen compartido (76-80G usados), se encontró que `/srv/evalutia/data` (el mismo volumen NVMe) es el data-root completo de Docker/containerd de **toda la VM**, no exclusivo de `evalutia` -- comparte disco con `matcher` (proyecto del socio del usuario, corriendo en paralelo en la misma VM, sin relación con Evalutia). El grueso eran 49G de `containerd` (capas de imágenes) + 32G de `docker` (build cache, en gran parte de los rebuilds de `etl` para desplegar este mismo fix). Se limpió con `docker builder prune -af` + `docker image prune -f` (solo cache y dangling images, nunca `-a` ni `--volumes`, para no arriesgar ninguna imagen/volumen de `matcher` mientras sus 3 contenedores seguían corriendo) -- liberó ~62GB reales sin tocar nada del otro proyecto.
+
+**Corrida completa terminada** (65 grupos no-201, ~4 días de duración real incluyendo el incidente): grupo más grande (200, 2636 artículos) tardó 42612s (~11.8h) él solo, en línea con la estimación hecha a partir del precedente de #44 escalado a la ventana de 10 años.
+
+**Incidente 2 -- bug real de datos, encontrado solo al verificar (no confiar en `estado='exitoso'`):** `merge_y_truncar_stage()` (el paso final que mueve `ventas_historicas_stage` → `ventas_historicas`) se invocaba sin chequear su código de salida. Causa: 39 SKUs con ventas históricas reales pero **sin fila en `articulos`** (productos dados de baja del catálogo actual) hacían fallar el `INSERT` completo por la FK `fk_ventas_articulo` -- atómico, sin tolerancia parcial. El script seguía de largo y marcaba el grupo `exitoso` igual. Resultado real: **39 de los 65 grupos quedaron con los 2 años de siempre**, no los 10 años reales, pese a figurar `exitoso` en `jobs_historial` -- detectado recién al chequear `MIN(fecha)` por grupo, uno de los criterios de aceptación del issue que casi se salta por confiar en el estado del job.
+
+**Fix real (commit `e0fa813`):** el `INSERT` excluye SKUs sin fila en `articulos` (`WHERE sku IN (SELECT sku FROM articulos)`, ~1.4% de las filas en `stage`, se descartan en vez de reconstruir el catálogo histórico) y el call site ahora chequea el código de salida del merge, marcando el grupo `fallido` si revienta -- reusa el mecanismo de `FAILED_CHUNKS`/reintento ya existente para fallos de chunk.
+
+**Deploy complicado por el mismo motivo que #104 original diagnosticó en otro lado:** `/opt/evalutia` en la VM tiene archivos de `.git` con dueño mixto (`ssm-user` vs `ubuntu`, según quién se conectó last -- SSM Session Manager vs SSH directo), y la clave SSH de `ubuntu` no está registrada como deploy key en GitHub (`git@github.com: Permission denied`). Se resolvió copiando el archivo corregido directo por `scp` (bypass de `git pull` para ese único archivo) en vez de perseguir la causa de fondo -- pendiente si se repite: registrar la clave de `ubuntu` como deploy key, o estandarizar qué usuario opera el repo.
+
+**Recuperación de los 39 grupos atascados:** en vez de re-correr el backfill completo (habría vuelto a pegarle al WS sin necesidad, los datos ya estaban extraídos), se corrió el merge corregido **una sola vez** directo contra el `ventas_historicas_stage` acumulado (93.069.480 filas: 91.8M válidas + 1.272.600 huérfanas de 39 SKUs distintos). La transacción tardó ~95 minutos (`INSERT...SELECT...GROUP BY` sobre ese volumen, sin progreso visible tipo log -- monitoreado vía `information_schema.innodb_trx.trx_rows_locked/modified`) y terminó de commitear **apenas antes de que el disco volviera a quedarse sin espacio** (llegó a 2GB libres durante la transacción, se liberó margen extra con otra limpieza de Docker sobre la marcha). Verificado: `ventas_historicas_stage` en 0 filas, `MIN(fecha)=2016-10-03` confirmado en los 39 grupos.
+
+**Verificación final del criterio de aceptación** ("sin alterar el rango ya cargado"): snapshot `COUNT`+`SUM` por grupo antes/después. 5 grupos mostraron diferencias reales (61, 69, 76, 81, 200) -- todas incrementos, nunca bajas, consistentes con 2-3 noches reales de cron diario corriendo durante los ~4 días que duró la corrida completa (la ejecución del backfill nunca bloqueó el cron diario más allá de mientras su propio lock estaba activo). No hay indicio de que el backfill ni la recuperación hayan alterado indebidamente el rango 2024-2026 ya cargado.
+
+**Lección para la próxima corrida de este tipo:** setear `binlog_expire_logs_seconds` corto (o hacer `docker system prune` de rutina) **antes** de lanzar cualquier operación de escritura masiva en este VM, no reactivamente -- el disco compartido con `matcher` tiene menos margen real del que parece.
+
+**#104 cerrado.**
+
+---
+
+### Medición real de impacto en elegibilidad post-backfill, issue #105 (sesión 2026-07-31/08-01)
+
+Sin código nuevo previsto originalmente (reusar `ml/run_eval_elegibilidad_dry_run.py` de `#102`), pero terminó necesitando dos fixes reales de memoria y dos migraciones de producción pendientes descubiertas en el camino -- ver bitácora completa abajo.
+
+**Migración pendiente de `#102` nunca desplegada:** `jobs_historial.tipo_job` en producción no tenía el valor `'eval_elegibilidad'` en el ENUM (`infra/sql/18-jobs-historial-eval-elegibilidad.sql` se había aplicado local en su momento, nunca en la VM). Aplicada ahora, confirmado idempotente.
+
+**Incidente real -- la VM se colgó dos veces intentando la corrida full-catalog:** con el fix de `#104` aplicado, `ventas_historicas` pasó a tener 5559 SKUs con historia real (muchos con 10 años en vez de 2). `load_series_by_sku_mysql` (`ioworker/data.py`) traía la tabla **completa** a memoria con `pd.read_sql_query`, sin filtrar por SKU en el SQL -- el filtro de `only_skus` se aplicaba recién después en pandas. En una VM `t3.medium` (3.7GB RAM), esto agotó memoria+swap y colgó la instancia entera (no solo el contenedor -- SSH, HTTP/HTTPS y hasta AWS Session Manager dejaron de responder) **dos veces**, cada una requiriendo `Stop`/`Start` manual desde la consola de AWS (el usuario descartó explícitamente subir el tamaño de instancia por costo).
+
+**Fix real 1 (commit `d3233a0`):** `load_series_by_sku_mysql` ahora arma `WHERE sku IN (...)` en el propio SQL cuando se pasa `only_skus`, mismo patrón que `fetch_catalogo` en `apply_elegibilidad.py` (`text()` + params nombrados). Sin cambio de comportamiento para full-catalog ni para `top_n`. Tests nuevos contra MySQL real (`tests/test_data.py`).
+
+**Fix real 2 (commit `35a289e`):** el filtro de SQL no alcanza solo -- una corrida full-catalog (sin `only_skus`) sigue cargando todo de una. `EVAL_BATCH_SIZE` (opcional, default `0` = comportamiento anterior) parte el universo completo de SKUs en lotes y corre `eval_walkforward.py` una vez por lote, mismo `EVAL_VERSION` en todos (`catalogo_modelos` acumula sin pisarse entre lotes, dedupea por `(sku, modelo)` quedándose con la `fecha_estimacion` más reciente). Tests nuevos puros (`chunk_skus`, `build_env_for_batch`).
+
+**Segunda migración pendiente descubierta a mitad de la corrida ya con `EVAL_BATCH_SIZE` andando:** `catalogo_modelos` (`infra/sql/16-catalogo-modelos.sql`, de `#86`) **tampoco existía en producción** -- mismo patrón que la de `#102`, documentada como "paso humano separado" en su momento y nunca ejecutada. Aplicada en caliente sin frenar la corrida (`CREATE TABLE IF NOT EXISTS`, sin impacto en lo que ya estaba corriendo). Los primeros 1-2 lotes procesados antes de este fix probablemente no persistieron en `catalogo_modelos` (pérdida menor, ~150-300 SKUs de 5559, no perseguida).
+
+**Corrida real exitosa** (`EVAL_BATCH_SIZE=150`, 38 lotes, ~2h20min total, sin volver a colgar la VM -- memoria se mantuvo entre 700MB-2GB disponibles todo el tramo, con picos de swap pero estables, no descontrolados como en los cuelgues anteriores): `jobs_historial` id=319, `estado='exitoso'`.
+
+**Resultado real, comparado contra el mismo universo del baseline de `#97`/`#102`** (los 1482 SKUs ya trackeados en `articulos_elegibilidad_econometrico`, no el catálogo completo de 5559):
+
+| Métrica | Antes (`#102`, pre-`#104`) | Después (post-`#104`) |
+|---|---|---|
+| Con historia suficiente para evaluar (`skus_evaluados`) | 58 / 1482 (3.9%) | **1026 / 1482 (69.2%)** |
+| Elegibles | 14 / 1482 (0.94%) | **244 / 1482 (16.5%)** |
+| Tasa de conversión evaluado→elegible | 24.1% (14/58) | 23.8% (244/1026) |
+
+**Hallazgo clave:** la tasa de conversión evaluado→elegible se mantuvo prácticamente igual (~24%) antes y después -- el salto de 14 a 244 elegibles no es porque el criterio de elegibilidad (`#70`) se haya vuelto más laxo, es enteramente porque el backfill de `#104` le dio historia real suficiente a muchísimos más SKUs para siquiera poder evaluarse (69.2% vs 3.9%). Confirma empíricamente la hipótesis de negocio que motivó `#104`.
+
+Full-catálogo (los 5559 SKUs de `ventas_historicas`, incluye grupo 201 y SKUs fuera del pool original de 1482 candidatos): `skus_evaluados=2194`, `elegibles=748`, `ganan=742`, `pierden=8`, `sin_cambio=1444`.
+
+**Decisión documentada (criterio de aceptación del issue):** aplicar este resultado a producción (`APPLY_PERSIST=true` en `apply_elegibilidad.py`) quedó explícitamente como paso humano separado, no implementado en la sesión de medición -- exactamente lo que pedía el issue.
+
+**Aplicado a producción, decisión explícita del usuario, misma sesión:** `APPLY_VERSION=eval-mensual-2026-08 APPLY_PERSIST=true python3 -m ml.apply_elegibilidad` -- `upsert_elegibilidad` es solo `UPDATE` (nunca `INSERT`, ver docstring de `#73`), así que se autolimitó solo a los 1482 SKUs ya trackeados pese a que la medición cubrió 2194 (incluye grupo 201 y SKUs fuera del pool original): **1026 filas actualizadas**, exactamente el subconjunto restringido calculado arriba, los otros 1168 SKUs medidos (fuera del pool) no tenían fila previa y no se tocaron -- sin riesgo de contaminar la tabla con SKUs fuera de su alcance. `revocados_sin_medicion` vacío, sin revocaciones. Confirmado en producción: `articulos_elegibilidad_econometrico` pasó de **14 a 244 elegibles** sobre 1482 filas totales.
+
+**#105 cerrado.**
 
 ---
 

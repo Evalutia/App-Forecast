@@ -185,6 +185,11 @@ process_chunk_depositos() {
 # se usa nada más en el camino donde YA se decidió no mergear, para dejar el
 # stage limpio antes del próximo grupo (que no tiene columna de grupo propia).
 merge_y_truncar_stage() {
+  # Issue #104: excluye SKUs sin fila en articulos (productos dados de baja del
+  # catalogo actual, pero con ventas historicas reales que el WS sigue
+  # devolviendo) -- sin el filtro, el INSERT completo revienta por la FK
+  # fk_ventas_articulo y ninguna fila del grupo se mergea, aunque sean pocos
+  # SKUs huerfanos entre millones de filas validas.
   python3 - <<PY
 import os, pymysql
 conn = pymysql.connect(
@@ -201,6 +206,7 @@ try:
                    NOW(6), COALESCE(MIN(s.fuente),'ws_consstockventa')
             FROM ventas_historicas_stage s
             WHERE s.sku IS NOT NULL
+              AND s.sku IN (SELECT sku FROM articulos)
             GROUP BY DATE(s.fecha), TRIM(s.sku)
             ON DUPLICATE KEY UPDATE
               cantidad = VALUES(cantidad), ts_carga = VALUES(ts_carga), fuente = VALUES(fuente)
@@ -265,8 +271,8 @@ echo "[INFO] Grupos a procesar: ${GROUPS_LIST}"
 for G in ${GROUPS_LIST}; do
   echo "[INFO] === Grupo ${G} ==="
 
-  if [[ "$(python3 "${SELF_DIR}/backfill_jobs.py" check "${G}")" == "1" ]]; then
-    echo "[INFO] Grupo ${G} ya completado en una corrida anterior — se saltea."
+  if [[ "$(python3 "${SELF_DIR}/backfill_jobs.py" check "${G}" "${BACKFILL_FROM}" "${BACKFILL_TO}")" == "1" ]]; then
+    echo "[INFO] Grupo ${G} ya completado en una corrida anterior para este mismo rango — se saltea."
     continue
   fi
 
@@ -295,6 +301,12 @@ for G in ${GROUPS_LIST}; do
   # en "ejecutando" para siempre (el "end" de abajo nunca se alcanzaría).
   # Sumarlo a FAILED_CHUNKS reusa el "end ... fallido" que ya existe: este
   # grupo se reintenta completo la próxima corrida, los demás siguen.
+  #
+  # Superset del fix de #104 (que solo chequeaba que merge_y_truncar_stage
+  # no explotara): esto ADEMÁS saltea el merge directamente cuando el grupo
+  # ya tuvo chunks fallidos del WS -- #104 igual llamaba al merge en ese
+  # caso, mezclando datos parciales con completos (la Capa 2 que #124 vino
+  # a cerrar).
   if [[ ${#FAILED_CHUNKS[@]} -eq 0 ]]; then
     if ! merge_y_truncar_stage; then
       # Atómico: si esto falló, ni el INSERT ni el DELETE se aplicaron (misma
