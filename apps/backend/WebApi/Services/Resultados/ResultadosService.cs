@@ -59,6 +59,7 @@ namespace Services.Resultados
         .ToList();
 
       int totalSkus = resumen.Count;
+      int skusConDatos = 0;
       int skusConStockout = 0;
       double sumStockoutRate = 0;
       long ventasPerdidasTotal = 0;
@@ -68,6 +69,14 @@ namespace Services.Resultados
         // Issue #120: mismo criterio que GetStockAnalysis/GetStockoutDistribution --
         // sin ningun dia observado no hay señal para presumir quiebre.
         if (r.TotalDias <= 0) continue;
+
+        // Issue #120 (code-review post-implement): totalSkus (universo completo,
+        // incluye SKUs sin datos) NO debe ser el denominador del promedio -- un SKU
+        // sin datos no aporta al numerador (sumStockoutRate) por el continue de
+        // arriba, así que dividir por totalSkus deflaciona el promedio a medida que
+        // entran más SKUs nuevos/sin procesar al catálogo. skusConDatos cuenta solo
+        // los que sí participaron del numerador.
+        skusConDatos++;
 
         var diasSinStock = Math.Max(VentanaDiasStock - r.DiasConStock, 0);
         var stockoutRate = (double)diasSinStock / VentanaDiasStock * 100;
@@ -102,7 +111,7 @@ namespace Services.Resultados
       {
         TotalSkus = totalSkus,
         SkusConStockout = skusConStockout,
-        StockoutRatePromedio = totalSkus > 0 ? Math.Round(sumStockoutRate / totalSkus, 1) : 0,
+        StockoutRatePromedio = skusConDatos > 0 ? Math.Round(sumStockoutRate / skusConDatos, 1) : 0,
         VentasPerdidasTotales = ventasPerdidasTotal,
         R2Promedio = Math.Round(r2Promedio, 3),
         UltimaPrediccion = ultimaPrediccion != default ? ultimaPrediccion.ToString("yyyy-MM-dd") : null
@@ -172,7 +181,9 @@ namespace Services.Resultados
         // a diferencia del caso "feed parcial" (totalDias > 0), acá no sabemos nada.
         bool tieneDatos = totalDias > 0;
         var diasSinStock = tieneDatos ? Math.Max(VentanaDiasStock - diasConStock, 0) : 0;
-        var stockoutRate = tieneDatos ? (double)diasSinStock / VentanaDiasStock * 100 : 0;
+        // diasSinStock ya es 0 cuando !tieneDatos (línea de arriba) -- el
+        // ternario acá era redundante, la fórmula ya da 0 sola.
+        var stockoutRate = (double)diasSinStock / VentanaDiasStock * 100;
 
         // Solo calcular velocidad de venta si hay suficientes días de datos (>= 30)
         bool dataSuficiente = totalDias >= MIN_DIAS_STOCK;

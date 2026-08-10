@@ -69,6 +69,14 @@ def procesar_payload(conn, payload, deposito_forzado=None, grupo_id=None):
     insert_cols.append("fuente")
 
     placeholders = ",".join(["%s"] * len(insert_cols))
+    # Issue #125 (code-review post-implement): si el stock no se puede
+    # interpretar, no hay que pisar un valor bueno que ya estaba en stage
+    # con un 0/NULL -- se arma una variante del mismo INSERT que omite la
+    # columna stock (ni se inserta ni se actualiza esa columna) en vez de
+    # defaultear a "0" como hacia antes de este fix. Solo hace falta en la
+    # rama con ON DUPLICATE KEY UPDATE: la otra rama siempre inserta una
+    # fila nueva, no hay valor previo que proteger.
+    sql_sin_stock = None
     if has_deposito:
         update_cols = ["cantidad"]
         if has_stock: update_cols.append("stock")
@@ -80,6 +88,16 @@ def procesar_payload(conn, payload, deposito_forzado=None, grupo_id=None):
             f"VALUES({placeholders}) "
             f"ON DUPLICATE KEY UPDATE {update_clause}"
         )
+        if has_stock:
+            insert_cols_sin_stock = [c for c in insert_cols if c != "stock"]
+            placeholders_sin_stock = ",".join(["%s"] * len(insert_cols_sin_stock))
+            update_cols_sin_stock = [c for c in update_cols if c != "stock"]
+            update_clause_sin_stock = ", ".join(f"{c} = VALUES({c})" for c in update_cols_sin_stock)
+            sql_sin_stock = (
+                f"INSERT INTO ventas_historicas_stage({','.join(insert_cols_sin_stock)}) "
+                f"VALUES({placeholders_sin_stock}) "
+                f"ON DUPLICATE KEY UPDATE {update_clause_sin_stock}"
+            )
     else:
         print("[WARN] ventas_historicas_stage sin columna deposito_id -- falta correr "
               "infra/sql/19-ventas-stage-deposito-grupo.sql. La ingesta NO es idempotente "
@@ -142,6 +160,7 @@ def procesar_payload(conn, payload, deposito_forzado=None, grupo_id=None):
                 continue
 
             values = {"fecha": fecha, "sku": sku, "cantidad": cant_val, "fuente": fuente}
+            stock_parseable = True
             if has_stock:
                 try:
                     if stock_is_decimal:
@@ -150,15 +169,28 @@ def procesar_payload(conn, payload, deposito_forzado=None, grupo_id=None):
                     else:
                         values["stock"] = parsers.parse_entero(stock)
                 except parsers.ParseError as e:
-                    print(f"[WARN] stock no interpretable sku={sku} fecha={fecha}: {e}; fila sin stock (0)")
-                    values["stock"] = "0" if stock_is_decimal else 0
+                    stock_parseable = False
+                    if sql_sin_stock is not None:
+                        print(f"[WARN] stock no interpretable sku={sku} fecha={fecha}: {e}; se inserta/actualiza sin tocar stock")
+                    else:
+                        # Rama sin ON DUPLICATE KEY UPDATE (deposito_id no
+                        # existe todavia): siempre inserta fila nueva, no
+                        # hay valor previo que proteger -- NULL, no 0.
+                        print(f"[WARN] stock no interpretable sku={sku} fecha={fecha}: {e}; se inserta con stock NULL")
+                        values["stock"] = None
             if has_deposito:
                 values["deposito_id"] = deposito_id
             if has_grupo:
                 values["grupo_id"] = grupo_val
 
+            active_sql = sql
+            active_cols = insert_cols
+            if has_stock and not stock_parseable and sql_sin_stock is not None:
+                active_sql = sql_sin_stock
+                active_cols = [c for c in insert_cols if c != "stock"]
+
             try:
-                cur.execute(sql, tuple(values[c] for c in insert_cols))
+                cur.execute(active_sql, tuple(values[c] for c in active_cols))
                 rows_ins += 1
             except Exception:
                 rows_skip += 1
@@ -166,7 +198,15 @@ def procesar_payload(conn, payload, deposito_forzado=None, grupo_id=None):
 
             if stock is not None and deposito_forzado:
                 try:
-                    stock_diario_val = parsers.parse_entero(stock)
+                    # Reusa el valor ya parseado arriba cuando coincide el tipo
+                    # (evita parsear el mismo string dos veces por fila en el
+                    # camino comun) -- en decimal son columnas de tipos
+                    # distintos (stage puede ser DECIMAL, stock_diario es
+                    # entero), ahi se mantiene el parseo independiente.
+                    if not stock_is_decimal and stock_parseable:
+                        stock_diario_val = values["stock"]
+                    else:
+                        stock_diario_val = parsers.parse_entero(stock)
                 except parsers.ParseError as e:
                     print(f"[WARN] stock_diario no actualizado, stock no interpretable sku={sku} fecha={fecha}: {e}")
                 else:

@@ -148,7 +148,10 @@ XML
     return 11
   fi
 
-  JSON="$(printf "%s" "$JSON" | sed -e 's/&quot;/"/g' -e 's/&amp;/\&/g' -e 's/&lt;/</g' -e 's/&gt;/>/g')"
+  # Issue #125: el desescape de entities HTML se movio a Python (mismo
+  # patron que run_extract_sales_chunk.sh) -- este sed tenia el orden
+  # quot/amp/lt/gt, que desescapaba de mas (&amp;lt; -> &lt; -> < en vez
+  # de quedarse en &lt;). Se escribe el JSON tal cual vino del WS.
   printf '%s' "$JSON" > "$TMP_JSON"
 
   TMP_JSON_PATH="$TMP_JSON" __FORCED_DEPOSITO="${dep}" python3 "${SELF_DIR}/run_extract_sales_chunk.py"
