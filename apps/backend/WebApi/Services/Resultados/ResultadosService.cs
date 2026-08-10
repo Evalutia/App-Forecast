@@ -13,6 +13,17 @@ namespace Services.Resultados
       _db = db;
     }
 
+    // Ventana calendario de StockResumen365 (issue #120, ver run_calc_stock_resumen.py
+    // VENTANA_DIAS). StockResumen365.TotalDias NO es esto -- cuenta COUNT(agg.fecha),
+    // dias con registro real en stock_diario, no dias calendario. Un articulo cuyo feed
+    // solo escribe filas mientras tiene stock llega con TotalDias == DiasConStock, asi
+    // que usarlo como denominador de la tasa de quiebre da 0% siempre, sin importar
+    // cuanto tiempo estuvo sin stock. La planilla (run_calc_planilla.py,
+    // dias_naturales_mes) usa el calendario como denominador -- un dia sin registro
+    // cuenta como sin stock ahi, no se excluye. Replicamos ese criterio: los dias sin
+    // registro en la ventana se presumen sin stock.
+    private const int VentanaDiasStock = 365;
+
     // SKUs elegibles para modelo econométrico (issue #94: migrado de grupos.aplica_modelo_econometrico,
     // flag muerto desde #71, a articulos_elegibilidad_econometrico.elegible -- mismo criterio que
     // get_skus_modelo.py usa desde #71, este servicio nunca se había actualizado). Evita que predicciones
@@ -54,15 +65,19 @@ namespace Services.Resultados
 
       foreach (var r in resumen)
       {
-        var totalDias = Math.Max(r.TotalDias, 1);
-        var stockoutRate = (double)(totalDias - r.DiasConStock) / totalDias * 100;
+        // Issue #120: mismo criterio que GetStockAnalysis/GetStockoutDistribution --
+        // sin ningun dia observado no hay señal para presumir quiebre.
+        if (r.TotalDias <= 0) continue;
+
+        var diasSinStock = Math.Max(VentanaDiasStock - r.DiasConStock, 0);
+        var stockoutRate = (double)diasSinStock / VentanaDiasStock * 100;
         sumStockoutRate += stockoutRate;
-        if (r.DiasConStock < totalDias) skusConStockout++;
+        if (diasSinStock > 0) skusConStockout++;
 
         if (r.DiasConStock > 0 && r.Ventas365 > 0)
         {
           var ventasPorDia = (double)r.Ventas365 / r.DiasConStock;
-          ventasPerdidasTotal += (long)(ventasPorDia * r.DiasSinStock);
+          ventasPerdidasTotal += (long)(ventasPorDia * diasSinStock);
         }
       }
 
@@ -152,8 +167,12 @@ namespace Services.Resultados
         int diasConStock = r?.DiasConStock ?? 0;
         int ventas365 = (int)(r?.Ventas365 ?? 0);
 
-        var diasSinStock = Math.Max(totalDias - diasConStock, 0);
-        var stockoutRate = totalDias > 0 ? (double)diasSinStock / totalDias * 100 : 0;
+        // Sin ningun dia observado (r == null, articulo recien dado de alta y aun
+        // no procesado por el ETL nocturno) no hay señal para presumir quiebre --
+        // a diferencia del caso "feed parcial" (totalDias > 0), acá no sabemos nada.
+        bool tieneDatos = totalDias > 0;
+        var diasSinStock = tieneDatos ? Math.Max(VentanaDiasStock - diasConStock, 0) : 0;
+        var stockoutRate = tieneDatos ? (double)diasSinStock / VentanaDiasStock * 100 : 0;
 
         // Solo calcular velocidad de venta si hay suficientes días de datos (>= 30)
         bool dataSuficiente = totalDias >= MIN_DIAS_STOCK;
@@ -175,7 +194,7 @@ namespace Services.Resultados
           Ventas365 = ventas365,
           DiasConStock365 = diasConStock,
           DiasSinStock365 = diasSinStock,
-          VentasPorDiaConStock365 = ventasPorDia.HasValue ? (double)Math.Ceiling(ventasPorDia.Value) : null,
+          VentasPorDiaConStock365 = ventasPorDia.HasValue ? Math.Round(ventasPorDia.Value, 2) : null,
           StockoutRate365 = Math.Round(stockoutRate, 1),
           VentasPerdidasEstimadas365 = ventasPerdidas,
           PronosticoProximoTrimestre = pronostico,
@@ -216,7 +235,8 @@ namespace Services.Resultados
         if (r.TotalDias < MIN_DIAS) continue;
         if (r.DiasConStock <= 0 || r.Ventas365 <= 0) continue;
         var ventasPorDia = (double)r.Ventas365 / r.DiasConStock;
-        var perdidas = (int)(ventasPorDia * r.DiasSinStock);
+        var diasSinStock = Math.Max(VentanaDiasStock - r.DiasConStock, 0);
+        var perdidas = (int)(ventasPorDia * diasSinStock);
         if (perdidas <= 0) continue;
         results.Add(new TopVentasPerdidasDto
         {
@@ -251,7 +271,8 @@ namespace Services.Resultados
           items.Add(new StockoutItemDto { Sku = s.Sku, Descripcion = s.Descripcion, StockoutRate = -1, Categoria = "SinDatos" });
           continue;
         }
-        var rate = (double)r.DiasSinStock / r.TotalDias * 100;
+        var diasSinStock = Math.Max(VentanaDiasStock - r.DiasConStock, 0);
+        var rate = (double)diasSinStock / VentanaDiasStock * 100;
         string cat;
         if (rate > 30) { critico++; cat = "Critico"; }
         else if (rate > 15) { moderado++; cat = "Moderado"; }
@@ -347,7 +368,10 @@ namespace Services.Resultados
           g.Key.Year,
           g.Key.Month,
           TotalUnidades = g.Sum(x => (long)x.Cantidad),
-          SkusActivos = g.Select(x => x.Sku).Distinct().Count()
+          // Issue #64/#120: ventas_historicas guarda una fila por SKU por dia
+          // calendario aunque no haya venta real (cantidad=0). Sin este filtro,
+          // Distinct() cuenta el catalogo entero como "activo".
+          SkusActivos = g.Where(x => x.Cantidad > 0).Select(x => x.Sku).Distinct().Count()
         })
         .ToList();
 
