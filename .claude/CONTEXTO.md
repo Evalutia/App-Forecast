@@ -3042,6 +3042,29 @@ Full-catálogo (los 5559 SKUs de `ventas_historicas`, incluye grupo 201 y SKUs f
 
 ---
 
+### #120 y #125: dos issues en paralelo con `/grill-me` + `/implement` en sesiones separadas + `/code-review` combinado (sesión 2026-08-10)
+
+Primera vez que se usa este flujo en el repo: `/grill-me` para acordar el plan (orden secuencial no paralelo real, sesión nueva por `/implement` para no arrastrar contexto ajeno, verificación de producción explícitamente fuera de alcance de cada `/implement`, `/code-review` combinado al final antes de un solo push). Los dos issues elegidos a propósito por no compartir ningún archivo entre sí.
+
+**#120** (`ResultadosService.cs`): 3 números que contradecían la planilla -- denominador de tasa de quiebre (`StockResumen365.TotalDias`, días con registro, contra `dias_naturales_mes` de la planilla, calendario), `Math.Ceiling` inflando 0.02 und/día a "1", y `SkusActivos` sin filtrar `cantidad > 0` (mismo invariante que #64). El propio `/code-review` de esa sesión encontró que el fix del denominador sin guarda convertía un SKU recién dado de alta (sin datos) en "100% quiebre" -- guarda agregada, y el mismo bug replicado en 2 métodos más de los originalmente identificados. TDD, 6 tests nuevos.
+
+**#125** (`services/etl/parsers.py`, nuevo): unifica parseo de números/fechas/códigos entre los 3 extractores. Bug concreto: `clamp_signed_int` en `run_extract_sales_chunk.py` no pasaba por el reemplazo de coma que sí tenía `to_decimal` -- `'1,5'` tiraba `InvalidOperation` y caía a `0` silencioso, pisando stock correcto. El bug de orden en desescape de entities HTML (`&amp;lt;` → `&lt;` → `<` en vez de quedarse en `&lt;`) resultó estar en **dos** scripts (`run_extract_sales_chunk.sh` y `run_extract_stockxml.sh`), no solo el uno del hallazgo original. 54 tests nuevos, suite completa 132/132.
+
+**`/code-review` combinado (`cacd791..HEAD`, los dos diffs juntos) encontró 3 bugs reales por interacción entre ambos cambios que ningún `/implement` aislado podía ver:**
+- `run_backfill_ventas.sh` seguía con el sed viejo de desescape (mismo bug que #125 sacó del script diario) -- una corrida de backfill manual podía divergir del cron nocturno para el mismo payload. Sacado.
+- `run_extract_sales_chunk.py`: un `stock` no interpretable seguía escribiendo `0` en `ventas_historicas_stage.stock` vía `ON DUPLICATE KEY UPDATE`, pisando un valor bueno -- contradecía el propio fix de al lado (`stock_diario` sí hacía skip). Ahora arma una variante del INSERT sin la columna `stock` en vez de defaultear sobre un valor existente. Verificado en Docker real.
+- `ResultadosService.GetResumenGlobal()`: `totalSkus` (universo completo) se usaba como denominador del promedio de stockout, pero los SKUs sin datos no aportan al numerador -- el promedio se deflaciona a medida que entran SKUs nuevos al catálogo. Corregido a `skusConDatos`.
+
+**Hallazgos del mismo review, evaluados y dejados sin tocar a propósito (no son bugs, son trade-offs de diseño ya alineados con lo que pedía cada issue):**
+- El parser nuevo de `parsers.py` ya no tiene el fallback de "extraer dígitos de un string parcialmente numérico" que tenía el `parse_stock_value` viejo -- ahora descarta la fila con log visible en vez de adivinar un valor aproximado. Es exactamente el comportamiento que pedía el AC de #125 ("nunca como cero" / fallo visible), no una regresión.
+- `SkusActivos` ahora excluye SKUs cuyo único movimiento del mes fue una nota de crédito (cantidad negativa, #80) -- defendible (no es una venta), pero queda inconsistente con `TotalUnidades` del mismo DTO (que sí suma negativos). No se tocó, es un llamado de diseño, no un bug claro.
+
+**⚠️ Pendiente de verificar antes de dar por cerrado del todo, en el paso de producción separado (no se resolvió en código):** `parsers.normalize_sku()` ahora pone en mayúsculas los SKUs en `stockxml`/`sales_chunk` (antes no lo hacían; `articulos` siempre lo hizo). Si en `stock_diario`/`ventas_historicas` existen filas históricas con SKUs en minúscula o mixtos, van a quedar separadas de las filas nuevas (en mayúscula) del mismo artículo físico -- ningún backfill de reconciliación se corrió. Chequear `SELECT DISTINCT sku FROM stock_diario WHERE sku != UPPER(sku)` (y lo mismo en `ventas_historicas`) antes/durante la verificación de producción de #125.
+
+**#120 y #125 cerrados en código; verificación de producción de ambos (AC explícito de los dos issues) queda como paso manual separado, con el hallazgo de mayúsculas de arriba como primer chequeo.**
+
+---
+
 ## Documentación adicional
 
 | Archivo | Contenido |
