@@ -206,6 +206,44 @@ describe('buildPlanillaWorkbook (#107)', () => {
     expect(hoja.getRow(4).getCell(13).value).toBe(75); // V/E.Jun
   });
 
+  // ── Consistencia con el ETL (#129) ─────────────────────────────────────────
+  // Estos valores son la salida EXACTA de extrapolacion_mes() en
+  // services/etl/run_calc_planilla.py, que es la implementación de referencia.
+  // La fórmula vive en tres lugares (ETL, este export y qa_planilla_oracle.py);
+  // si alguna se toca sin las otras, el Excel muestra un V/E que contradice al
+  // VAj de la celda de al lado. Este test es lo que impide que eso pase en
+  // silencio: si falla, la implementación TS se desincronizó del ETL.
+  const CASOS_ETL = [
+    { ventas: 6, ds: 6, dn: 30, esperado: 10.8 },
+    { ventas: 29, ds: 29, dn: 30, esperado: 29.97 },
+    { ventas: 5, ds: 5, dn: 30, esperado: 9.17 },
+    { ventas: 30, ds: 30, dn: 30, esperado: 30.0 },
+    { ventas: 10, ds: 1, dn: 31, esperado: 19.68 },
+    { ventas: 0, ds: 5, dn: 30, esperado: 0.0 },
+    { ventas: -5, ds: 6, dn: 30, esperado: -5.0 },
+    { ventas: 562, ds: 13, dn: 31, esperado: 888.32 },
+    { ventas: 30, ds: 1, dn: 31, esperado: 59.03 },
+    { ventas: 100, ds: 15, dn: 30, esperado: 150.0 },
+    { ventas: 9, ds: 16, dn: 31, esperado: 13.35 },
+    { ventas: 1, ds: 26, dn: 31, esperado: 1.16 },
+  ];
+
+  it.each(CASOS_ETL)(
+    'V/E coincide con el ETL: $ventas uds en $ds de $dn días (#129)',
+    ({ ventas, ds, dn, esperado }) => {
+      const m = mes({
+        month: 6, estadoMes: 'quiebre_parcial',
+        ventasCantidad: ventas, diasConStock: ds, diasNaturalesMes: dn,
+        rotacionDiariaReal: ventas / ds,
+      });
+      const sku: PlanillaVentasDto = { ...skuA, sku: 'SKU-ETL', meses: [skuA.meses[0], m, skuA.meses[2]] };
+      const hoja = buildPlanillaWorkbook([sku], sugerencias).getWorksheet('Detalle de cálculo')!;
+      const ve = hoja.getRow(4).getCell(13).value as number;
+      // el ETL redondea a 2 decimales al persistir; el export no redondea
+      expect(Number(ve.toFixed(2))).toBe(esperado);
+    },
+  );
+
   it('hoja 2: V/E nunca supera el doble de lo vendido (#129)', () => {
     // El tope emerge de la fórmula: con muy pocos días de stock el
     // multiplicador tiende a 2 pero no lo alcanza.

@@ -10,7 +10,6 @@ set -euo pipefail
 #
 # El bookkeeping nunca puede voltear la corrida: cada llamada se aisla y su
 # fallo solo se loguea. El ETL manda; el registro es observabilidad.
-SELF_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 CRON_JOBS="${CRON_JOBS:-/app/services/etl/cron_jobs.py}"
 # Overridable solo para poder testear la orquestacion sin Pentaho (ver
@@ -29,7 +28,17 @@ KITCHEN="${KITCHEN:-/opt/pentaho/data-integration/kitchen.sh}"
 # no duplicarlo) para toda la corrida, no solo para chequear: el que llega
 # primero gana, el otro se saltea/aborta.
 BACKFILL_LOCK_FILE="${BACKFILL_LOCK_FILE:-/app/data/backfill.lock}"
-source "${SELF_DIR}/lock_backfill.sh"
+# Ruta absoluta, NO relativa a la ubicacion de este script: el Dockerfile lo
+# copia a /usr/local/bin/ pero lock_backfill.sh solo existe bajo /app, asi que
+# resolverlo "junto a mi" no funciona en produccion y `set -e` aborta
+# la corrida entera (paso el 2026-08-11: el cron nocturno no corrio). Misma
+# convencion que CRON_JOBS de arriba, overridable para los tests.
+LOCK_BACKFILL_SH="${LOCK_BACKFILL_SH:-/app/services/etl/lock_backfill.sh}"
+if [[ ! -f "${LOCK_BACKFILL_SH}" ]]; then
+  echo "[OFELIA][ERROR] no encuentro ${LOCK_BACKFILL_SH} -- abortando sin tocar nada." >&2
+  exit 1
+fi
+source "${LOCK_BACKFILL_SH}"
 if ! tomar_lock_backfill "${BACKFILL_LOCK_FILE}"; then
   echo "[OFELIA] Backfill en curso (${BACKFILL_LOCK_FILE}) — se saltea la corrida diaria de esta noche."
   python3 "${CRON_JOBS}" skip "backfill en curso (${BACKFILL_LOCK_FILE})" >/dev/null \

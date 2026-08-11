@@ -63,6 +63,9 @@ def entorno(tmp_path):
         "CRON_JOBS": str(cron_stub),
         "KITCHEN": str(kitchen_stub),
         "BACKFILL_LOCK_FILE": str(tmp_path / "no-existe.lock"),
+        # En produccion es /app/services/etl/lock_backfill.sh; aca se apunta al
+        # del repo. Es ruta absoluta a proposito -- ver test_layout_de_produccion.
+        "LOCK_BACKFILL_SH": str(SCRIPT.parent / "lock_backfill.sh"),
     }
     return {"env": env, "llamadas": llamadas, "tmp": tmp_path}
 
@@ -278,3 +281,46 @@ def test_start_que_falla_no_inventa_job_id_desde_el_stderr(entorno, tmp_path):
     assert not [ln for ln in registro if ln.startswith("cron:end")], \
         "no debe cerrar ninguna fila si no hubo job_id valido"
     assert "no se pudo registrar el inicio" in proc.stderr
+
+
+# ── Layout de produccion — regresion del 2026-08-11 ──────────────────────────
+
+def test_layout_de_produccion_el_script_no_vive_junto_a_lock_backfill(entorno, tmp_path):
+    """
+    El Dockerfile copia run_ofelia.sh a /usr/local/bin/ pero lock_backfill.sh
+    solo existe bajo /app/services/etl/. Resolver el lock "junto a mi"
+    (SELF_DIR) funcionaba en el repo y en estos tests -- donde los dos archivos
+    conviven -- y fallaba en produccion, abortando el cron entero con `set -e`
+    antes de tocar nada. El cron nocturno del 2026-08-11 no corrio por esto.
+
+    Este test copia el script SOLO a otro directorio, como hace la imagen.
+    """
+    aparte = tmp_path / "usr_local_bin"
+    aparte.mkdir()
+    copia = aparte / "run_ofelia.sh"
+    shutil.copy2(SCRIPT, copia)
+    assert not (aparte / "lock_backfill.sh").exists(), "el fixture debe dejarlo separado"
+
+    proc = subprocess.run([BASH, str(copia)], env=entorno["env"],
+                          capture_output=True, text=True)
+    registro = (entorno["llamadas"].read_text(encoding="utf-8").splitlines()
+                if entorno["llamadas"].exists() else [])
+
+    assert proc.returncode == 0, (
+        "la corrida aborto con el script separado de lock_backfill.sh -- "
+        f"es el bug del 2026-08-11. stderr: {proc.stderr.strip()}")
+    assert "kitchen" in registro, (
+        "el ETL no llego a ejecutarse; el script murio antes. "
+        f"stderr: {proc.stderr.strip()}")
+
+
+def test_falta_lock_backfill_aborta_con_mensaje_claro(entorno, tmp_path):
+    """Si el archivo no esta donde se lo espera, que se entienda por que."""
+    proc = subprocess.run(
+        [BASH, str(SCRIPT)],
+        env={**entorno["env"], "LOCK_BACKFILL_SH": str(tmp_path / "no-existe.sh")},
+        capture_output=True, text=True,
+    )
+    assert proc.returncode != 0
+    assert "no encuentro" in proc.stderr
+    assert "no-existe.sh" in proc.stderr
