@@ -1,1 +1,5 @@
 pytest>=8.0.0
+# openpyxl: lo usa scripts/diagnostico_planillas_cliente.py (#127) para leer las
+# planillas del cliente. No es dependencia del pipeline -- la imagen de etl no lo
+# trae, por eso vive acá y no en el requirements de runtime.
+openpyxl>=3.1.0

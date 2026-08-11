@@ -3154,6 +3154,36 @@ Severidad MEDIA. Precedido por `/grill-me issue 117`. Solo frontend, sin tocar b
 
 ---
 
+### #127: diagnóstico contra las planillas del cliente — decisión sobre la base de la rotación (sesión 2026-08-11)
+
+Rodrigo mandó 3 pares de planillas reales (`BRUTO` = lo que emite su sistema, `ROT OK` = con la rotación elegida a mano para el pedido). Precedido por `/grill-me` (ver #127 para los hallazgos de las fórmulas). Script: `scripts/diagnostico_planillas_cliente.py`, solo lectura, con los 6 archivos versionados en `scripts/fixtures/planillas_cliente/`.
+
+**Corrido contra producción, no contra local.** La réplica local tenía `stock_diario` sólo hasta el 14 de julio, lo que hacía aparecer 75 falsos meses "con quiebre" (`dias_con_stock=14` era falta de datos, no quiebre) y contaminaba el veredicto. Producción tiene los 31 días. Se accedió por túnel SSH al MySQL de la VM; el script no escribe nada.
+
+**Decisión de método: el denominador NO cambia.** Confirmado por dos vías independientes:
+
+1. **Directa.** Los `rot-ok` traen un bloque de columnas que la primera lectura pasó por alto (`TOT STK`, `C/STK`, `VTA`, `DDSTK`, sobre una ventana de 360 días). El issue #127 llegó a afirmar que "sus archivos no traen los días con stock" -- es cierto sólo para los `bruto`. En el 100% de 560 SKUs con datos se cumple `DDSTK = VTA / C/STK`: **su demanda diaria divide por días con stock.** Además su `C/STK` contra nuestro `dias_con_stock` da mediana 0.957, coherente con la diferencia de ventana (360 días contra nuestros ~395).
+2. **Indirecta (despeje).** Sobre 441 meses con quiebre real, 436 (98.9%) sólo se explican si divide por días con stock y **cero** casos apoyan días naturales.
+
+La sospecha que motivó el ticket (que su hoja `Compras` multiplica la rotación por días de calendario, y que por eso su rotación sería de base calendario) **queda refutada**: multiplican por días calendario una rotación medida sobre días con stock.
+
+Consecuencias directas:
+- **No se abre el issue de cambio de base** que #127 dejaba condicionado. No hay rediseño de `rotacion_diaria_real` ni de lo que deriva de ella (Rot.DesEstac., ROT.S, QBK, DDSTK), ni recálculo de producción.
+- **#130 se simplifica**: la única divergencia real en las columnas mensuales es que las suyas están desestacionalizadas y las nuestras crudas. Ya tenemos el valor desestacionalizado calculado, así que es cambiar qué se muestra, no cómo se calcula.
+- **#129 gana respaldo empírico** en vez de perderlo: si ambos dividimos por días con stock, el sesgo de sobreestimación que Rodrigo intuye en su pregunta 1 lo tienen **los dos métodos**. Su pregunta no es sobre una diferencia entre nosotros y él: es sobre un problema compartido.
+
+**Los factores estacionales son los mismos:** nuestro `factor_mes_MM` reproduce el valor del cliente en 99.9% de 3451 meses sin quiebre. La desestacionalización no es una fuente de divergencia.
+
+**El default de `Rot. Manual` es la propia `Rotacion DesEstac.` del cliente**: en los `bruto` viene precargada en 521 filas y en todas coincide exactamente con ella. Es decir que su sistema propone su rotación y la persona que arma el pedido decide activamente apartarse -- el desvío experto medible es `rot-ok` menos `bruto`. De los 491 SKUs comparados, sólo 13 quedaron con el valor sin tocar.
+
+**Brecha contra `Rot. Manual`** (491 SKUs comparables): mediana `ROT.S / Rot.Manual` = **0.963**, media 1.157. Sin sesgo sistemático fuerte, pero con mucha dispersión: 30% por encima de +10%, 37% por debajo de −10%, 33% dentro de ±10%. La media muy por encima de la mediana delata una cola larga a la derecha, y esa cola **correlaciona con quiebres**: el cuartil donde más nos pasamos promedia 2.10 meses con quiebre contra 1.66 del cuartil donde nos quedamos cortos, con casos extremos como ×15.8 y ×10.6 en artículos con 2 y 4 meses de quiebre. Es evidencia medida de que la extrapolación infla, justo lo que #129 corrige.
+
+**Hallazgo lateral, fuera de alcance:** la venta mensual coincide en 88.9% de 14.853 celdas comparables, y el 80.8% de las diferencias son casos donde **ambos valores son mayores a cero pero distintos** — no se explican por el merchandising que el cliente no sigue (esa es sólo una parte del 19% restante). Hay 508 SKUs afectados, algunos con los 12 meses distintos, lo que sugiere algo sistemático y no ruido. Registrado en #126, que es donde vive la conversación sobre las diferencias contra su planilla; no se persigue acá.
+
+**#127 cerrado.** Habilita #128 (respuesta al cliente), y #129/#130 quedan como estaban salvo la simplificación de alcance de #130.
+
+---
+
 ## Documentación adicional
 
 | Archivo | Contenido |

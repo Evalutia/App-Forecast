@@ -51,7 +51,7 @@ jobs:
         with:
           python-version: "3.11"
       - name: Install dependencies
-        run: pip install pytest PyMySQL
+        run: pip install PyMySQL -r services/etl/requirements-dev.txt
       - name: Run tests
         working-directory: services/etl
         run: python -m pytest tests/ -v
