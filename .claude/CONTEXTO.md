@@ -3184,6 +3184,32 @@ Consecuencias directas:
 
 ---
 
+### #128: respuesta a las tres consultas de Rodrigo (sesión 2026-08-11)
+
+Documento para el cliente, listo para que Nico lo revise y lo envíe: **https://claude.ai/code/artifact/d9c7db69-2ee7-4f4c-94be-41e16ce8b20b**
+
+Las tres consultas tenían estados muy distintos, y la revisión de issues previa a redactar fue lo que lo destrabó:
+
+| Consulta | Estado real |
+|---|---|
+| 1 · Extrapolación y momento del quiebre | Hueco genuino, sin issue previo. Se responde con la corrección de #129. |
+| 2 · Columnas mensuales y su coloreado | Tenía razón y nosotros asumíamos lo contrario (#32 decidió explícitamente mostrar la rotación cruda). Se responde con #130. |
+| 3 · Qué muestra `VAj` | **Ya estaba resuelto desde #109** — la hoja "Criterios" lo documenta. Nunca le llegó. |
+
+**Contenido, en lo que importa:**
+- **Consulta 1:** se le reconoce el problema sin rodeos y se le muestra la corrección con una tabla de multiplicadores antes/después. El argumento de venta es que **su propio ejemplo del día 29 da × 1.03** — el "3% más" que él escribió — sin haber calibrado nada para que diera eso. Se suma el fundamento que él no explicita: los días posteriores a una reposición arrastran demanda reprimida, así que ese ritmo está sesgado hacia arriba por construcción.
+- **Consulta 2:** se le dice que tenía razón y se agrega el hallazgo que ni él ni nosotros veíamos -- que la columna resumen `Rotacion DesEstac.` promedia valores que no aparecen en ninguna columna visible, así que **la cuenta no le cierra aunque la haga bien**. En su planilla sí cierra. Se le adelanta que el criterio de coloreado se le va a mostrar antes de aplicarlo. Y se le informan los dos puntos donde el diagnóstico de #127 confirmó que **sí** coincidimos: denominador (días con stock) y factores estacionales (99.9%).
+- **Consulta 3:** definición de `VAj` como "valor ajustado" más la tabla de los tres métodos y su relación con la columna `Crit.` y con los tickets.
+- **Aviso de cambios:** qué dos columnas van a moverse y por qué, dado que la planilla se reconstruye cada noche y los valores cambian solos.
+
+**Va separado de #126** (decisión de la sesión de `/grill-me`): mezclar "te contesto tus tres preguntas" con "contestame estas cuatro mías" diluye las dos. Las de #126 llevan sin respuesta desde julio y siguen pendientes.
+
+**#110 cerrado sin enviarse.** Su documento (del 2026-08-02) describía el export anterior a #107 y citaba valores de `I02418` que #116, #117 y #122 ya cambiaron -- enviarlo hoy sería mandar cifras que el cliente no va a encontrar en su archivo, junto con un segundo documento el mismo día sobre la misma planilla. El ítem 4 que pedía definir QBK/ROT.S/Fiabilidad/Crit/VAj queda saldado por otra vía: `VAj` y `Crit` en este documento, y las otras tres en la hoja "Criterios" que #109 metió dentro de cada Excel.
+
+**#128 cerrado en cuanto al entregable**; el envío al cliente lo hace Nico.
+
+---
+
 ## Documentación adicional
 
 | Archivo | Contenido |
