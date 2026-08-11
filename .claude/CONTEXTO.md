@@ -3148,7 +3148,9 @@ Severidad MEDIA. Precedido por `/grill-me issue 117`. Solo frontend, sin tocar b
 
 **Suite:** tsc limpio, 33/33 tests de planilla (18 preexistentes + 14 nuevos + 1 agregado por el review).
 
-**#117 cerrado en código.** Deploy a producción queda como paso separado.
+**Desplegado a producción** (commit `78f06ea`, rebuild de `webapp`; sin cambios de backend/ETL, no requirió migración ni corrida manual).
+
+**#117 cerrado en código y en producción.**
 
 ---
 
