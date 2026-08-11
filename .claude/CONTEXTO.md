@@ -3124,7 +3124,11 @@ Severidad ALTA: es la columna con la que el cliente decide cuánto reponer, y es
 
 **Suite completa (post-fixes):** 40/40 backend, 18/18 frontend, 163/163 ETL (corrida dentro del contenedor Linux `evalutia-etl`, no en el host macOS — algunos tests de scripts bash dan falsos negativos ahí por diferencias de entorno, no reflejan el estado real).
 
-**#116 cerrado en código.** Deploy a producción + corrida manual de `run_calc_sugerencias.py` + medición de `verificar_rotacion_vs_ddstk.py` contra datos reales quedan como paso separado.
+**Desplegado a producción** (commit `cfe85b3`, rebuild de `webapp`/`etl`) y corrido manualmente contra datos reales (decisión #6 del grill-me, no se esperó al cron nocturno):
+- `run_calc_sugerencias.py`: 1726 SKUs con sugerencia (94 sin datos suficientes), 1460 con QBK calculado.
+- `verificar_rotacion_vs_ddstk.py` contra producción: proporción de SKUs con `ROT.S > 2×DDSTK` bajó de **14.7% a 3.5%** (1270 SKUs comparables) -- consistente con la medición local (14.2% → 2.4%) y con el 17% que motivó el issue. 193 SKUs ganan sugerencia que antes no tenían.
+
+**#116 cerrado en código y en producción.**
 
 ---
 
