@@ -3132,6 +3132,26 @@ Severidad ALTA: es la columna con la que el cliente decide cuánto reponer, y es
 
 ---
 
+### #117: Rot. DesEstac. mezclaba escalas sin factor estacional; DDSTK explotaba con poca base (sesión 2026-08-11)
+
+Severidad MEDIA. Precedido por `/grill-me issue 117`. Solo frontend, sin tocar backend ni ETL.
+
+**Rot. DesEstac.:** un mes `quiebre_parcial` sin factor estacional cargado (`rotacionDiariaDesestacionalizada` null) caía a un fallback que empujaba `rotacionAjustada` **sin corregir** al promedio, mezclando escalas bajo una columna que dice "corregida por estacionalidad". En los 475 artículos sin ningún factor (confirmado exacto contra la DB local), el resultado terminaba siendo un promedio puro de valores crudos.
+
+**Decisión (grill-me):** un mes sin factor se excluye del promedio, sea `normal` o `quiebre_parcial` -- mismo criterio ya aplicado a los `normal`. Si el SKU no tiene ningún factor, la columna queda vacía en vez de un número sin corregir.
+
+**DDSTK:** el caso de 0 días con stock ya daba vacío, pero el casi-degenerado (2-3 días) no -- podía reportar una demanda diaria de dos dígitos sin ninguna marca de base insuficiente. **Decisión:** mínimo 7 días con stock en toda la ventana (mismo umbral que QBK en #116, por consistencia); por debajo, vacío.
+
+**Deduplicación (grill-me, 3ra decisión):** las dos funciones vivían duplicadas y ya divergidas entre `exportPlanilla.ts` y `PlanillaTable.tsx`. Extraídas a un módulo nuevo compartido `apps/frontend/src/features/planilla/utils/planillaResumen.ts` (`calcularRotDesEstac`, `calcularDdstk`), importado por ambos -- fuente única, no dos copias para mantener sincronizadas a mano.
+
+**TDD:** 14 tests nuevos en `planillaResumen.test.ts` (funciones puras) + 1 test de integración agregado a `exportPlanilla.test.ts` (hallazgo de `/code-review`: el fixture SKU-A ya tenía el escenario exacto del bug -- mes `quiebre_parcial` sin factor -- pero ninguna aserción verificaba el valor numérico de la celda; sin este test, un futuro cambio en el wiring de `exportPlanilla.ts` podía romper la integración sin que ningún test lo note).
+
+**Suite:** tsc limpio, 33/33 tests de planilla (18 preexistentes + 14 nuevos + 1 agregado por el review).
+
+**#117 cerrado en código.** Deploy a producción queda como paso separado.
+
+---
+
 ## Documentación adicional
 
 | Archivo | Contenido |

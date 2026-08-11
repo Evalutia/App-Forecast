@@ -3,6 +3,7 @@ import { useRef, useState } from 'react';
 import type { PlanillaMesDto, PlanillaSugerenciaDto, PlanillaVentasDto, PlanillaVentasParams } from '../types/planilla';
 import { usePlanillaVentas } from '../hooks/usePlanilla';
 import { exportPlanillaExcel } from '../utils/exportPlanilla';
+import { DDSTK_MIN_DIAS_CON_STOCK, calcularDdstk, calcularRotDesEstac } from '../utils/planillaResumen';
 import { useUmbralesTickets } from '../../configuracion/hooks/useConfiguracion';
 import { useAuthUser } from '../../auth/hooks/useAuthUser';
 
@@ -42,28 +43,8 @@ function criterioFrecuenciaLabel(criterio: string | null | undefined, estadoMes:
   return '—';
 }
 
-function calcRotDesEstac(meses: PlanillaMesDto[]): string {
-  const closed = meses.slice(0, -1);
-  const vals: number[] = [];
-  for (const m of closed) {
-    if (m.estadoMes === 'normal' && m.rotacionDiariaDesestacionalizada != null) {
-      vals.push(m.rotacionDiariaDesestacionalizada);
-    } else if (m.estadoMes === 'quiebre_parcial' && m.rotacionAjustada != null) {
-      if (m.rotacionDiariaDesestacionalizada != null && m.rotacionDiariaReal != null && m.rotacionDiariaReal > 0)
-        vals.push(m.rotacionAjustada * (m.rotacionDiariaDesestacionalizada / m.rotacionDiariaReal));
-      else
-        vals.push(m.rotacionAjustada);
-    }
-  }
-  if (vals.length === 0) return '—';
-  return (vals.reduce((s, v) => s + v, 0) / vals.length).toFixed(4);
-}
-
-function calcDdstk(meses: PlanillaMesDto[]): string {
-  const totalVentas = meses.reduce((s, m) => s + (m.ventasCantidad ?? 0), 0);
-  const totalDias   = meses.reduce((s, m) => s + (m.diasConStock ?? 0), 0);
-  if (totalDias === 0) return '—';
-  return (totalVentas / totalDias).toFixed(4);
+function fmtResumen(v: number | null): string {
+  return v == null ? '—' : v.toFixed(4);
 }
 
 // VTA: suma de ventasCantidad de los 12 meses cerrados (excluye el mes de referencia)
@@ -451,7 +432,9 @@ export default function PlanillaTable({ params, onPageChange, sugerencias, suger
                     'Demanda Diaria con Stock\n' +
                     'Fórmula: Σ ventas del período ÷ Σ días con stock del período\n' +
                     'Tasa de venta diaria histórica promedio del artículo,\n' +
-                    'calculada sobre los 13 meses de la ventana.'
+                    'calculada sobre los 13 meses de la ventana.\n\n' +
+                    `— = menos de ${DDSTK_MIN_DIAS_CON_STOCK} días con stock en toda la ventana\n` +
+                    '(muy poca base para confiar en el número).'
                   }
                 />
               </th>
@@ -521,8 +504,8 @@ export default function PlanillaTable({ params, onPageChange, sugerencias, suger
               </tr>
             ) : (
               items.map((row: PlanillaVentasDto) => {
-                const rd  = calcRotDesEstac(row.meses);
-                const dd  = calcDdstk(row.meses);
+                const rd  = fmtResumen(calcularRotDesEstac(row.meses));
+                const dd  = fmtResumen(calcularDdstk(row.meses));
                 const vta = calcVta(row.meses);
                 return (
                   <tr key={row.sku}>

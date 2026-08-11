@@ -134,6 +134,16 @@ describe('buildPlanillaWorkbook (#107)', () => {
     expect(hoja1.getRow(3).getCell(12).value).toBe(7);   // SKU-B: null→0 + 7
   });
 
+  it('hoja 1: Rotacion DesEstac. excluye el mes quiebre_parcial sin factor estacional (#117)', () => {
+    // SKU-A: May/26 normal con factor (desest=3.1), Jun/26 quiebre_parcial
+    // SIN factor (rotacionDiariaDesestacionalizada=null por default del
+    // fixture, solo tiene rotacionAjustada=2.2). Antes del fix, Jun caía a
+    // un fallback que empujaba 2.2 sin corregir -> promedio (3.1+2.2)/2=2.65,
+    // mezclando un valor crudo en una columna "corregida por estacionalidad".
+    // Con el fix, Jun se excluye por no tener factor -> promedio = 3.1 (May solo).
+    expect(hoja1.getRow(2).getCell(10).value).toBe(3.1);
+  });
+
   it('hoja 2: anclas + 5 bloques mensuales del blending', () => {
     expect(headerValues(hoja2.getRow(3).values)).toEqual([
       'Articulo', 'Descripcion',

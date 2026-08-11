@@ -1,5 +1,6 @@
 import ExcelJS, { type Cell } from 'exceljs';
 import { fetchPlanillaVentas } from './api';
+import { DDSTK_MIN_DIAS_CON_STOCK, calcularDdstk, calcularRotDesEstac } from './planillaResumen';
 import type { PlanillaMesDto, PlanillaSugerenciaDto, PlanillaVentasDto, PlanillaVentasParams } from '../types/planilla';
 
 const MESES = ['Ene','Feb','Mar','Abr','May','Jun','Jul','Ago','Sep','Oct','Nov','Dic'];
@@ -74,28 +75,6 @@ function applyHeaderStyle(headerRow: ExcelJS.Row, firstSummaryCol: number): void
     cell.alignment = { vertical: 'middle', horizontal: colNum <= 2 ? 'left' : 'center', wrapText: false };
     cell.border    = { bottom: { style: 'medium', color: { argb: 'FF34C48F' } } };
   });
-}
-
-function rotDesEstac(meses: PlanillaMesDto[]): number | null {
-  const closed = meses.slice(0, -1);
-  const vals: number[] = [];
-  for (const m of closed) {
-    if (m.estadoMes === 'normal' && m.rotacionDiariaDesestacionalizada != null) {
-      vals.push(m.rotacionDiariaDesestacionalizada);
-    } else if (m.estadoMes === 'quiebre_parcial' && m.rotacionAjustada != null) {
-      if (m.rotacionDiariaDesestacionalizada != null && m.rotacionDiariaReal != null && m.rotacionDiariaReal > 0)
-        vals.push(m.rotacionAjustada * (m.rotacionDiariaDesestacionalizada / m.rotacionDiariaReal));
-      else
-        vals.push(m.rotacionAjustada);
-    }
-  }
-  return vals.length === 0 ? null : vals.reduce((s, v) => s + v, 0) / vals.length;
-}
-
-function ddstk(meses: PlanillaMesDto[]): number | null {
-  const totalVentas = meses.reduce((s, m) => s + (m.ventasCantidad ?? 0), 0);
-  const totalDias   = meses.reduce((s, m) => s + (m.diasConStock ?? 0), 0);
-  return totalDias === 0 ? null : totalVentas / totalDias;
 }
 
 // Issue #66: "VentaReal/Extrapolación" no esta persistido por separado en #62
@@ -206,10 +185,10 @@ function buildHojaPlanilla(
       ...item.meses.map(m =>
         (m.estadoMes === 'sin_datos' || m.estadoMes === 'sin_stock') ? null : m.rotacionDiariaReal ?? 0
       ),
-      rotDesEstac(item.meses),
+      calcularRotDesEstac(item.meses),
       item.estadoArticulo ?? 'activo',
       item.meses.slice(0, -1).reduce((s, m) => s + (m.ventasCantidad ?? 0), 0),
-      ddstk(item.meses),
+      calcularDdstk(item.meses),
       sug?.rotacionSugerida ?? null,
       sug?.fiabilidadPorcentaje ?? null,
       sug?.diasHastaQuiebre != null ? Math.round(sug.diasHastaQuiebre) : null,
@@ -370,11 +349,11 @@ export const CRITERIOS_COLUMNAS: CriterioRow[] = [
   { col: '[mes]', hoja: 'Planilla', que: 'Rotación diaria real del mes: a qué ritmo se vendió mientras hubo stock.',
     como: 'Unidades vendidas del mes ÷ días del mes con stock disponible. Vacía si el mes no tuvo ningún día con stock.' },
   { col: 'Rotacion DesEstac.', hoja: 'Planilla', que: 'Rotación diaria promedio del año, corregida por estacionalidad.',
-    como: 'Promedio sobre los 12 meses cerrados: los meses con stock completo usan su rotación ÷ factor estacional del mes; los meses con quiebre usan la rotación ajustada por frecuencia; los meses sin stock o sin datos no participan. Excluye el mes en curso.' },
+    como: 'Promedio sobre los 12 meses cerrados: los meses con stock completo usan su rotación ÷ factor estacional del mes; los meses con quiebre usan la rotación ajustada por frecuencia, corregida con el mismo factor. Un mes (con o sin quiebre) que no tenga factor estacional cargado no participa — no se mezcla un valor sin corregir en un promedio "desestacionalizado". Los meses sin stock o sin datos tampoco participan. Excluye el mes en curso. Vacía si el artículo no tiene ningún factor estacional cargado.' },
   { col: 'Estado Art.', hoja: 'Planilla', que: 'Estado del artículo en el catálogo.', como: 'activo (en venta normal), inactivo (temporalmente inactivo) o discontinuo (sin reposición futura).' },
   { col: 'VTA', hoja: 'Planilla', que: 'Total de unidades vendidas en el año.', como: 'Suma de las ventas de los 12 meses cerrados. Excluye el mes en curso.' },
   { col: 'DDSTK', hoja: 'Planilla', que: 'Demanda diaria con stock: venta promedio por día en los días que hubo stock.',
-    como: 'Suma de ventas de los 13 meses ÷ suma de días con stock de los 13 meses.' },
+    como: `Suma de ventas de los 13 meses ÷ suma de días con stock de los 13 meses. Vacía si el total de días con stock en la ventana es menor a ${DDSTK_MIN_DIAS_CON_STOCK} (muy pocos días de base dan un número poco confiable).` },
   { col: 'ROT.S', hoja: 'Planilla', que: 'Rotación diaria sugerida para planificar la reposición.',
     como: 'Promedio ponderado de la rotación de hasta 12 meses cerrados (el mes en curso siempre queda afuera del promedio; stock completo: rotación real; quiebre: rotación ajustada). Los meses sin ventas cuentan con rotación 0 — no se descartan, un mes cerrado sin ventas es un dato real. Los meses recientes pesan más que los antiguos. Vacía si hay menos de 3 meses con datos (sin stock o sin datos no cuentan).' },
   { col: 'Fiabilidad %', hoja: 'Planilla', que: 'Qué tan estable es la rotación del artículo — cuánto confiar en ROT.S.',
