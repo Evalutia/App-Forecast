@@ -10,16 +10,27 @@ set -euo pipefail
 #
 # El bookkeeping nunca puede voltear la corrida: cada llamada se aisla y su
 # fallo solo se loguea. El ETL manda; el registro es observabilidad.
+SELF_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
 CRON_JOBS="${CRON_JOBS:-/app/services/etl/cron_jobs.py}"
 # Overridable solo para poder testear la orquestacion sin Pentaho (ver
 # tests/test_run_ofelia.py). En produccion siempre es el kitchen.sh real.
 KITCHEN="${KITCHEN:-/opt/pentaho/data-integration/kitchen.sh}"
 
-# Issue #44: si hay un backfill historico corriendo (run_backfill_ventas.sh),
+# Issue #44/#119: si hay un backfill historico corriendo (run_backfill_ventas.sh),
 # se saltea esta corrida del daily en vez de competir por ventas_historicas_stage
 # y por conexiones al WS. Se recupera sola la noche siguiente.
+#
+# Issue #119: antes esto solo LEIA el lock (exclusion unidireccional) -- si el
+# backfill arrancaba mientras el cron ya estaba corriendo, no habia nada que
+# lo detuviera, y los dos terminaban pisandose el mismo staging. Ahora ofelia
+# TOMA el mismo lock (flock, atomico, via lock_backfill.sh -- fuente
+# compartida con run_backfill_ventas.sh, ver ese archivo para el porqué de
+# no duplicarlo) para toda la corrida, no solo para chequear: el que llega
+# primero gana, el otro se saltea/aborta.
 BACKFILL_LOCK_FILE="${BACKFILL_LOCK_FILE:-/app/data/backfill.lock}"
-if [[ -e "${BACKFILL_LOCK_FILE}" ]]; then
+source "${SELF_DIR}/lock_backfill.sh"
+if ! tomar_lock_backfill "${BACKFILL_LOCK_FILE}"; then
   echo "[OFELIA] Backfill en curso (${BACKFILL_LOCK_FILE}) — se saltea la corrida diaria de esta noche."
   python3 "${CRON_JOBS}" skip "backfill en curso (${BACKFILL_LOCK_FILE})" >/dev/null \
     || echo "[OFELIA][WARN] no se pudo registrar la noche salteada en jobs_historial." >&2

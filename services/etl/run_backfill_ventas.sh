@@ -47,13 +47,24 @@ BACKFILL_LOCK_FILE="${BACKFILL_LOCK_FILE:-/app/data/backfill.lock}"
 
 # ── Lock: exclusion mutua con el cron diario (run_ofelia.sh) y con otra
 #    corrida de este mismo script ────────────────────────────────────────────
-mkdir -p "$(dirname "${BACKFILL_LOCK_FILE}")"
-if [[ -e "${BACKFILL_LOCK_FILE}" ]]; then
-  echo "[ERROR] Ya hay un backfill en curso (lock: ${BACKFILL_LOCK_FILE}). Abortando." >&2
+# Issue #119: antes esto era un archivo simple (test -e + echo $$ + trap rm) y
+# la exclusion era UNIDIRECCIONAL -- run_ofelia.sh solo LEIA este archivo para
+# saltearse, nunca lo CREABA. Si el backfill arrancaba mientras el cron ya
+# estaba corriendo, este chequeo daba falso-libre (el cron nunca habia escrito
+# nada acá) y los dos procesos terminaban escribiendo/vaciando el mismo
+# ventas_historicas_stage a la vez.
+#
+# flock sobre un file descriptor es atomico (sin ventana check-then-act como
+# tenia `test -e` + `echo`) y se libera solo cuando el fd se cierra -- incluso
+# ante un kill -9, que un trap normal no atraparia. Mismo mecanismo y mismo
+# archivo lo usa ahora run_ofelia.sh (via lock_backfill.sh, fuente
+# compartida -- ver ese archivo para el porqué de no duplicarlo): el primero
+# que lo toma gana, el otro se saltea/aborta en vez de pisarse.
+source "${SELF_DIR}/lock_backfill.sh"
+if ! tomar_lock_backfill "${BACKFILL_LOCK_FILE}"; then
+  echo "[ERROR] Ya hay un backfill o la corrida diaria en curso (lock: ${BACKFILL_LOCK_FILE}). Abortando." >&2
   exit 1
 fi
-echo "$$" > "${BACKFILL_LOCK_FILE}"
-trap 'rm -f "${BACKFILL_LOCK_FILE}"' EXIT
 
 BASE="$(printf '%s' "${WS_URL}" | sed -E 's,/+$,,')"
 ENDPOINT="${BASE}/VsWebProduccion/SwNadWeb.asmx"
@@ -193,6 +204,18 @@ merge_y_truncar_stage() {
   # devolviendo) -- sin el filtro, el INSERT completo revienta por la FK
   # fk_ventas_articulo y ninguna fila del grupo se mergea, aunque sean pocos
   # SKUs huerfanos entre millones de filas validas.
+  #
+  # Issue #119: el filtro tenia que ser el mismo que usa el merge del cron
+  # diario (job_etl_diario.kjb, paso "MERGE STAGING -> VENTAS") y no lo era
+  # -- este usaba `s.sku IN (SELECT sku FROM articulos)` (sin normalizar),
+  # el diario ya usaba `INNER JOIN articulos a ON a.sku = TRIM(s.sku)`. Con
+  # la colacion actual de MySQL un codigo con un espacio de mas pasaba un
+  # filtro y no el otro -- los dos caminos cargaban conjuntos de filas
+  # distintos pese a pretender ser "la misma consulta" (documentado asi en
+  # el comentario de arriba). Ahora es el mismo JOIN, texto identico al del
+  # .kjb -- si uno cambia, el otro se tiene que actualizar a mano junto con
+  # este (no hay forma barata de compartir una sola definicion entre SQL
+  # embebido en XML de Pentaho y SQL embebido en este heredoc de Python).
   python3 - <<PY
 import os, pymysql
 conn = pymysql.connect(
@@ -208,8 +231,8 @@ try:
                    SUM(CAST(s.cantidad AS DECIMAL(12,3))),
                    NOW(6), COALESCE(MIN(s.fuente),'ws_consstockventa')
             FROM ventas_historicas_stage s
+            INNER JOIN articulos a ON a.sku = TRIM(s.sku)
             WHERE s.sku IS NOT NULL
-              AND s.sku IN (SELECT sku FROM articulos)
             GROUP BY DATE(s.fecha), TRIM(s.sku)
             ON DUPLICATE KEY UPDATE
               cantidad = VALUES(cantidad), ts_carga = VALUES(ts_carga), fuente = VALUES(fuente)

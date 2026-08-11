@@ -20,9 +20,6 @@ ID_GRUPO="${ID_GRUPO:-}"
 S_DEPOSITOS="${S_DEPOSITOS:-}"
 CANTREG="${CANTREG:-20000}"
 
-# chunking: default diario
-STEP_DAYS="${STEP_DAYS:-1}"
-
 BASE="$(printf '%s' "${WS_URL}" | sed -E 's,/+$,,')"
 ENDPOINT="${BASE}/VsWebProduccion/SwNadWeb.asmx"
 
@@ -42,11 +39,21 @@ if not s:
 if len(s) >= 10 and s[4] == "-" and s[7] == "-":
   print(s[:10]); raise SystemExit(0)
 
-if fmt == "dmy":
-  d = dt.datetime.strptime(s[:10], "%d/%m/%Y").date()
-else:
-  d = dt.datetime.strptime(s[:10], "%Y-%m-%d").date()
-print(d.strftime("%Y-%m-%d"))
+# Issue #119 (code-review post-implement): antes esto dejaba que strptime
+# tirara ValueError sin atrapar en fechas no vacias pero invalidas -- el
+# caller (assert_ventana_no_peligrosa) esperaba "" como unico contrato de
+# "no se pudo interpretar", no un crash. Ahora CUALQUIER fecha no
+# interpretable -- vacia, con espacios, o con formato invalido -- da "" de
+# la misma forma, para que haya un solo camino que el bash de afuera tenga
+# que chequear.
+try:
+  if fmt == "dmy":
+    d = dt.datetime.strptime(s[:10], "%d/%m/%Y").date()
+  else:
+    d = dt.datetime.strptime(s[:10], "%Y-%m-%d").date()
+  print(d.strftime("%Y-%m-%d"))
+except ValueError:
+  print("")
 PY
 }
 
@@ -56,6 +63,24 @@ fmt_out() {
     date -d "${iso}" +'%d/%m/%Y'
   else
     date -d "${iso}" +'%Y-%m-%d'
+  fi
+}
+
+# Issue #119: ConsStockXml devuelve siempre la foto de HOY, sin importar el
+# rango pedido (DesdeFec/HastaFec) -- no es un bug de este script, es como
+# responde el web service. Pedir una ventana de mas de un dia significa que
+# CADA fecha del rango termina con el MISMO contenido (el de hoy) escrito
+# bajo una fecha distinta -- exactamente lo que corrompe stock_diario cuando
+# se invoca a mano sin FORCE_START (ventana default de 7 dias): pisa valores
+# reales por fecha que ya habia cargado el otro extractor (ConsStockVenta,
+# que si respeta el rango pedido). Un solo dia (el uso real del cron
+# nocturno, FORCE_START=FORCE_END=ayer) es una foto de hoy mal-etiquetada
+# por a lo sumo un dia -- tolerado, no es lo que este chequeo previene.
+assert_ventana_no_peligrosa() {
+  local desde="$1" hasta="$2"
+  if [[ "${desde}" != "${hasta}" ]]; then
+    echo "[ERROR] Ventana de mas de un dia (${desde} -> ${hasta}): ConsStockXml devuelve siempre la foto de HOY sin importar el rango pedido -- pedir varios dias escribiria el mismo contenido bajo fechas distintas, pisando stock_diario real. Invocar con un solo dia por vez (CHUNK_START == CHUNK_END, o FORCE_START == FORCE_END)." >&2
+    exit 3
   fi
 }
 
@@ -163,6 +188,18 @@ process_current_window() {
 # Modo 1: si CHUNK_START/CHUNK_END vienen seteadas externamente => 1 ejecución
 # ---------------------------
 if [[ -n "${CHUNK_START:-}" && -n "${CHUNK_END:-}" ]]; then
+  # Issue #119 (code-review post-implement): to_iso() de una fecha invalida
+  # imprime "" -- sin este chequeo, DOS fechas invalidas distintas resolvian
+  # a la misma cadena vacia, assert_ventana_no_peligrosa las veia "iguales"
+  # y dejaba pasar la ventana (con las fechas originales, invalidas, intactas)
+  # en vez de abortar. Reproducido antes de este fix: pasaba sin abortar.
+  ISO_CHUNK_START_EXT="$(to_iso "${CHUNK_START}")"
+  ISO_CHUNK_END_EXT="$(to_iso "${CHUNK_END}")"
+  if [[ -z "${ISO_CHUNK_START_EXT}" || -z "${ISO_CHUNK_END_EXT}" ]]; then
+    echo "[ERROR] CHUNK_START/CHUNK_END inválidas: '${CHUNK_START}' / '${CHUNK_END}'" >&2
+    exit 2
+  fi
+  assert_ventana_no_peligrosa "${ISO_CHUNK_START_EXT}" "${ISO_CHUNK_END_EXT}"
   export CHUNK_START CHUNK_END ID_EMPRESA
   echo "[INFO] Stock window (externo): ${CHUNK_START} -> ${CHUNK_END}"
   process_current_window
@@ -171,8 +208,13 @@ fi
 
 # ---------------------------
 # Modo 2: rango automático
-# - Si FORCE_START: desde FORCE_START hasta HOY (o hasta FORCE_END si viene, capado a HOY)
-# - Si no FORCE_START: comportamiento default (últimos 7 días terminando AYER)
+# - Si FORCE_START: exige FORCE_END tambien (Issue #119, ver mas abajo), un
+#   solo dia (FORCE_START == FORCE_END) es el uso real del cron nocturno.
+# - Si no FORCE_START: default de 7 dias terminando AYER -- Issue #119: esta
+#   ventana multi-dia siempre choca contra assert_ventana_no_peligrosa()
+#   mas abajo y aborta. ConsStockXml no soporta rangos historicos (ver el
+#   comentario de esa funcion), asi que este "default" nunca fue seguro para
+#   una invocacion manual sin FORCE_START explicito de un solo dia.
 # ---------------------------
 ISO_TODAY="$(date +%F)"
 
@@ -183,16 +225,19 @@ if [[ -n "${FORCE_START:-}" ]]; then
     exit 2
   fi
 
-  if [[ -n "${FORCE_END:-}" ]]; then
-    ISO_END="$(to_iso "${FORCE_END}")"
-    if [[ -z "${ISO_END}" ]]; then
-      echo "[ERROR] FORCE_END inválida: '${FORCE_END}'"
-      exit 2
-    fi
-    [[ "${ISO_END}" > "${ISO_TODAY}" ]] && ISO_END="${ISO_TODAY}"
-  else
-    ISO_END="${ISO_TODAY}"
+  if [[ -z "${FORCE_END:-}" ]]; then
+    # Issue #119: antes esto defaulteaba en silencio a HOY (ISO_END="${ISO_TODAY}"),
+    # una ventana de rango incompleto usando "otra" ventana sin avisar. Un
+    # FORCE_START sin FORCE_END ahora es un error explicito, no una adivinanza.
+    echo "[ERROR] FORCE_START='${FORCE_START}' sin FORCE_END -- rango incompleto. Si el rango es de un solo dia, pasar FORCE_END igual a FORCE_START." >&2
+    exit 2
   fi
+  ISO_END="$(to_iso "${FORCE_END}")"
+  if [[ -z "${ISO_END}" ]]; then
+    echo "[ERROR] FORCE_END inválida: '${FORCE_END}'"
+    exit 2
+  fi
+  [[ "${ISO_END}" > "${ISO_TODAY}" ]] && ISO_END="${ISO_TODAY}"
 else
   ISO_END="$(date -d 'yesterday' +%F)"
   ISO_START="$(date -d "${ISO_END} -6 days" +%F)"
@@ -204,18 +249,17 @@ if [[ "${ISO_START}" > "${ISO_END}" ]]; then
   exit 2
 fi
 
-CUR="${ISO_START}"
-while [[ "${CUR}" < "${ISO_END}" || "${CUR}" == "${ISO_END}" ]]; do
-  CHUNK_START="$(fmt_out "${CUR}")"
+assert_ventana_no_peligrosa "${ISO_START}" "${ISO_END}"
 
-  ISO_CHUNK_END="$(date -d "${CUR} +$((STEP_DAYS-1)) days" +%F)"
-  [[ "${ISO_CHUNK_END}" > "${ISO_END}" ]] && ISO_CHUNK_END="${ISO_END}"
-  CHUNK_END="$(fmt_out "${ISO_CHUNK_END}")"
+# Issue #119 (code-review post-implement): antes esto era un loop de
+# chunking por STEP_DAYS sobre [ISO_START, ISO_END]. La guarda de arriba ya
+# garantiza ISO_START == ISO_END en todo camino que llegue hasta acá (Modo 2
+# aborta si difieren) -- el loop nunca podía dar más de una vuelta, STEP_DAYS
+# ya no cambiaba nada. Se saca el loop y la variable en vez de dejar código
+# que aparenta soportar sub-chunking y no lo hace.
+CHUNK_START="$(fmt_out "${ISO_START}")"
+CHUNK_END="$(fmt_out "${ISO_END}")"
+export CHUNK_START CHUNK_END ID_EMPRESA
 
-  export CHUNK_START CHUNK_END ID_EMPRESA
-
-  echo "[INFO] Stock window: ${CHUNK_START} -> ${CHUNK_END}"
-  process_current_window
-
-  CUR="$(date -d "${ISO_CHUNK_END} +1 day" +%F)"
-done
+echo "[INFO] Stock window: ${CHUNK_START} -> ${CHUNK_END}"
+process_current_window

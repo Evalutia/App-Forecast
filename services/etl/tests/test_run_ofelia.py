@@ -8,11 +8,13 @@ el exit code del ETL, y que el bookkeeping nunca voltee la corrida.
 Se saltan si no hay bash disponible (el script es bash, no sh).
 """
 
+import fcntl
 import os
 import re
 import shutil
 import subprocess
 import textwrap
+import time
 from pathlib import Path
 
 import pytest
@@ -107,15 +109,95 @@ def test_atraso_detectado_no_aborta_la_corrida(entorno):
     assert proc.returncode == 0
 
 
-def test_lock_de_backfill_saltea_y_deja_registro(entorno):
-    lock = entorno["tmp"] / "backfill.lock"
-    lock.write_text("1", encoding="utf-8")
+def test_ofelia_sostiene_el_lock_mientras_corre(tmp_path):
+    """
+    Issue #119, la mitad que faltaba: no alcanza con que ofelia RESPETE un
+    lock ajeno -- tiene que TOMAR el suyo propio mientras corre, para que
+    run_backfill_ventas.sh (u otra corrida) lo vea ocupado. Concurrencia real:
+    KITCHEN stub que duerme, se lanza ofelia en background, y mientras el
+    stub está durmiendo se intenta tomar el mismo lock desde el test -- tiene
+    que fallar. Terminado ofelia, el lock tiene que quedar libre de nuevo.
+    """
+    lock = tmp_path / "backfill.lock"
+    cron_stub = _escribir(tmp_path / "cron_stub.py", """
+        import sys
+        sub = sys.argv[1]
+        if sub == "start":
+            print("1")
+        sys.exit(0)
+        """)
+    # Duerme lo suficiente para que el test alcance a intentar el flock
+    # mientras el "kitchen" todavia esta "corriendo".
+    kitchen_stub = _escribir(tmp_path / "kitchen_stub.sh", """
+        #!/usr/bin/env bash
+        sleep 1
+        exit 0
+        """)
 
-    proc, registro = _correr(entorno, BACKFILL_LOCK_FILE=str(lock))
+    env = {
+        **os.environ,
+        "CRON_JOBS": str(cron_stub),
+        "KITCHEN": str(kitchen_stub),
+        "BACKFILL_LOCK_FILE": str(lock),
+    }
+    proc = subprocess.Popen([BASH, str(SCRIPT)], env=env,
+                             stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    try:
+        time.sleep(0.4)  # deja que ofelia pase el flock y entre a "kitchen"
+
+        assert lock.exists(), "ofelia deberia haber creado el lock file al arrancar"
+        fd = os.open(lock, os.O_RDWR)
+        try:
+            with pytest.raises(BlockingIOError):
+                fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        finally:
+            os.close(fd)
+    finally:
+        proc.wait(timeout=10)
 
     assert proc.returncode == 0
-    assert any(ln.startswith("cron:skip") for ln in registro)
-    assert "kitchen" not in registro, "no debe correr el ETL con backfill en curso"
+
+    # Terminado ofelia, el lock tiene que quedar libre -- confirma que no
+    # se queda tomado para siempre (fd se cierra solo al salir el proceso).
+    fd = os.open(lock, os.O_RDWR)
+    try:
+        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)  # no debe tirar
+    finally:
+        os.close(fd)
+
+
+def test_lock_de_backfill_saltea_y_deja_registro(entorno):
+    """
+    Issue #119: el lock es flock, atomico -- que el archivo EXISTA no alcanza
+    (asi funcionaba el mecanismo viejo, unidireccional). Hace falta que otro
+    proceso lo tenga tomado de verdad, como haria run_backfill_ventas.sh real.
+    """
+    lock = entorno["tmp"] / "backfill.lock"
+    lock.touch()
+
+    fd = os.open(lock, os.O_RDWR)
+    try:
+        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+
+        proc, registro = _correr(entorno, BACKFILL_LOCK_FILE=str(lock))
+
+        assert proc.returncode == 0
+        assert any(ln.startswith("cron:skip") for ln in registro)
+        assert "kitchen" not in registro, "no debe correr el ETL con backfill en curso"
+    finally:
+        os.close(fd)
+
+
+def test_lock_libre_ofelia_corre_normal(entorno):
+    """Complemento del test de arriba: sin nadie sosteniendo el lock, ofelia
+    tiene que poder tomarlo y correr -- confirma que el flock en sí no rompe
+    el camino feliz."""
+    lock = entorno["tmp"] / "backfill.lock"
+
+    proc, registro = _correr(entorno, BACKFILL_LOCK_FILE=str(lock), FAKE_ETL_RC="0")
+
+    assert proc.returncode == 0
+    assert "kitchen" in registro
 
 
 def test_bookkeeping_caido_no_impide_la_corrida(entorno, tmp_path):
