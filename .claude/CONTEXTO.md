@@ -3262,6 +3262,37 @@ Los otros tres hallazgos: el tooltip de la cabecera mensual seguía describiendo
 
 ---
 
+### Revisión transversal de robustez y hallazgo crítico: el cron nocturno no corría (sesión 2026-08-11)
+
+Pedido de Nico tras cerrar #127-#130: revisar todo lo hecho con foco en que **siga funcionando solo**, sin intervención, mes a mes. La revisión encontró un fallo que ya estaba activo.
+
+**CRÍTICO -- el cron nocturno estaba roto desde el deploy de #119.** El job de Ofelia del 2026-08-11 terminó en 346 ms sin ejecutar nada:
+
+```
+run_ofelia.sh: line 32: /usr/local/bin/lock_backfill.sh: No such file or directory
+Finished in "346.824936ms", failed: true
+```
+
+`#119` agregó `source "${SELF_DIR}/lock_backfill.sh"`, pero el Dockerfile copia `run_ofelia.sh` a `/usr/local/bin/` mientras `lock_backfill.sh` sólo existe bajo `/app/services/etl/`. `SELF_DIR` resuelve a `/usr/local/bin`, el `source` falla y `set -e` aborta la corrida **antes de tocar nada**. Funcionaba en el repo y en los tests -- donde los dos archivos conviven -- y sólo fallaba con el layout de la imagen: exactamente el gap que los tests no cubrían.
+
+Corregido con ruta absoluta y override, misma convención que ya usaba `CRON_JOBS` en el mismo archivo, más un chequeo de existencia con mensaje claro. Se eliminó `SELF_DIR`, que quedaba sin uso y sólo invitaba a repetir el error. Dos tests nuevos: uno copia el script a otro directorio reproduciendo el layout de la imagen (verificado que falla con el código de #119) y otro cubre el mensaje de error.
+
+**El hueco de datos se cierra solo:** el extractor de ventas pide una ventana de 7 días (`ayer − 6 días`), no sólo el día anterior, así que el cron siguiente recupera lo que faltó. Además `cron_jobs stale` avisa si el atraso supera 2 días. Sin eso, la noche perdida habría requerido un backfill manual.
+
+**Lección:** un script que se copia a una ubicación distinta de la del repo no puede resolver sus dependencias de forma relativa, y ningún test que corra desde el repo lo va a detectar. El patrón correcto ya estaba en el mismo archivo (`CRON_JOBS` con ruta absoluta); #119 no lo siguió.
+
+**Lo demás verificado, sin hallazgos:**
+- **Robustez temporal:** ventana de 13 meses correcta en cambio de año, febrero de 28 y 29 días, y años bisiestos seculares (2000 sí, 2100 no). La extrapolación de #129 respeta el tope de ×2 en meses de cualquier duración.
+- **Las tres implementaciones de la extrapolación coinciden** (ETL, export, oráculo QA) sobre 12 casos, incluidos los bordes. Quedó un test con esos valores como golden, generados desde el ETL, para que no puedan divergir en silencio.
+- **Alineación con el cliente intacta** tras todos los cambios: denominador 98.9% `con_stock`, factores estacionales 99.9%, mediana `ROT.S / Rot.Manual` 0.963 -- idéntica a la medición previa a #129, confirmando que ese ticket no movía ROT.S (va por `rotacion_ajustada`, otro camino).
+- **Migraciones 16, 17, 19 y 20 aplicadas** en producción, verificadas por su efecto en el esquema.
+- **Crecimiento de `stock_diario`: 0.23 GB/mes**, mucho más lento de lo que se había estimado en #122. Con 44 GB libres hay margen de años, no de meses -- **corrige la advertencia de esa sesión**. El riesgo real de disco no es el crecimiento sino reconstruir la tabla (~27 GB de golpe) con el volumen ocupado por otra cosa, que es lo que pasó con las imágenes de Docker.
+- **Cadena nocturna completa y automática:** extracts, merges, `predict.py`, `CALC_PLANILLA`, `CALC_SUGERENCIAS` y `CALC_STOCK_RESUMEN` corren encadenados desde el `.kjb`. Todo lo de #129 y #130 entra solo.
+
+**Quedan 3 jobs en estado `ejecutando` desde junio y julio** (#151, #235, #248) que nunca cerraron: no afectan nada operativo -- el `no-overlap` de Ofelia es por contenedor, no por esa tabla -- pero ensucian cualquier consulta de salud del pipeline. No se tocaron.
+
+---
+
 ## Documentación adicional
 
 | Archivo | Contenido |
