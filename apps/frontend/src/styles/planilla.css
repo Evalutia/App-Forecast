@@ -126,6 +126,16 @@ thead .planilla-sticky-col {
 }
 .planilla-leyenda-sinstock::before { background: rgba(100,116,139,0.6); }
 
+/* Sin factor estacional (#130): lila -- deliberadamente fuera de la escala
+   amarillo/naranja/rojo del quiebre y del gris de sin stock, porque no habla
+   del mes sino de un dato que falta del articulo. */
+.planilla-leyenda-sinfactor {
+  background: rgba(124,92,180,0.16);
+  border: 1px solid rgba(124,92,180,0.25);
+  color: #8b74c4;
+}
+.planilla-leyenda-sinfactor::before { background: rgba(124,92,180,0.6); }
+
 /* Criterio de frecuencia: mismo mecanismo que en la tabla (borde izq., no
    relleno) -- swatch con borde en vez de cuadrado solido, para que se lea
    de un vistazo como "esto es un borde", distinto de los rellenos de quiebre.

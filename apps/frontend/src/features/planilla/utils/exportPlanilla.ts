@@ -1,6 +1,6 @@
 import ExcelJS, { type Cell } from 'exceljs';
 import { fetchPlanillaVentas } from './api';
-import { DDSTK_MIN_DIAS_CON_STOCK, calcularDdstk, calcularRotDesEstac } from './planillaResumen';
+import { DDSTK_MIN_DIAS_CON_STOCK, calcularDdstk, calcularRotDesEstac, celdaRotacionMes } from './planillaResumen';
 import type { PlanillaMesDto, PlanillaSugerenciaDto, PlanillaVentasDto, PlanillaVentasParams } from '../types/planilla';
 
 const MESES = ['Ene','Feb','Mar','Abr','May','Jun','Jul','Ago','Sep','Oct','Nov','Dic'];
@@ -12,6 +12,7 @@ const COLOR_QUIEBRE_MEDIA = 'FFB74D'; // orange — media frecuencia
 const COLOR_QUIEBRE_BAJA  = 'EF9A9A'; // rose — baja frecuencia
 const COLOR_SINSTOCK      = '90A4AE'; // slate grey
 const COLOR_SINDATOS      = 'F1F5F9'; // light slate — mes sin fila calculada (#106)
+const COLOR_SINFACTOR     = 'E8E3F2'; // lila tenue — sin factor estacional (#130)
 const COLOR_HEADER        = '0D5C2E'; // dark green for headers
 const COLOR_SUMMARY       = '1B4332'; // darker green for summary col headers
 const COLOR_SUMMARY_BG    = 'D1FAE5'; // light green for summary data cells
@@ -34,6 +35,10 @@ function mesBgColor(estadoMes: string, frecuenciaNivel?: string | null): string 
   }
   if (estadoMes === 'sin_stock') return COLOR_SINSTOCK;
   if (estadoMes === 'sin_datos') return COLOR_SINDATOS;
+  // Issue #130: el mes tuvo stock y ventas, pero el artículo no tiene factor
+  // estacional cargado para ese mes, así que no hay valor desestacionalizado
+  // que mostrar. Sin este tono, la celda quedaría vacía y sin explicación.
+  if (estadoMes === 'sin_factor') return COLOR_SINFACTOR;
   return null;
 }
 
@@ -42,14 +47,20 @@ function mesFgColor(estadoMes: string, frecuenciaNivel?: string | null): string 
     return frecuenciaNivel === 'baja' ? 'FF7F1D1D' : 'FF7B4A00';
   }
   if (estadoMes === 'sin_stock') return 'FF374151';
+  if (estadoMes === 'sin_factor') return 'FF4C3F6B';
   return 'FF111827';
 }
 
-function applyMesStyle(cell: Cell, mes: PlanillaMesDto, isRef: boolean): void {
-  const bg = mesBgColor(mes.estadoMes, mes.frecuenciaNivel);
+// `estado` se pasa explícito porque desde #130 no siempre es el estado del mes:
+// las celdas de rotación pueden estar en 'sin_factor', que no es un estado del
+// mes sino de esa celda en particular (el mes fue normal, lo que falta es el
+// factor estacional).
+function applyMesStyle(cell: Cell, mes: PlanillaMesDto, isRef: boolean, estado?: string): void {
+  const est = estado ?? mes.estadoMes;
+  const bg = mesBgColor(est, mes.frecuenciaNivel);
   if (bg) {
     cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: `FF${bg}` } };
-    cell.font = { color: { argb: mesFgColor(mes.estadoMes, mes.frecuenciaNivel) }, size: 10 };
+    cell.font = { color: { argb: mesFgColor(est, mes.frecuenciaNivel) }, size: 10 };
   } else if (isRef) {
     cell.font = { color: { argb: 'FF6B7280' }, italic: true, size: 10 };
   } else {
@@ -186,14 +197,8 @@ function buildHojaPlanilla(
       item.descripcion ?? '',
       item.codigoBarras ?? '',
       // Meses sin_datos (#106) exportan celda vacía (null), no un 0 inventado.
-      // Issue #122: sin_stock también -- la hoja "Criterios" promete "Vacía
-      // si el mes no tuvo ningún día con stock" para esta columna, y
-      // rotacionDiariaReal viene en 0 (no null) para esos meses, no en null
-      // como asume el ?? 0 de abajo -- sin este chequeo quedaba "0,0000".
       ...item.meses.map(m => m.ventasCantidad),
-      ...item.meses.map(m =>
-        (m.estadoMes === 'sin_datos' || m.estadoMes === 'sin_stock') ? null : m.rotacionDiariaReal ?? 0
-      ),
+      ...item.meses.map(m => celdaRotacionMes(m).valor),
       calcularRotDesEstac(item.meses),
       item.estadoArticulo ?? 'activo',
       item.meses.slice(0, -1).reduce((s, m) => s + (m.ventasCantidad ?? 0), 0),
@@ -215,7 +220,7 @@ function buildHojaPlanilla(
 
       const rot = row.getCell(COL_ROT_MES(i));
       rot.numFmt = '0.0000';
-      applyMesStyle(rot, mes, i === lastMesIdx);
+      applyMesStyle(rot, mes, i === lastMesIdx, celdaRotacionMes(mes).estado);
     });
 
     applySummaryStyle(row.getCell(COL_RD),   '0.0000');
@@ -244,15 +249,22 @@ function buildHojaDetalle(wb: ExcelJS.Workbook, items: PlanillaVentasDto[]): voi
   const lastMesIdx = n - 1;
   const mesLabels  = meses.map(m => mesLabel(m.year, m.month));
 
-  const COL_TICK = (i: number) => 3 + i;
-  const COL_HIST = (i: number) => 3 + n + i;
-  const COL_VE   = (i: number) => 3 + 2 * n + i;
-  const COL_CRIT = (i: number) => 3 + 3 * n + i;
-  const COL_VAJ  = (i: number) => 3 + 4 * n + i;
+  // Issue #130: RotReal es el primer bloque -- la rotación sin corregir por
+  // estacionalidad, que salió de la hoja 1 cuando las columnas mensuales
+  // pasaron a mostrar la desestacionalizada. Sigue siendo un dato útil ("a qué
+  // ritmo se vendió mientras hubo stock"), sólo que ya no es lo que promedia
+  // la columna resumen, así que no puede ocupar su lugar en la hoja principal.
+  const COL_ROTR = (i: number) => 3 + i;
+  const COL_TICK = (i: number) => 3 + n + i;
+  const COL_HIST = (i: number) => 3 + 2 * n + i;
+  const COL_VE   = (i: number) => 3 + 3 * n + i;
+  const COL_CRIT = (i: number) => 3 + 4 * n + i;
+  const COL_VAJ  = (i: number) => 3 + 5 * n + i;
 
   ws.columns = [
     { width: 13 },                            // Articulo
     { width: 34 },                            // Descripcion
+    ...meses.map(() => ({ width: 9 })),       // RotReal
     ...meses.map(() => ({ width: 8 })),       // Tick
     ...meses.map(() => ({ width: 9 })),       // Hist
     ...meses.map(() => ({ width: 9 })),       // V/E
@@ -285,6 +297,7 @@ function buildHojaDetalle(wb: ExcelJS.Workbook, items: PlanillaVentasDto[]): voi
   const headers = [
     'Articulo',
     'Descripcion',
+    ...mesLabels.map(l => `Rot.Real.${l}`),
     ...mesLabels.map(l => `Tick.${l}`),
     ...mesLabels.map(l => `Hist.${l}`),
     ...mesLabels.map(l => `V/E.${l}`),
@@ -297,6 +310,9 @@ function buildHojaDetalle(wb: ExcelJS.Workbook, items: PlanillaVentasDto[]): voi
     const row = ws.addRow([
       item.sku,
       item.descripcion ?? '',
+      ...item.meses.map(m =>
+        (m.estadoMes === 'sin_datos' || m.estadoMes === 'sin_stock') ? null : m.rotacionDiariaReal ?? 0
+      ),
       ...item.meses.map(m => m.ticketsMes),
       ...item.meses.map(m => m.valorHistorico ?? null),
       ...item.meses.map(m => ventaRealOExtrapolacion(m)),
@@ -310,6 +326,10 @@ function buildHojaDetalle(wb: ExcelJS.Workbook, items: PlanillaVentasDto[]): voi
 
     item.meses.forEach((mes, i) => {
       const isRef = i === lastMesIdx;
+      const rotr = row.getCell(COL_ROTR(i));
+      rotr.numFmt = '0.0000';
+      applyMesStyle(rotr, mes, isRef);
+
       const tick = row.getCell(COL_TICK(i));
       tick.numFmt = '0';
       applyMesStyle(tick, mes, isRef);
@@ -355,8 +375,8 @@ export const CRITERIOS_COLUMNAS: CriterioRow[] = [
   { col: 'Codigos Barras', hoja: 'Planilla', que: 'Código de barras.', como: 'Tal como figura en el catálogo. Vacío si el artículo no tiene.' },
   { col: 'Vta.[mes]', hoja: 'Planilla', que: 'Unidades vendidas en ese mes (ventas netas: descuenta devoluciones).',
     como: 'Suma de las ventas del mes. La columna de más a la derecha es el mes en curso (incompleto), en letra gris. Celda vacía gris claro = sin datos de ese mes (ej. artículo dado de alta después).' },
-  { col: '[mes]', hoja: 'Planilla', que: 'Rotación diaria real del mes: a qué ritmo se vendió mientras hubo stock.',
-    como: 'Unidades vendidas del mes ÷ días del mes con stock disponible. Vacía si el mes no tuvo ningún día con stock.' },
+  { col: '[mes]', hoja: 'Planilla', que: 'Rotación diaria del mes, corregida por estacionalidad.',
+    como: 'Unidades vendidas ÷ días con stock, dividido por el factor estacional del mes; en los meses con quiebre se parte de la rotación ajustada por frecuencia. Es exactamente el valor que promedia la columna "Rotacion DesEstac.": ese promedio es el de estas celdas, sin contar el mes en curso (la última columna) ni las vacías. Queda vacía si el mes no tuvo stock, o si no hay factor estacional para corregirlo (celda lila). La rotación sin corregir está en la hoja "Detalle de cálculo".' },
   { col: 'Rotacion DesEstac.', hoja: 'Planilla', que: 'Rotación diaria promedio del año, corregida por estacionalidad.',
     como: 'Promedio sobre los 12 meses cerrados: los meses con stock completo usan su rotación ÷ factor estacional del mes; los meses con quiebre usan la rotación ajustada por frecuencia, corregida con el mismo factor. Un mes (con o sin quiebre) que no tenga factor estacional cargado no participa — no se mezcla un valor sin corregir en un promedio "desestacionalizado". Los meses sin stock o sin datos tampoco participan. Excluye el mes en curso. Vacía si el artículo no tiene ningún factor estacional cargado.' },
   { col: 'Estado Art.', hoja: 'Planilla', que: 'Estado del artículo en el catálogo.', como: 'activo (en venta normal), inactivo (temporalmente inactivo) o discontinuo (sin reposición futura).' },
@@ -371,6 +391,8 @@ export const CRITERIOS_COLUMNAS: CriterioRow[] = [
     como: 'Stock actual ÷ ROT.S. 0 = ya sin stock. Vacía si el último dato de stock del artículo tiene más de 7 días de antigüedad (evita estimar sobre un stock desactualizado).' },
   { col: 'Género', hoja: 'Planilla', que: 'Género del artículo.', como: 'Tal como figura en el catálogo.' },
   // Hoja 2 — Detalle de cálculo
+  { col: 'Rot.Real.[mes]', hoja: 'Detalle', que: 'Rotación diaria del mes SIN corregir por estacionalidad.',
+    como: 'Unidades vendidas del mes ÷ días del mes con stock. Es a qué ritmo se vendió mientras hubo stock, sin ajustar por la época del año. Vacía si el mes no tuvo stock.' },
   { col: 'Tick.[mes]', hoja: 'Detalle', que: 'Tickets: cantidad de días de ese mes con al menos una venta real.',
     como: 'Se cuentan días con venta, no unidades. Define qué método se usa para el valor ajustado (ver bandas abajo).' },
   { col: 'Hist.[mes]', hoja: 'Detalle', que: 'Histórico: venta mensual promedio del artículo.',
@@ -395,6 +417,7 @@ const CRITERIOS_COLORES: { color: string | null; fg?: string; label: string; det
   { color: COLOR_QUIEBRE_BAJA, label: 'Rojo', detalle: 'Mes con quiebre en artículo de baja frecuencia (vendió en 3 meses o menos).' },
   { color: COLOR_SINSTOCK, label: 'Gris', detalle: 'Mes completo sin stock.' },
   { color: COLOR_SINDATOS, label: 'Gris claro', detalle: 'Sin datos: el artículo no existía o no hay información de ese mes. La celda queda vacía.' },
+  { color: COLOR_SINFACTOR, label: 'Lila', detalle: 'Sólo en las columnas de rotación mensual: el mes tuvo stock y ventas, pero el artículo no tiene factor estacional cargado para ese mes, así que no hay rotación corregida que mostrar. La rotación sin corregir está en la hoja "Detalle de cálculo".' },
   { color: CRITERIO_FILL.historico.bg, fg: CRITERIO_FILL.historico.fg, label: 'Azul (VAj)', detalle: 'El valor ajustado usó el método Histórico.' },
   { color: CRITERIO_FILL.promedio.bg, fg: CRITERIO_FILL.promedio.fg, label: 'Violeta (VAj)', detalle: 'El valor ajustado usó el método Promedio.' },
   { color: CRITERIO_FILL.real_extrapolado.bg, fg: CRITERIO_FILL.real_extrapolado.fg, label: 'Verde azulado (VAj)', detalle: 'El valor ajustado usó Venta real o Extrapolación.' },

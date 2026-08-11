@@ -3240,6 +3240,24 @@ De paso se liberaron 11.2 GB de build cache acumulado por los deploys del día: 
 
 ---
 
+### #130: las columnas mensuales no mostraban lo que la columna resumen promedia (sesión 2026-08-11)
+
+Lo detectó Rodrigo por otro lado: preguntó por el **coloreado** de esas columnas, y al investigarlo apareció el problema de fondo. Las 13 columnas mensuales mostraban la rotación **cruda**, mientras `Rotacion DesEstac.` promedia los valores **desestacionalizados** -- o sea que el cliente no podía reproducir el resumen con los números que tenía al lado. En su propia planilla esa columna sí es el promedio visible de las de al lado. #127 ya había confirmado que el denominador coincide, así que acá no se cambia ningún cálculo: sólo qué valor se muestra.
+
+**Decisión del coloreado** (única que quedaba abierta, consultada con el dato sobre la mesa): se conserva el color de quiebre/sin stock y se agrega un tono lila para el caso nuevo. Motivo: el cambio deja **1.784 celdas vacías** en producción -- 9,2% de las 19.345 que hoy muestran un número -- que son meses con stock y ventas pero sin factor estacional cargado. Sin marca quedarían vacías y mudas, peor que antes. El lila gana sobre el color de quiebre cuando ambos aplican, a propósito: sobre una celda vacía el color de quiebre no contextualiza ningún número, y la señal no se pierde de la fila porque la columna de venta del mismo mes la conserva.
+
+La rotación sin corregir no se pierde: baja a la hoja "Detalle de cálculo" como bloque `Rot.Real.[mes]` (compromiso ya comunicado al cliente en #128), y aparece además en el tooltip de cada celda en la web.
+
+**El `/code-review` encontró un hallazgo que invalidaba el objetivo del ticket.** La celda mostraba `rotacionDiariaDesestacionalizada` mientras el promedio, para meses con quiebre, usa `rotacionAjustada × (desest/real)`. Con `real=2.0, ajustada=2.2, factor=2` la celda decía `1.0000` y el promedio usaba `1.1` -- el cliente **seguía** sin poder reproducir la cuenta, que era exactamente lo que #130 venía a arreglar. Peor: el test que debía cubrirlo usaba `ajustada == real`, el único par de valores donde ambas fórmulas coinciden, así que pasaba en verde.
+
+Corregido extrayendo `rotacionDesestacionalizadaMes()` como **fuente única**: el promedio ahora es literalmente `map(rotacionDesestacionalizadaMes).filter(...)` de lo que muestran las celdas, así que no pueden divergir por construcción. Se agregaron tres tests que comparan celda contra promedio directamente y que fallan si se desacoplan.
+
+Los otros tres hallazgos: el tooltip de la cabecera mensual seguía describiendo la fórmula vieja y no listaba el color nuevo, la hoja "Criterios" prometía verificabilidad sin aclarar los dos matices (meses con quiebre parten de la ajustada; el mes en curso no entra), y quedaba un comentario huérfano de #106/#122 sobre código que se había mudado a la hoja 2.
+
+**Suite:** 46 frontend (8 nuevos + 3 del review), 224 ETL, tsc limpio.
+
+---
+
 ## Documentación adicional
 
 | Archivo | Contenido |

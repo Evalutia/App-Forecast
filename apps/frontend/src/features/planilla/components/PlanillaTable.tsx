@@ -3,7 +3,7 @@ import { useRef, useState } from 'react';
 import type { PlanillaMesDto, PlanillaSugerenciaDto, PlanillaVentasDto, PlanillaVentasParams } from '../types/planilla';
 import { usePlanillaVentas } from '../hooks/usePlanilla';
 import { exportPlanillaExcel } from '../utils/exportPlanilla';
-import { DDSTK_MIN_DIAS_CON_STOCK, calcularDdstk, calcularRotDesEstac } from '../utils/planillaResumen';
+import { DDSTK_MIN_DIAS_CON_STOCK, calcularDdstk, calcularRotDesEstac, celdaRotacionMes } from '../utils/planillaResumen';
 import { useUmbralesTickets } from '../../configuracion/hooks/useConfiguracion';
 import { useAuthUser } from '../../auth/hooks/useAuthUser';
 
@@ -19,6 +19,10 @@ function estadoMesBg(estado: string, frecuenciaNivel?: string | null): string {
     return 'rgba(234,179,8,0.18)';
   }
   if (estado === 'sin_stock') return 'rgba(100,116,139,0.18)';
+  // Issue #130: sólo en las columnas de rotación -- el mes tuvo stock y ventas
+  // pero falta el factor estacional, así que no hay valor corregido que
+  // mostrar. Sin esto la celda quedaría vacía y sin explicación.
+  if (estado === 'sin_factor') return 'rgba(124,92,180,0.16)';
   return '';
 }
 
@@ -179,6 +183,16 @@ const ESTADO_ENTRIES: LeyendaEntry[] = [
     className: 'planilla-leyenda-sinstock',
     label: 'Sin stock (mes completo)',
     tip: 'Estado: Sin stock\nEl artículo no tuvo stock ningún día del mes -- no hay rotación real calculable ese mes.',
+  },
+  {
+    className: 'planilla-leyenda-sinfactor',
+    label: 'Sin factor estacional',
+    tip:
+      'Sólo en las columnas de rotación mensual.\n' +
+      'El mes tuvo stock y ventas, pero el artículo no tiene factor\n' +
+      'estacional cargado para ese mes, así que no hay rotación\n' +
+      'corregida que mostrar. La rotación sin corregir aparece en el\n' +
+      'tooltip de la celda y en la hoja "Detalle de cálculo" del Excel.',
   },
 ];
 
@@ -390,8 +404,8 @@ export default function PlanillaTable({ params, onPageChange, sugerencias, suger
                             label={<span style={esRef ? { fontStyle: 'italic' } : undefined}>{mesLabel(m.year, m.month)}</span>}
                             tip={
                               esRef
-                                ? `${mesLabel(m.year, m.month)} — Mes de referencia\nNo entra en el promedio de Rot. DesEstac.\nFórmula: ventas ÷ días_con_stock`
-                                : `${mesLabel(m.year, m.month)} — Rotación diaria real\nFórmula: ventas_mes ÷ días_con_stock\nAmarillo = quiebre alta freq · Naranja = quiebre media · Rojo = quiebre baja freq · Gris = sin stock`
+                                ? `${mesLabel(m.year, m.month)} — Mes de referencia\nRotación corregida por estacionalidad.\nNo entra en el promedio de Rot. DesEstac.`
+                                : `${mesLabel(m.year, m.month)} — Rotación diaria corregida por estacionalidad\nEs el valor que promedia Rot. DesEstac., así que ese promedio se puede verificar con estas celdas.\nLa rotación sin corregir está en el tooltip de cada celda.\nAmarillo = quiebre alta freq · Naranja = quiebre media · Rojo = quiebre baja freq · Gris = sin stock · Lila = sin factor estacional`
                             }
                           />
                         </th>
@@ -540,24 +554,30 @@ export default function PlanillaTable({ params, onPageChange, sugerencias, suger
                       </td>
                     ))}
 
-                    {row.meses.map((mes, idx) => (
-                      <td
-                        key={`rot-${mes.year}-${mes.month}`}
-                        className="planilla-col-mes"
-                        style={{ backgroundColor: estadoMesBg(mes.estadoMes, mes.frecuenciaNivel) }}
-                        title={
-                          mes.estadoMes === 'sin_datos'
-                            ? `${mesLabel(mes.year, mes.month)} · Sin datos (mes sin fila calculada)`
-                            : `${mesLabel(mes.year, mes.month)} · ${mes.diasConStock ?? 0}/${mes.diasNaturalesMes} días con stock · ${mes.ventasCantidad ?? 0} uds.`
-                        }
-                      >
-                        <span style={idx === lastMesIdx ? { opacity: 0.6, fontStyle: 'italic' } : undefined}>
-                          {mes.estadoMes === 'sin_datos'
-                            ? <span className="muted">—</span>
-                            : mes.rotacionDiariaReal != null ? mes.rotacionDiariaReal.toFixed(4) : '0.0000'}
-                        </span>
-                      </td>
-                    ))}
+                    {row.meses.map((mes, idx) => {
+                      // Issue #130: muestra la rotación desestacionalizada, que
+                      // es lo que promedia Rot. DesEstac. -- antes mostraba la
+                      // cruda y el promedio no se podía verificar a mano.
+                      const celda = celdaRotacionMes(mes);
+                      return (
+                        <td
+                          key={`rot-${mes.year}-${mes.month}`}
+                          className="planilla-col-mes"
+                          style={{ backgroundColor: estadoMesBg(celda.estado, mes.frecuenciaNivel) }}
+                          title={
+                            celda.estado === 'sin_datos'
+                              ? `${mesLabel(mes.year, mes.month)} · Sin datos (mes sin fila calculada)`
+                              : celda.estado === 'sin_factor'
+                                ? `${mesLabel(mes.year, mes.month)} · Sin factor estacional cargado para este mes — la rotación sin corregir es ${(mes.rotacionDiariaReal ?? 0).toFixed(4)}`
+                                : `${mesLabel(mes.year, mes.month)} · ${mes.diasConStock ?? 0}/${mes.diasNaturalesMes} días con stock · ${mes.ventasCantidad ?? 0} uds. · sin corregir: ${(mes.rotacionDiariaReal ?? 0).toFixed(4)}`
+                          }
+                        >
+                          <span style={idx === lastMesIdx ? { opacity: 0.6, fontStyle: 'italic' } : undefined}>
+                            {celda.valor != null ? celda.valor.toFixed(4) : <span className="muted">—</span>}
+                          </span>
+                        </td>
+                      );
+                    })}
 
                     <td className={`planilla-col-summary${rd === '—' ? ' sin-datos' : ''}`}>{rd}</td>
                     <td><EstadoCell estado={row.estadoArticulo} /></td>

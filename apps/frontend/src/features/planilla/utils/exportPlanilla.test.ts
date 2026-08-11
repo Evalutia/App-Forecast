@@ -144,9 +144,10 @@ describe('buildPlanillaWorkbook (#107)', () => {
     expect(hoja1.getRow(2).getCell(10).value).toBe(3.1);
   });
 
-  it('hoja 2: anclas + 5 bloques mensuales del blending', () => {
+  it('hoja 2: anclas + 6 bloques mensuales (Rot.Real de #130 + los 5 del blending)', () => {
     expect(headerValues(hoja2.getRow(3).values)).toEqual([
       'Articulo', 'Descripcion',
+      'Rot.Real.May/26', 'Rot.Real.Jun/26', 'Rot.Real.Jul/26',
       'Tick.May/26', 'Tick.Jun/26', 'Tick.Jul/26',
       'Hist.May/26', 'Hist.Jun/26', 'Hist.Jul/26',
       'V/E.May/26', 'V/E.Jun/26', 'V/E.Jul/26',
@@ -167,20 +168,21 @@ describe('buildPlanillaWorkbook (#107)', () => {
 
   it('hoja 2: VAj con fondo por criterio y etiqueta legible en Crit', () => {
     const filaA = hoja2.getRow(4); // SKU-A
-    expect(fillColor(filaA.getCell(15))).toBe('FFBFDBFE'); // VAj.May historico → azul
-    expect(fillColor(filaA.getCell(16))).toBe('FFDDD6FE'); // VAj.Jun promedio → violeta
-    expect(fillColor(filaA.getCell(17))).toBe('FF99F6E4'); // VAj.Jul real_extrapolado → teal
-    expect(filaA.getCell(12).value).toBe('Histórico');
-    expect(filaA.getCell(13).value).toBe('Promedio');
-    expect(filaA.getCell(14).value).toBe('Venta real');    // normal → Venta real
+    expect(fillColor(filaA.getCell(18))).toBe('FFBFDBFE'); // VAj.May historico → azul
+    expect(fillColor(filaA.getCell(19))).toBe('FFDDD6FE'); // VAj.Jun promedio → violeta
+    expect(fillColor(filaA.getCell(20))).toBe('FF99F6E4'); // VAj.Jul real_extrapolado → teal
+    expect(filaA.getCell(15).value).toBe('Histórico');
+    expect(filaA.getCell(16).value).toBe('Promedio');
+    expect(filaA.getCell(17).value).toBe('Venta real');    // normal → Venta real
   });
 
   it('hoja 2: mes sin_datos queda vacío también en el detalle', () => {
     const filaB = hoja2.getRow(5); // SKU-B
-    expect(filaB.getCell(3).value).toBeNull();  // Tick.May
-    expect(filaB.getCell(12).value).toBe('');   // Crit.May sin etiqueta
-    expect(filaB.getCell(15).value).toBeNull(); // VAj.May
-    expect(fillColor(filaB.getCell(15))).toBe('FFF1F5F9'); // gris sin_datos, no color de criterio
+    expect(filaB.getCell(3).value).toBeNull();  // Rot.Real.May (sin_datos)
+    expect(filaB.getCell(6).value).toBeNull();  // Tick.May
+    expect(filaB.getCell(15).value).toBe('');   // Crit.May sin etiqueta
+    expect(filaB.getCell(18).value).toBeNull(); // VAj.May
+    expect(fillColor(filaB.getCell(18))).toBe('FFF1F5F9'); // gris sin_datos, no color de criterio
   });
 
   it('hoja 2: mes sin_stock exporta V/E vacío, no 0,00 (#122)', () => {
@@ -188,7 +190,7 @@ describe('buildPlanillaWorkbook (#107)', () => {
     // sin_stock hacía que `!= null` calculara 0*dias=0 en vez de dejar
     // la celda vacía como promete "Criterios" para esta columna.
     const filaB = hoja2.getRow(5); // SKU-B
-    expect(filaB.getCell(11).value).toBeNull(); // V/E.Jul (índice 2, sin_stock)
+    expect(filaB.getCell(14).value).toBeNull(); // V/E.Jul (índice 2, sin_stock)
   });
 
   it('hoja 2: V/E de un mes con quiebre pondera por los días con stock (#129)', () => {
@@ -201,7 +203,7 @@ describe('buildPlanillaWorkbook (#107)', () => {
     });
     const sku: PlanillaVentasDto = { ...skuA, sku: 'SKU-MITAD', meses: [skuA.meses[0], mitad, skuA.meses[2]] };
     const hoja = buildPlanillaWorkbook([sku], sugerencias).getWorksheet('Detalle de cálculo')!;
-    expect(hoja.getRow(4).getCell(10).value).toBe(75); // V/E.Jun
+    expect(hoja.getRow(4).getCell(13).value).toBe(75); // V/E.Jun
   });
 
   it('hoja 2: V/E nunca supera el doble de lo vendido (#129)', () => {
@@ -213,7 +215,7 @@ describe('buildPlanillaWorkbook (#107)', () => {
     });
     const sku: PlanillaVentasDto = { ...skuA, sku: 'SKU-TOPE', meses: [skuA.meses[0], casi, skuA.meses[2]] };
     const hoja = buildPlanillaWorkbook([sku], sugerencias).getWorksheet('Detalle de cálculo')!;
-    const ve = hoja.getRow(4).getCell(10).value as number;
+    const ve = hoja.getRow(4).getCell(13).value as number;
     expect(ve).toBeLessThan(80);      // 2 × 40
     expect(ve).toBeGreaterThan(75);   // pero cerca del tope
   });
