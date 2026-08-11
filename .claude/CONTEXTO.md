@@ -3228,6 +3228,16 @@ Lo planteó el cliente. Un mes con quiebre se proyectaba como `(ventas / días_c
 
 **Suite:** 224 ETL, 40 backend, 35 frontend, tsc limpio.
 
+**Desplegado y verificado en producción** (commit `3f47449`, rebuild de `webapp` y `etl`). Se forzó el recálculo de `run_calc_planilla.py` en vez de esperar al cron: tardó 67 minutos, exactamente el promedio de las 8 corridas anteriores (62-68 min), sin degradación pese a correr a mediodía compitiendo con la carga normal.
+
+Verificado sobre los datos reales ya recalculados:
+- **`I02552`, jul-2026** -- el caso extremo, 30 unidades vendidas en 1 solo día de 31: su valor ajustado quedó en **33.91**. Con la fórmula vieja habría sido **469.4** (la extrapolación daba 930, promediada con el histórico de 8.79). Baja del 93% en el número que alimenta la reposición de ese artículo.
+- **Cero violaciones del tope** sobre los 1502 meses con quiebre: ningún valor extrapolado supera el doble de lo realmente vendido. La garantía estructural se cumple sobre datos reales, no sólo en los tests.
+
+De paso se liberaron 11.2 GB de build cache acumulado por los deploys del día: el volumen quedó en 44 GB libres (54% de uso). Sigue en pie lo anotado en #122: `stock_diario` son 27.46 GB de los 33.5 GB de datos y crece a diario, así que agrandar el volumen EBS sigue siendo el arreglo de fondo -- limpiar cache compra tiempo, no resuelve.
+
+**#129 cerrado en código y en producción.**
+
 ---
 
 ## Documentación adicional
