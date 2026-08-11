@@ -3293,6 +3293,35 @@ Corregido con ruta absoluta y override, misma convención que ya usaba `CRON_JOB
 
 ---
 
+### Triple revisión de la planilla y recuperación del día perdido (sesión 2026-08-11)
+
+Pedido de Nico: tres revisiones independientes y en paralelo de toda la planilla de reposición — dos subagentes con ángulos distintos (correctitud de los cálculos y robustez operativa) y una propia (consistencia entre capas), cruzando después las tres lecturas.
+
+**El patrón que los tres encontramos por caminos separados:** el sistema afirma cosas que no son ciertas y nadie se entera. Le miente al cliente (490 meses rotulados "mes completo sin stock" que tenían mercadería y vendieron; 243 celdas lila que dicen "falta el factor estacional" teniéndolo cargado), le miente al operador (el 2026-08-02 un paso falló y la noche quedó como `exitoso`; tres noches de julio se saltearon y también figuran como éxito) y se contradice a sí mismo (`ROT.S` cuenta los meses con venta 0 y `Rotacion DesEstac.`, al lado, los descarta).
+
+**La contradicción de fondo:** #116 decidió, en un grill-me, que los meses sin ventas cuentan como rotación 0 porque descartarlos infla la sugerencia. #130 hizo lo contrario en la columna vecina. Hoy el artículo `O00847` muestra DDSTK 1,93 · Rot.DesEstac. 0,05 · ROT.S 0,03 — **63× de spread** entre columnas que dicen medir lo mismo.
+
+**Dos de los hallazgos más serios los introduje yo, con el mismo patrón**: el cron roto de #119 (ruta relativa que sólo falla con el layout de la imagen) y el guard de los ceros de #130 (`rotacionDiariaReal > 0`, razonando que sin `real` no se puede derivar el factor — cierto, pero el valor no hace falta derivarlo: si vendiste 0, la desestacionalizada **es** 0 y el ETL ya la persiste). En los dos casos **había un test que fijaba el comportamiento incorrecto**. Un test que documenta un error lo vuelve permanente.
+
+**Resultado:** 13 tickets publicados, #131 a #143. Casi ninguno tiene bloqueantes —son fallos independientes— salvo #143, que espera a #134 y #135 porque los tres tocan los textos de la hoja "Criterios".
+
+### Recuperación del 2026-08-10
+
+El cron roto dejó ese día sin cargar, y como `run_ofelia.sh` pasa `FORCE_START=FORCE_END=ayer` no había catch-up: la corrida siguiente habría saltado al 11 dejando el hueco para siempre.
+
+Recuperado con `run_backfill_ventas.sh` acotado a ese día. **65 grupos, cero errores.** Verificado que quedó completo y correcto:
+- **5.593 filas de ventas**, exactamente el mismo número que el 07, 08 y 09.
+- **1.671 unidades** el lunes 10 contra 1.669 el viernes 7. Los ceros del 8 y 9 no eran un hueco: son sábado y domingo.
+- **El stock es dato real, no una foto repetida**: de 33.708 SKUs comparables, 218 tienen cantidad distinta a la del 09/08. Una copia daría cero diferencias.
+
+**Dos correcciones a lo que yo había afirmado en esta misma sesión**, ambas registradas en los tickets correspondientes:
+1. Dije que el hueco se cerraba solo porque el extractor pide 7 días. Falso: esa rama existe pero el cron la desactiva pasando siempre un día. Lo detectó el subagente de robustez.
+2. Dije que el stock no era recuperable porque `ConsStockXml` devuelve la foto de hoy. Cierto para *ese* endpoint, pero **`ConsStockVenta` puebla `stock_diario` con dato real por fecha** — el backfill lo demostró. #133 quedó corregido: una noche perdida se puede recuperar completa.
+
+**Fricción confirmada en vivo (#139):** el backfill murió al arrancar con `WS_URL: missing`. De las diez variables que necesita, ocho ya están en el entorno del contenedor y faltan exactamente las tres hardcodeadas en `run_ofelia.sh`. En una urgencia, eso es tiempo perdido y un riesgo real de correr un backfill sobre una lista de depósitos incompleta sin que nada lo señale.
+
+---
+
 ## Documentación adicional
 
 | Archivo | Contenido |
