@@ -55,7 +55,11 @@ const skuB: PlanillaVentasDto = {
     // Placeholder sin_datos (#106): valores null, no ceros.
     mes({ month: 5, estadoMes: 'sin_datos', ventasCantidad: null, diasConStock: null, ticketsMes: null }),
     mes({ month: 6, ventasCantidad: 7, ticketsMes: 2 }),
-    mes({ month: 7, estadoMes: 'sin_stock', ventasCantidad: 0, diasConStock: 0 }),
+    // Issue #122: rotacionDiariaReal viene en 0 (no null) del backend para
+    // meses sin_stock -- el fixture antes tenía null por default, que no
+    // reproducía el bug real (el `?? 0`/`!= null` de exportPlanilla.ts solo
+    // fallaba con 0 explícito, no con null).
+    mes({ month: 7, estadoMes: 'sin_stock', ventasCantidad: 0, diasConStock: 0, rotacionDiariaReal: 0 }),
   ],
 };
 
@@ -112,6 +116,14 @@ describe('buildPlanillaWorkbook (#107)', () => {
     expect(filaB.getCell(7).value).toBeNull();       // Rot May/26
   });
 
+  it('hoja 1: mes sin_stock exporta rotación vacía, no 0,0000 (#122)', () => {
+    // SKU-B, Jul/26 (índice 2, el último mes): sin_stock con
+    // rotacionDiariaReal=0 -- la hoja Criterios promete "Vacía si el mes no
+    // tuvo ningún día con stock" para esta columna.
+    const filaB = hoja1.getRow(3);
+    expect(filaB.getCell(9).value).toBeNull(); // Rot.Jul/26
+  });
+
   it('hoja 1: color de quiebre en la celda mensual (media freq → naranja)', () => {
     const filaA = hoja1.getRow(2);
     expect(fillColor(filaA.getCell(5))).toBe('FFFFB74D'); // Vta.Jun/26 quiebre media
@@ -159,6 +171,14 @@ describe('buildPlanillaWorkbook (#107)', () => {
     expect(filaB.getCell(12).value).toBe('');   // Crit.May sin etiqueta
     expect(filaB.getCell(15).value).toBeNull(); // VAj.May
     expect(fillColor(filaB.getCell(15))).toBe('FFF1F5F9'); // gris sin_datos, no color de criterio
+  });
+
+  it('hoja 2: mes sin_stock exporta V/E vacío, no 0,00 (#122)', () => {
+    // Mismo bug que en hoja 1: rotacionDiariaReal=0 (no null) para
+    // sin_stock hacía que `!= null` calculara 0*dias=0 en vez de dejar
+    // la celda vacía como promete "Criterios" para esta columna.
+    const filaB = hoja2.getRow(5); // SKU-B
+    expect(filaB.getCell(11).value).toBeNull(); // V/E.Jul (índice 2, sin_stock)
   });
 });
 

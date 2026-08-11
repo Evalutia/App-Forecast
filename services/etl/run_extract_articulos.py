@@ -290,6 +290,14 @@ def main():
         autocommit=False,
         charset="utf8mb4",
     )
+    # Issue #122: sin esto, ts_carga = NOW(6) de mas abajo usa el huso local
+    # del servidor (America/Montevideo, UTC-3) en vez de UTC -- mismo patron
+    # ya usado en run_calc_planilla.py/run_calc_sugerencias.py/
+    # run_calc_stock_resumen.py/run_extract_sales_chunk.py. Sin unificar,
+    # filas de la misma corrida quedaban con 3hs de diferencia entre si segun
+    # que script las escribio -- justo lo que hizo falta para diagnosticar #114.
+    with conn.cursor() as cur:
+        cur.execute("SET time_zone = '+00:00'")
 
     insert_sql = """
     INSERT INTO articulos

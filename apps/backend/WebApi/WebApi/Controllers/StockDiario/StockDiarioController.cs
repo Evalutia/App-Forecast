@@ -3,6 +3,7 @@ using Microsoft.AspNetCore.Mvc;
 using System.Linq;
 using DataAccess.Repositories.StockDiarioDataAccess;
 using WebApi.Controllers.StockDiario.DTOs;
+using WebApi.Filters;
 
 namespace WebApi.Controllers.StockDiarioApi
 {
@@ -18,7 +19,13 @@ namespace WebApi.Controllers.StockDiarioApi
       _repo = repo;
     }
 
+    // Issue #122: [Authorize] a nivel de clase solo exige estar autenticado --
+    // cualquier usuario de solo lectura (duenoDeEmpresa) podia escribir stock
+    // conociendo la URL, sin que la UI expusiera el endpoint. Los GET de este
+    // mismo controller siguen abiertos a cualquier autenticado a proposito
+    // (son de lectura); esta es la unica escritura, y ahora exige admin.
     [HttpPost("batch")]
+    [AuthorizationFilter("administrador")]
     public IActionResult InsertarBatch([FromBody] List<StockDiarioDto> payload)
     {
       if (payload == null || payload.Count == 0)

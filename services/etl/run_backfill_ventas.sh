@@ -225,6 +225,12 @@ conn = pymysql.connect(
 )
 try:
     with conn.cursor() as cur:
+        # Issue #122: sin esto, NOW(6) de abajo usa el huso local del
+        # servidor en vez de UTC -- mismo patron que el resto de los scripts
+        # ETL (run_calc_planilla.py, run_extract_sales_chunk.py, etc.). El
+        # merge diario (job_etl_diario.kjb) escribe el mismo ts_carga con el
+        # mismo problema, arreglado ahi tambien.
+        cur.execute("SET time_zone = '+00:00'")
         cur.execute("""
             INSERT INTO ventas_historicas (fecha, sku, cantidad, ts_carga, fuente)
             SELECT DATE(s.fecha), TRIM(s.sku),

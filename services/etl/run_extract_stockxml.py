@@ -91,6 +91,10 @@ conn = pymysql.connect(
     autocommit=False,
     charset="utf8mb4",
 )
+# Issue #122: mismo motivo que run_extract_articulos.py -- sin esto ts_carga
+# usa hora local del servidor en vez de UTC, como el resto de los scripts.
+with conn.cursor() as cur:
+    cur.execute("SET time_zone = '+00:00'")
 
 def get_columns(table_name: str):
     with conn.cursor() as cur:
@@ -201,7 +205,13 @@ with conn.cursor() as cur:
             print(f"[WARN] fila descartada, stock no interpretable sku={sku}: {e}")
             rows_skip += 1
             continue
-        deposito_val = trunc(deposito, 64) if deposito else None
+        # Issue #122: stock_diario.deposito_id es NOT NULL DEFAULT '' desde la
+        # migracion 20 -- trunc(None, 64) ya devuelve "" (ver definicion arriba),
+        # asi que no hay que pasar None nunca. Antes esto se insertaba/actualizaba
+        # como NULL, y post-migracion 20 hubiera tirado una excepcion de MySQL
+        # absorbida en silencio por el except generico de abajo (fila "saltada"
+        # sin distinguirse de un skip legitimo).
+        deposito_val = trunc(deposito, 64)
         fuente = "ConsStockXml"
 
         try:

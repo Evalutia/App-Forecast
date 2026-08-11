@@ -101,11 +101,16 @@ function ddstk(meses: PlanillaMesDto[]): number | null {
 // Issue #66: "VentaReal/Extrapolación" no esta persistido por separado en #62
 // (solo valor_ajustado y criterio_frecuencia) -- se reconstruye con datos ya
 // expuestos, misma formula exacta que run_calc_planilla.py (Extrapolacion =
-// rotacion_diaria_real * dias_naturales_mes). Si es sin_stock (rotacionDiariaReal
-// null, extrapolacion indefinida), no hubo componente real que usar en el
-// blend para esa fila -- se deja en blanco, no se inventa un valor.
+// rotacion_diaria_real * dias_naturales_mes).
+//
+// Issue #122: sin_stock (0 días con stock ese mes) no da rotacionDiariaReal
+// null como asumía el comentario original -- el backend lo manda en 0, así
+// que `!= null` dejaba pasar `0 * diasNaturalesMes = 0` en vez de la celda
+// vacía que la hoja "Criterios" promete ("Vacía si el mes no tuvo stock").
+// Se chequea estadoMes directo, no la nulabilidad de rotacionDiariaReal.
 function ventaRealOExtrapolacion(mes: PlanillaMesDto): number | null {
   if (mes.estadoMes === 'normal') return mes.ventasCantidad ?? 0;
+  if (mes.estadoMes === 'sin_stock' || mes.estadoMes === 'sin_datos') return null;
   if (mes.rotacionDiariaReal != null) return mes.rotacionDiariaReal * mes.diasNaturalesMes;
   return null;
 }
@@ -193,8 +198,14 @@ function buildHojaPlanilla(
       item.descripcion ?? '',
       item.codigoBarras ?? '',
       // Meses sin_datos (#106) exportan celda vacía (null), no un 0 inventado.
+      // Issue #122: sin_stock también -- la hoja "Criterios" promete "Vacía
+      // si el mes no tuvo ningún día con stock" para esta columna, y
+      // rotacionDiariaReal viene en 0 (no null) para esos meses, no en null
+      // como asume el ?? 0 de abajo -- sin este chequeo quedaba "0,0000".
       ...item.meses.map(m => m.ventasCantidad),
-      ...item.meses.map(m => m.estadoMes === 'sin_datos' ? null : m.rotacionDiariaReal ?? 0),
+      ...item.meses.map(m =>
+        (m.estadoMes === 'sin_datos' || m.estadoMes === 'sin_stock') ? null : m.rotacionDiariaReal ?? 0
+      ),
       rotDesEstac(item.meses),
       item.estadoArticulo ?? 'activo',
       item.meses.slice(0, -1).reduce((s, m) => s + (m.ventasCantidad ?? 0), 0),
@@ -365,7 +376,7 @@ export const CRITERIOS_COLUMNAS: CriterioRow[] = [
   { col: 'DDSTK', hoja: 'Planilla', que: 'Demanda diaria con stock: venta promedio por día en los días que hubo stock.',
     como: 'Suma de ventas de los 13 meses ÷ suma de días con stock de los 13 meses.' },
   { col: 'ROT.S', hoja: 'Planilla', que: 'Rotación diaria sugerida para planificar la reposición.',
-    como: 'Promedio ponderado de la rotación de hasta 13 meses cerrados con datos útiles (stock completo: rotación real; quiebre: rotación ajustada). Los meses recientes pesan más que los antiguos. Vacía si hay menos de 3 meses útiles.' },
+    como: 'Promedio ponderado de la rotación de hasta 12 meses cerrados con datos útiles (el mes en curso siempre queda afuera del promedio; stock completo: rotación real; quiebre: rotación ajustada). Los meses recientes pesan más que los antiguos. Vacía si hay menos de 3 meses útiles.' },
   { col: 'Fiabilidad %', hoja: 'Planilla', que: 'Qué tan estable es la rotación del artículo — cuánto confiar en ROT.S.',
     como: '100% = rotación idéntica todos los meses; baja cuanto más varía de mes a mes. Siempre entre 0% y 100%.' },
   { col: 'QBK (días)', hoja: 'Planilla', que: 'Días estimados hasta quedarse sin stock.', como: 'Stock actual ÷ ROT.S. 0 = ya sin stock.' },

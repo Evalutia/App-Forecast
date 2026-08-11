@@ -172,13 +172,20 @@ VALUES (
 -- Con el JOIN entran las filas buenas y se saltean las huerfanas, misma
 -- tolerancia que ya tenia run_calc_planilla.py (que ademas cuenta
 -- skus_omitidos en jobs_historial).
+--
+-- Issue #122: CONVERT_TZ(NOW(6), @@session.time_zone, '+00:00') en vez de
+-- NOW(6) solo -- sin esto, ts_carga queda en el huso local del servidor
+-- (America/Montevideo, UTC-3), distinto del UTC que ya escriben los scripts
+-- Python del ETL (run_calc_planilla.py y otros, via SET time_zone). Se usa
+-- una expresion self-contained (no un SET previo) porque este step SQL no
+-- garantiza compartir sesion con un statement anterior.
 INSERT INTO ventas_historicas
   (fecha, sku, cantidad, ts_carga, fuente)
 SELECT
   DATE(s.fecha) AS fecha,
   TRIM(s.sku) AS sku,
   SUM(CAST(s.cantidad AS DECIMAL(12,3))) AS cantidad,
-  NOW(6) AS ts_carga,
+  CONVERT_TZ(NOW(6), @@session.time_zone, '+00:00') AS ts_carga,
   COALESCE(MIN(s.fuente),'ws_consstockventa') AS fuente
 FROM ventas_historicas_stage s
 INNER JOIN articulos a ON a.sku = TRIM(s.sku)
@@ -239,7 +246,8 @@ SELECT
   COALESCE(v.ventas_cantidad, 0) as ventas_cantidad,
   COALESCE(d.dias_con_stock, 0) as dias_con_stock,
   'calculado',
-  NOW(6)
+  -- Issue #122: mismo motivo que en el MERGE de arriba, UTC explicito.
+  CONVERT_TZ(NOW(6), @@session.time_zone, '+00:00')
 FROM (
   SELECT sku, YEAR(fecha) AS year, MONTH(fecha) AS month
   FROM ventas_historicas
@@ -276,7 +284,7 @@ LEFT JOIN (
 ON DUPLICATE KEY UPDATE
   ventas_cantidad = VALUES(ventas_cantidad),
   dias_con_stock  = VALUES(dias_con_stock),
-  actualizado_en = NOW(6);
+  actualizado_en = CONVERT_TZ(NOW(6), @@session.time_zone, '+00:00');
       ]]></sql>
       <xloc>1920</xloc><yloc>64</yloc><draw>Y</draw>
     </entry>

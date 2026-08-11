@@ -27,9 +27,13 @@ namespace DataAccess.Repositories.StockDiarioDataAccess
         {
           if (string.IsNullOrWhiteSpace(r.Sku))
             throw new ArgumentException("Sku is required.");
+          // Issue #122: stock_diario.deposito_id es NOT NULL DEFAULT '' desde la
+          // migracion 20 (mismo sentinel que usan los scripts ETL); sin este coalesce
+          // un DepositoId nulo tira una excepcion de MySQL que aborta el batch entero.
+          var depositoId = r.DepositoId ?? "";
           _db.Database.ExecuteSqlInterpolated($@"
 INSERT INTO stock_diario (sku, fecha, cantidad, deposito_id, fuente, ts_carga)
-VALUES ({r.Sku}, {r.Fecha}, {r.Cantidad}, {r.DepositoId}, {r.Fuente}, {r.TsCarga})
+VALUES ({r.Sku}, {r.Fecha}, {r.Cantidad}, {depositoId}, {r.Fuente}, {r.TsCarga})
 ON DUPLICATE KEY UPDATE
   cantidad = VALUES(cantidad),
   fuente = VALUES(fuente),

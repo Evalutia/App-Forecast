@@ -423,7 +423,7 @@ export default function PlanillaTable({ params, onPageChange, sugerencias, suger
                     'Rotación diaria promedio corregida por estacionalidad.\n' +
                     'Promedio de meses cerrados, excluyendo el mes de referencia.\n' +
                     '  · Meses normales: rotación real ÷ factor estacional del mes\n' +
-                    '  · Meses con quiebre: rotación ajustada por frecuencia × factor estacional\n' +
+                    '  · Meses con quiebre: rotación ajustada por frecuencia ÷ factor estacional\n' +
                     '  · Meses sin stock o sin factor: excluidos'
                   }
                 />
@@ -461,7 +461,8 @@ export default function PlanillaTable({ params, onPageChange, sugerencias, suger
                   tip={
                     'Rotación Sugerida\n' +
                     'Promedio ponderado de la rotación real en meses normales\n' +
-                    '(pesos lineales: más reciente = mayor peso, hasta 13 meses).\n\n' +
+                    '(pesos lineales: más reciente = mayor peso, hasta 12 meses cerrados —\n' +
+                    'el mes de referencia en curso siempre queda afuera).\n\n' +
                     'Badge de fiabilidad:\n' +
                     '  Verde  ≥ 70% — rotación estable\n' +
                     '  Amarillo 40–69% — variabilidad moderada\n' +
