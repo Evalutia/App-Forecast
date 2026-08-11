@@ -79,19 +79,28 @@ function applyHeaderStyle(headerRow: ExcelJS.Row, firstSummaryCol: number): void
 
 // Issue #66: "VentaReal/Extrapolación" no esta persistido por separado en #62
 // (solo valor_ajustado y criterio_frecuencia) -- se reconstruye con datos ya
-// expuestos, misma formula exacta que run_calc_planilla.py (Extrapolacion =
-// rotacion_diaria_real * dias_naturales_mes).
+// expuestos, replicando la formula de run_calc_planilla.py.
 //
 // Issue #122: sin_stock (0 días con stock ese mes) no da rotacionDiariaReal
 // null como asumía el comentario original -- el backend lo manda en 0, así
 // que `!= null` dejaba pasar `0 * diasNaturalesMes = 0` en vez de la celda
 // vacía que la hoja "Criterios" promete ("Vacía si el mes no tuvo stock").
 // Se chequea estadoMes directo, no la nulabilidad de rotacionDiariaReal.
+//
+// Issue #129: la extrapolación ahora pondera por cuánto del mes se pudo
+// observar -- `ventas * (2 - díasConStock / díasDelMes)` -- en vez de proyectar
+// el ritmo de los días con stock al mes entero. Tiene que seguir a
+// extrapolacion_mes() de run_calc_planilla.py: si divergen, esta columna
+// contradice al valor ajustado que aparece a su lado en la misma hoja.
 function ventaRealOExtrapolacion(mes: PlanillaMesDto): number | null {
   if (mes.estadoMes === 'normal') return mes.ventasCantidad ?? 0;
   if (mes.estadoMes === 'sin_stock' || mes.estadoMes === 'sin_datos') return null;
-  if (mes.rotacionDiariaReal != null) return mes.rotacionDiariaReal * mes.diasNaturalesMes;
-  return null;
+
+  const ventas = mes.ventasCantidad ?? 0;
+  const ds = mes.diasConStock ?? 0;
+  if (ds <= 0 || mes.diasNaturalesMes <= 0) return null;
+  if (ventas <= 0) return ventas;
+  return ventas * (2 - ds / mes.diasNaturalesMes);
 }
 
 // Issue #66: etiqueta legible del criterio (mismo criterio que #65 en
@@ -367,7 +376,7 @@ export const CRITERIOS_COLUMNAS: CriterioRow[] = [
   { col: 'Hist.[mes]', hoja: 'Detalle', que: 'Histórico: venta mensual promedio del artículo.',
     como: 'Promedio de ventas de los 12 meses cerrados en los que el artículo ya existía. Es el mismo valor en todos los meses de la fila.' },
   { col: 'V/E.[mes]', hoja: 'Detalle', que: 'Venta real del mes, o su extrapolación si hubo quiebre.',
-    como: 'Con stock todo el mes: la venta real. Con quiebre: rotación diaria real × días del mes (estima cuánto se habría vendido sin quiebre). Vacía si el mes no tuvo stock.' },
+    como: 'Con stock todo el mes: la venta real. Con quiebre: la venta se proyecta al mes completo, y cuanto menos duró el stock más se proyecta — pero nunca más del doble de lo realmente vendido, por poco que haya durado. Vacía si el mes no tuvo stock.' },
   { col: 'Crit.[mes]', hoja: 'Detalle', que: 'Método usado para el valor ajustado de ese mes.',
     como: 'Histórico, Promedio, Venta real o Extrapolado — según los tickets del mes (ver bandas abajo).' },
   { col: 'VAj.[mes]', hoja: 'Detalle', que: 'Valor ajustado: la estimación de demanda mensual que usa el sistema.',

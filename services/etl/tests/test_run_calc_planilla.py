@@ -11,6 +11,7 @@ from run_calc_planilla import (
     calcular_historico,
     clasificar_estado,
     clasificar_estado_mes,
+    extrapolacion_mes,
     meses_disponibles_historico,
     valor_ajustado_y_criterio,
     ventana_meses,
@@ -176,6 +177,92 @@ def test_cinco_tickets_con_quiebre_usa_extrapolacion_ignora_historico():
         tickets=5, ventas_real=10, extrapolacion=80.0, historico=50.0, es_quiebre=True
     )
     assert (valor, criterio) == (80.0, "real_extrapolado")
+
+
+# ── extrapolacion_mes() — Issue #129 ────────────────────────────────────────
+# Antes se extrapolaba (ventas / dias_con_stock) * dias_naturales, sin mirar en
+# que momento del mes se corto el stock: un articulo que se agota el dia 6 de 30
+# se multiplicaba x5. Ahora se proyecta en proporcion a cuanto del mes se pudo
+# observar, que acotado da ventas * (2 - ds/dn).
+
+def test_mes_completo_no_extrapola():
+    # sin quiebre no hay nada que proyectar: la venta real es el valor
+    assert extrapolacion_mes(ventas=30, dias_con_stock=30, dias_naturales=30) == 30.0
+
+
+def test_issue_129_caso_del_cliente_agota_el_dia_6():
+    # 6 unidades en 6 dias de 30. Antes: (6/6)*30 = 30 (x5). Ahora: 6*(2-0.2) = 10.8
+    assert extrapolacion_mes(ventas=6, dias_con_stock=6, dias_naturales=30) == 10.8
+
+
+def test_issue_129_caso_del_cliente_agota_el_dia_29_queda_casi_igual():
+    """
+    El cliente escribio que en este caso "iba a vender tan solo un 3% mas".
+    La formula da x1.0333 sin haberse calibrado para eso -- es la validacion
+    mas fuerte del criterio elegido.
+    """
+    valor = extrapolacion_mes(ventas=29, dias_con_stock=29, dias_naturales=30)
+    assert valor == 29.97                                # el valor se guarda con 2 decimales
+    assert valor / 29 == pytest.approx(1.0333, abs=0.0005)
+
+
+def test_issue_129_importacion_que_entra_a_fin_de_mes():
+    # 5 dias con stock de 30. Antes x6.00, ahora x1.83
+    assert extrapolacion_mes(ventas=5, dias_con_stock=5, dias_naturales=30) == 9.17   # x1.83
+
+
+@pytest.mark.parametrize("ds,dn", [(1, 30), (1, 31), (2, 28), (3, 31)])
+def test_issue_129_el_multiplicador_nunca_supera_x2(ds, dn):
+    """El tope emerge de la formula, no de un parametro: 2 - ds/dn < 2 siempre."""
+    ventas = 10
+    assert extrapolacion_mes(ventas, ds, dn) < 2 * ventas
+
+
+def test_issue_129_es_continua_no_tiene_escalones():
+    """
+    A igual venta, cortar el stock el dia 15 o el 16 da practicamente lo mismo:
+    no hay escalon arbitrario a mitad de mes. Un tope duro ("maximo x2") si lo
+    tendria, y justo donde caen mas articulos.
+    """
+    a = extrapolacion_mes(ventas=100, dias_con_stock=15, dias_naturales=30)
+    b = extrapolacion_mes(ventas=100, dias_con_stock=16, dias_naturales=30)
+    assert abs(b - a) < 4.0            # ~3.3 sobre un valor de ~150
+    assert b < a                       # y va en la direccion correcta
+
+
+def test_issue_129_proyecta_mas_cuanto_menos_se_observo():
+    """
+    Misma venta, menos dias observados -> mas proyeccion. Es la direccion
+    correcta: si vendiste 40 unidades en 1 dia, el mes completo daba mucho mas
+    que si las vendiste en 30 dias. Lo que cambia respecto de la formula vieja
+    no es el sentido sino cuanto: antes x30, ahora x1.97 como techo.
+    """
+    valores = [extrapolacion_mes(40, ds, 30) for ds in (30, 20, 10, 5, 1)]
+    assert valores == sorted(valores)                    # estrictamente creciente
+    assert valores[0] == 40.0                            # mes completo: sin proyectar
+    assert valores[-1] < 80.0                            # el ultimo, aun asi, por debajo del doble
+
+
+def test_issue_129_venta_negativa_no_se_extrapola():
+    """
+    Desde #80 un mes puede cerrar en negativo por notas de credito. Amplificar
+    una devolucion por haber tenido poco stock no significa nada.
+    """
+    assert extrapolacion_mes(ventas=-5, dias_con_stock=6, dias_naturales=30) == -5.0
+
+
+def test_issue_129_venta_cero_no_se_extrapola():
+    assert extrapolacion_mes(ventas=0, dias_con_stock=6, dias_naturales=30) == 0.0
+
+
+@pytest.mark.parametrize("ds,dn", [(0, 30), (-1, 30), (6, 0)])
+def test_sin_base_para_proyectar_devuelve_none(ds, dn):
+    """
+    dias_con_stock=0 es el mes sin_stock: no hay ritmo observado del que partir.
+    Devolver None mantiene el comportamiento previo -- valor_ajustado_y_criterio
+    lo hace caer a Historico.
+    """
+    assert extrapolacion_mes(ventas=10, dias_con_stock=ds, dias_naturales=dn) is None
 
 
 # ── Fallbacks no cubiertos por el mail (decididos en la sesion de grill-me) ──

@@ -211,8 +211,17 @@ def verificar_sku(cur, sku, ventana, cerrados, ref):
                 r_raj = (round(r_vta / dn, 4) if r_ds == 0
                          else round((r_vta / r_ds + r_vta / dn) / 2, 4))
 
-        # Blending
-        extrap = round(r_rot * dn, 2) if r_rot is not None else None
+        # Blending. Issue #129: la extrapolacion pondera por cuanto del mes se
+        # pudo observar -- ventas * (2 - dias_con_stock/dias_naturales) -- en vez
+        # de proyectar el ritmo de los dias con stock al mes entero. Replica
+        # exacta de extrapolacion_mes() en run_calc_planilla.py; si divergen,
+        # este oraculo reporta mismatches falsos en todos los meses con quiebre.
+        if r_ds <= 0 or dn <= 0:
+            extrap = None
+        elif r_vta <= 0:
+            extrap = float(r_vta)
+        else:
+            extrap = round(r_vta * (2 - r_ds / dn), 2)
         es_quiebre = r_est != "normal"
         if es_quiebre and extrap is None:
             r_vaj, r_crit = ((round(historico, 2), "historico") if historico is not None

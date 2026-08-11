@@ -190,6 +190,33 @@ describe('buildPlanillaWorkbook (#107)', () => {
     const filaB = hoja2.getRow(5); // SKU-B
     expect(filaB.getCell(11).value).toBeNull(); // V/E.Jul (índice 2, sin_stock)
   });
+
+  it('hoja 2: V/E de un mes con quiebre pondera por los días con stock (#129)', () => {
+    // 50 unidades vendidas en 15 de 30 días. Antes se proyectaba
+    // (50/15)*30 = 100 — el doble de lo vendido, por haber tenido stock la
+    // mitad del mes. Ahora: 50 * (2 - 15/30) = 75.
+    const mitad = mes({
+      month: 6, estadoMes: 'quiebre_parcial', ventasCantidad: 50,
+      diasConStock: 15, diasNaturalesMes: 30, rotacionDiariaReal: 50 / 15,
+    });
+    const sku: PlanillaVentasDto = { ...skuA, sku: 'SKU-MITAD', meses: [skuA.meses[0], mitad, skuA.meses[2]] };
+    const hoja = buildPlanillaWorkbook([sku], sugerencias).getWorksheet('Detalle de cálculo')!;
+    expect(hoja.getRow(4).getCell(10).value).toBe(75); // V/E.Jun
+  });
+
+  it('hoja 2: V/E nunca supera el doble de lo vendido (#129)', () => {
+    // El tope emerge de la fórmula: con muy pocos días de stock el
+    // multiplicador tiende a 2 pero no lo alcanza.
+    const casi = mes({
+      month: 6, estadoMes: 'quiebre_parcial', ventasCantidad: 40,
+      diasConStock: 1, diasNaturalesMes: 30, rotacionDiariaReal: 40,
+    });
+    const sku: PlanillaVentasDto = { ...skuA, sku: 'SKU-TOPE', meses: [skuA.meses[0], casi, skuA.meses[2]] };
+    const hoja = buildPlanillaWorkbook([sku], sugerencias).getWorksheet('Detalle de cálculo')!;
+    const ve = hoja.getRow(4).getCell(10).value as number;
+    expect(ve).toBeLessThan(80);      // 2 × 40
+    expect(ve).toBeGreaterThan(75);   // pero cerca del tope
+  });
 });
 
 describe('hoja Criterios (#109)', () => {

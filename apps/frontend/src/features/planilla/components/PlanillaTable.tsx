@@ -216,8 +216,9 @@ function frecuenciaEntries(umbrales: { bajoMax: number; altoMin: number } | null
         tip:
           'Criterio: Venta real / Extrapolado\n' +
           'El mes tuvo suficientes días de venta para confiar en el número\n' +
-          'tal cual. Si hubo quiebre, se extrapola lo vendido en los días\n' +
-          'con stock a todo el mes.',
+          'tal cual. Si hubo quiebre, la venta se proyecta al mes completo:\n' +
+          'cuanto menos duró el stock más se proyecta, pero nunca más del\n' +
+          'doble de lo vendido.',
       },
     ];
   }
@@ -258,8 +259,9 @@ function frecuenciaEntries(umbrales: { bajoMax: number; altoMin: number } | null
       tip:
         'Criterio: Venta real / Extrapolado\n' +
         `El mes tuvo ${altoMin} tickets o más -- suficientes días de venta para\n` +
-        'confiar en el número tal cual. Si hubo quiebre, se extrapola lo\n' +
-        'vendido en los días con stock a todo el mes.',
+        'confiar en el número tal cual. Si hubo quiebre, la venta se proyecta\n' +
+        'al mes completo: cuanto menos duró el stock más se proyecta, pero\n' +
+        'nunca más del doble de lo vendido.',
     },
   ];
 }

@@ -171,6 +171,47 @@ def calcular_historico(
     return round(total / len(disponibles), 2)
 
 
+def extrapolacion_mes(
+    ventas: int, dias_con_stock: int, dias_naturales: int
+) -> float | None:
+    """
+    Estima cuanto se habria vendido en el mes completo, para los meses con
+    quiebre de stock. None si no hay base sobre la cual proyectar (sin_stock:
+    dias_con_stock=0) -- valor_ajustado_y_criterio() lo hace caer a Historico.
+
+    Issue #129 (planteado por el cliente): antes esto era
+    `(ventas / dias_con_stock) * dias_naturales`, que proyecta el ritmo de los
+    dias observados al mes entero **sin mirar en que momento se corto el
+    stock**. Un articulo que se agota el dia 6 de 30 se multiplicaba por 5; uno
+    que se agota el dia 1, por 30. Y el sesgo va en la peor direccion: los dias
+    posteriores a una reposicion arrastran la demanda que quedo sin atender
+    mientras no hubo stock, asi que ese ritmo es mas alto que el sostenido y
+    extrapolarlo al mes entero infla por construccion.
+
+    El criterio nuevo es recorrer el salto de la venta observada al mes
+    completo **en proporcion a cuanto del mes se pudo observar**:
+
+        ventas + (extrapolacion_vieja - ventas) * (dias_con_stock / dias_naturales)
+
+    que se simplifica a `ventas * (2 - dias_con_stock / dias_naturales)`.
+
+    Tres propiedades por las que se eligio esta y no un tope fijo:
+      - el multiplicador queda acotado en [1, 2): nunca se proyecta mas del
+        doble de lo realmente vendido, y el tope **emerge** en vez de elegirse;
+      - es continua, sin escalones arbitrarios a mitad de mes;
+      - reproduce los dos ejemplos que dio el cliente sin calibrar nada: un mes
+        que se agota el dia 29 queda en x1.03 -- su "tan solo un 3% mas".
+
+    Venta <= 0 no se extrapola (desde #80 un mes puede cerrar en negativo por
+    notas de credito, y amplificar una devolucion no significa nada).
+    """
+    if dias_con_stock <= 0 or dias_naturales <= 0:
+        return None
+    if ventas <= 0:
+        return float(ventas)
+    return round(ventas * (2 - dias_con_stock / dias_naturales), 2)
+
+
 def valor_ajustado_y_criterio(
     tickets: int,
     ventas_real: int,
@@ -509,8 +550,14 @@ def calcular_filas(conn: pymysql.Connection) -> tuple[list[dict], int, int, int]
 
         # Issue #61/#63: frecuencia de venta por tickets del mes
         historico = historicos.get(sku)
-        rot_real  = fila["rotacion_diaria_real"]
-        extrapolacion = round(rot_real * fila["dias_naturales_mes"], 2) if rot_real is not None else None
+        # Issue #129: la extrapolacion ahora pondera por cuanto del mes se pudo
+        # observar, en vez de proyectar el ritmo de los dias con stock al mes
+        # entero. Ver extrapolacion_mes().
+        extrapolacion = extrapolacion_mes(
+            fila["ventas_cantidad"],
+            fila["dias_con_stock"],
+            fila["dias_naturales_mes"],
+        )
         es_quiebre = fila["estado_mes"] != "normal"
 
         fila["valor_historico"] = round(historico, 2) if historico is not None else None

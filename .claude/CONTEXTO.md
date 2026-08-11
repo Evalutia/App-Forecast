@@ -3176,7 +3176,7 @@ Consecuencias directas:
 
 **El default de `Rot. Manual` es la propia `Rotacion DesEstac.` del cliente**: en los `bruto` viene precargada en 521 filas y en todas coincide exactamente con ella. Es decir que su sistema propone su rotación y la persona que arma el pedido decide activamente apartarse -- el desvío experto medible es `rot-ok` menos `bruto`. De los 491 SKUs comparados, sólo 13 quedaron con el valor sin tocar.
 
-**Brecha contra `Rot. Manual`** (491 SKUs comparables): mediana `ROT.S / Rot.Manual` = **0.963**, media 1.157. Sin sesgo sistemático fuerte, pero con mucha dispersión: 30% por encima de +10%, 37% por debajo de −10%, 33% dentro de ±10%. La media muy por encima de la mediana delata una cola larga a la derecha, y esa cola **correlaciona con quiebres**: el cuartil donde más nos pasamos promedia 2.10 meses con quiebre contra 1.66 del cuartil donde nos quedamos cortos, con casos extremos como ×15.8 y ×10.6 en artículos con 2 y 4 meses de quiebre. Es evidencia medida de que la extrapolación infla, justo lo que #129 corrige.
+**Brecha contra `Rot. Manual`** (491 SKUs comparables): mediana `ROT.S / Rot.Manual` = **0.963**, media 1.157. Sin sesgo sistemático fuerte, pero con mucha dispersión: 30% por encima de +10%, 37% por debajo de −10%, 33% dentro de ±10%. La media muy por encima de la mediana delata una cola larga a la derecha, y esa cola **correlaciona con quiebres**: el cuartil donde más nos pasamos promedia 2.10 meses con quiebre contra 1.66 del cuartil donde nos quedamos cortos, con casos extremos como ×15.8 y ×10.6 en artículos con 2 y 4 meses de quiebre. Se anotó en su momento como "evidencia de que la extrapolación infla, justo lo que #129 corrige", pero **eso era impreciso** (lo detectó el `/code-review` de #129): ROT.S no se alimenta de la extrapolación sino de `rotacion_ajustada`, que es otro camino. #129 corrige el valor ajustado y **no mueve esta cola** -- ver la nota sobre `rotacion_ajustada` más abajo.
 
 **Hallazgo lateral, fuera de alcance:** la venta mensual coincide en 88.9% de 14.853 celdas comparables, y el 80.8% de las diferencias son casos donde **ambos valores son mayores a cero pero distintos** — no se explican por el merchandising que el cliente no sigue (esa es sólo una parte del 19% restante). Hay 508 SKUs afectados, algunos con los 12 meses distintos, lo que sugiere algo sistemático y no ruido. Registrado en #126, que es donde vive la conversación sobre las diferencias contra su planilla; no se persigue acá.
 
@@ -3207,6 +3207,26 @@ Las tres consultas tenían estados muy distintos, y la revisión de issues previ
 **#110 cerrado sin enviarse.** Su documento (del 2026-08-02) describía el export anterior a #107 y citaba valores de `I02418` que #116, #117 y #122 ya cambiaron -- enviarlo hoy sería mandar cifras que el cliente no va a encontrar en su archivo, junto con un segundo documento el mismo día sobre la misma planilla. El ítem 4 que pedía definir QBK/ROT.S/Fiabilidad/Crit/VAj queda saldado por otra vía: `VAj` y `Crit` en este documento, y las otras tres en la hoja "Criterios" que #109 metió dentro de cada Excel.
 
 **#128 cerrado en cuanto al entregable**; el envío al cliente lo hace Nico.
+
+---
+
+### #129: la extrapolación ignoraba cuándo se agotó el stock (sesión 2026-08-11)
+
+Lo planteó el cliente. Un mes con quiebre se proyectaba como `(ventas / días_con_stock) × días_naturales`, **sin mirar en qué momento del mes se cortó el stock**: un artículo que se agota el día 6 de 30 se multiplicaba por 5, y uno que se agota el día 1, por 30. El sesgo va en la peor dirección, además, porque los días posteriores a una reposición arrastran la demanda que quedó sin atender y ese ritmo es más alto que el sostenido.
+
+**Criterio nuevo** (decidido en `/grill-me`, comunicado al cliente en #128 antes de aplicarlo): recorrer el salto de la venta observada al mes completo en proporción a cuánto del mes se pudo observar, que se simplifica a `ventas × (2 − días_con_stock/días_naturales)`. Tres propiedades por las que se eligió sobre un tope fijo: el multiplicador queda acotado en `[1, 2)` con el tope **emergiendo** de la fórmula en vez de elegirse, es continua (un cap duro crearía un escalón justo donde caen más artículos), y reproduce el ejemplo del cliente sin calibrar nada -- un mes que se agota el día 29 da ×1.03, su "tan solo un 3% más".
+
+`ventas ≤ 0` no se extrapola (desde #80 hay meses negativos por notas de crédito; amplificar una devolución no significa nada) y `días_con_stock = 0` sigue devolviendo `None`, que hace caer el mes a Histórico como antes.
+
+**Medido contra producción:** de 1502 meses con quiebre y stock parcial, **652 (43.4%) cambian su valor ajustado**. La mediana baja 8% -- la mayoría son quiebres leves donde la corrección casi no aplica, que es lo buscado -- pero 77 meses bajan más del 50% y el caso extremo baja 94%: `I02552` vendió 30 unidades en 1 solo día de 31 y se extrapolaba a **930 unidades**; ahora da 59.
+
+**La fórmula vivía en tres lugares.** Además del ETL, la replicaban `exportPlanilla.ts` (columna `V/E` de la hoja de detalle, con un comentario que decía "misma formula exacta que run_calc_planilla.py") y `scripts/qa_planilla_oracle.py`. Sin actualizar las tres, el Excel habría mostrado la extrapolación vieja al lado del valor ajustado nuevo **en la misma hoja**, y el oráculo habría reportado mismatches falsos en los 652 meses. La del oráculo la encontró el `/code-review`.
+
+**`/code-review`: 4 hallazgos, todos corregidos.** El más incómodo: el texto que escribí para la hoja "Criterios" y los tooltips decía *"cuanto menos duró el stock, menos se proyecta"* -- exactamente al revés. El multiplicador `2 − ds/dn` es **mayor** cuanto menor es `ds`; lo que cambia respecto de la fórmula vieja no es el sentido sino la magnitud (antes ×30 como techo, ahora ×1.97). La misma frase invertida había quedado en el documento enviado al cliente, y se corrigió ahí también.
+
+**Hallazgo que queda abierto, fuera de alcance:** `rotacion_ajustada` sigue usando `vq/ds` para los artículos de frecuencia alta, y de ahí salen `Rot. DesEstac.`, `ROT.S` y `QBK`. El mismo argumento de fondo aplica -- esa tasa está sesgada al alza por la demanda reprimida post-reposición -- pero corregirla cambia números operativos que el documento enviado al cliente **no anuncia**, y es una decisión de método propia. No se tocó acá. Es también la razón por la que #129 no va a mover la cola larga de `ROT.S` contra `Rot. Manual` medida en #127.
+
+**Suite:** 224 ETL, 40 backend, 35 frontend, tsc limpio.
 
 ---
 
