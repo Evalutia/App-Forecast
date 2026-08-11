@@ -460,14 +460,16 @@ export default function PlanillaTable({ params, onPageChange, sugerencias, suger
                   label="ROT.S"
                   tip={
                     'Rotación Sugerida\n' +
-                    'Promedio ponderado de la rotación real en meses normales\n' +
+                    'Promedio ponderado de la rotación de meses cerrados con stock\n' +
+                    '(normal: rotación real; quiebre: rotación ajustada) —\n' +
+                    'los meses sin ventas cuentan con rotación 0, no se descartan\n' +
                     '(pesos lineales: más reciente = mayor peso, hasta 12 meses cerrados —\n' +
                     'el mes de referencia en curso siempre queda afuera).\n\n' +
                     'Badge de fiabilidad:\n' +
                     '  Verde  ≥ 70% — rotación estable\n' +
                     '  Amarillo 40–69% — variabilidad moderada\n' +
                     '  Rojo  < 40% — alta variabilidad\n\n' +
-                    '— = menos de 3 meses con stock normal disponibles.'
+                    '— = menos de 3 meses cerrados con datos disponibles.'
                   }
                 />
               </th>
@@ -481,7 +483,8 @@ export default function PlanillaTable({ params, onPageChange, sugerencias, suger
                     '  Rojo    = 0d — sin stock ya\n' +
                     '  Amarillo ≤ 15d — menos de 2 semanas (lead time típico)\n' +
                     '  Verde   > 15d — margen suficiente\n\n' +
-                    '— = sin datos suficientes para calcular.'
+                    '— = sin ROT.S calculada, o el último dato de stock del\n' +
+                    'artículo tiene más de 7 días de antigüedad.'
                   }
                 />
               </th>

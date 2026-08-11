@@ -3099,6 +3099,35 @@ Issue de higiene (severidad BAJA) con 6 sub-problemas independientes. Resueltos 
 
 ---
 
+### #116: ROT.S y Fiabilidad excluían meses sin ventas — la rotación sugerida quedaba inflada (sesión 2026-08-11)
+
+Severidad ALTA: es la columna con la que el cliente decide cuánto reponer, y estaba sesgada en la dirección peligrosa (sugería reponer de más). Precedido por `/grill-me issue 116` para destrabar la decisión metodológica que el propio issue pedía antes de codear (6 preguntas, resumen abajo).
+
+**Causa raíz:** `run_calc_sugerencias.py` filtraba los meses elegibles para ROT.S/fiabilidad con `estado_mes IN ('normal','quiebre_parcial') AND rotacion > 0` — el `> 0` descartaba meses cerrados con stock completo donde el artículo simplemente no vendió nada, en vez de contarlos como el dato real que son. Fiabilidad usa la misma lista filtrada, así que heredaba el mismo sesgo (la intermitencia desaparecía del cálculo de CV).
+
+**Decisiones (grill-me, todas confirmadas):**
+1. Sacar el `> 0` — un mes `normal`/`quiebre_parcial` cuenta aunque haya vendido 0.
+2. `MIN_MESES_CON_DATOS` se queda en 3.
+3. QBK (`dias_hasta_quiebre`) pasa a `NULL` si el último `stock_diario` conocido del SKU tiene más de 7 días de antigüedad (evita reportar sobre stock congelado de un SKU que desapareció del feed).
+4. Script de verificación nuevo y commiteado (`scripts/verificar_rotacion_vs_ddstk.py`, solo lectura) en vez de una medición descartable.
+5. `MODELO` bumpeado a `weighted_avg_13m_v2` para trazabilidad.
+6. Correr `run_calc_sugerencias.py` manualmente en producción apenas se despliegue, no esperar al cron nocturno.
+
+**Implementación (TDD):** se extrajeron 2 funciones puras de `run_calc_sugerencias.py` (`calcular_rotacion_y_fiabilidad`, `calcular_dias_hasta_quiebre`) con 19 tests nuevos en `services/etl/tests/test_run_calc_sugerencias.py` (18 unitarios sin DB + 1 de integración contra MySQL real que siembra un SKU con meses en cero y prueba que ya no queda excluido — confirmado que falla contra el código viejo y pasa contra el nuevo). `scripts/qa_planilla_oracle.py` actualizado con el mismo criterio para dejar de validar el bug contra sí mismo. Hoja "Criterios" y tooltips de ROT.S/Fiabilidad/QBK actualizados para describir el criterio real.
+
+**Medido en local con `scripts/verificar_rotacion_vs_ddstk.py`:** la proporción de SKUs con `ROT.S > 2×DDSTK` bajó de **14.2% a 2.4%**, y 211 SKUs que antes quedaban en `NULL` (por < 3 meses "con ventas") ahora reciben sugerencia. Medición sobre producción queda pendiente para el momento del deploy.
+
+**`/code-review` encontró 3 hallazgos reales, corregidos:**
+1. **Rotación neta negativa rompía el CHECK de la tabla.** `ventas_cantidad` es signed desde el #80 (devoluciones/notas de crédito) — sin el filtro `> 0`, un mes con retorno neto fuerte podía arrastrar el promedio ponderado por debajo de 0, violando `chk_sugerencias_rotacion CHECK (rotacion_sugerida >= 0)` y abortando el batch completo (no solo el SKU afectado). Corregido con `max(0.0, ...)` sobre el resultado final en las 3 implementaciones (script principal, oráculo, script de verificación) — mismo recorte, un solo criterio.
+2. **El test de integración nuevo no limpiaba sus datos de prueba.** El fixture `conn` solo hace `rollback()` (no-op sobre datos ya commiteados); el SKU de prueba quedaba para siempre en la DB local. Agregado `try/finally` con `DELETE` explícito, mismo patrón que `test_run_calc_planilla.py`.
+3. **El oráculo comparaba la antigüedad del stock contra "hoy" en vez de contra la fecha real de cálculo del pipeline.** Si el oráculo se corre días después de la última corrida de `run_calc_sugerencias.py`, comparar contra `dt.date.today()` daba un MISMATCH falso solo por el paso del tiempo. Corregido para usar `ts_generacion` de `planilla_sugerencias` como fecha de referencia.
+
+**Suite completa (post-fixes):** 40/40 backend, 18/18 frontend, 163/163 ETL (corrida dentro del contenedor Linux `evalutia-etl`, no en el host macOS — algunos tests de scripts bash dan falsos negativos ahí por diferencias de entorno, no reflejan el estado real).
+
+**#116 cerrado en código.** Deploy a producción + corrida manual de `run_calc_sugerencias.py` + medición de `verificar_rotacion_vs_ddstk.py` contra datos reales quedan como paso separado.
+
+---
+
 ## Documentación adicional
 
 | Archivo | Contenido |

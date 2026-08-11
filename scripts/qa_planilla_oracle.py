@@ -31,6 +31,7 @@ TOL = 0.01  # tolerancia por redondeos (valores almacenados con 2-4 decimales)
 FREQ_ALTA_MIN, FREQ_BAJA_MAX = 9, 3
 TICKETS_BAJO_MAX, TICKETS_ALTO_MIN = 2, 5
 MIN_MESES_CON_DATOS, MAX_MESES = 3, 13
+UMBRAL_DIAS_STOCK_VIEJO = 7  # Issue #116, mismo umbral que run_calc_sugerencias.py
 
 
 def connect():
@@ -273,14 +274,28 @@ def verificar_sku(cur, sku, ventana, cerrados, ref):
           f"EstadoArt={estado_art} frecuencia={nivel} ({n_con_ventas} meses c/venta)")
 
     # ── ROT.S / Fiabilidad / QBK (algoritmo de run_calc_sugerencias.py) ────────
+    # Issue #116: un mes normal/quiebre_parcial cuenta aunque haya vendido 0
+    # -- ya no se exige "> 0" (ver mismo comentario en run_calc_sugerencias.py).
+    #
+    # fecha de referencia para la guarda de stock viejo: se usa ts_generacion
+    # (cuando el pipeline calculo por ultima vez), no la fecha de HOY -- si
+    # corremos el oraculo dias despues de la ultima corrida del job, comparar
+    # contra "hoy" da un MISMATCH falso por el solo paso del tiempo, no por un
+    # bug real (hallazgo de /code-review).
+    cur.execute("SELECT rotacion_sugerida, fiabilidad_porcentaje, dias_hasta_quiebre, ts_generacion "
+                "FROM planilla_sugerencias WHERE sku=%s", (sku,))
+    sug_row = cur.fetchone() or (None, None, None, None)
+    sug = sug_row[:3]
+    fecha_ref_qbk = sug_row[3].date() if sug_row[3] else dt.date.today()
+
     elegibles = []
     for ym in sorted(stored, reverse=True):
         if ym == ref:
             continue
         r = stored[ym]
         est, rot, raj = r[7], r[5], r[9]
-        v = (float(rot) if est == "normal" and rot is not None and float(rot) > 0
-             else float(raj) if est == "quiebre_parcial" and raj is not None and float(raj) > 0
+        v = (float(rot) if est == "normal" and rot is not None
+             else float(raj) if est == "quiebre_parcial" and raj is not None
              else None)
         if v is not None and len(elegibles) < MAX_MESES:
             elegibles.append(v)
@@ -289,22 +304,25 @@ def verificar_sku(cur, sku, ventana, cerrados, ref):
     else:
         n = len(elegibles)
         pesos = list(range(n, 0, -1))
-        r_rots = round(sum(p * v for p, v in zip(pesos, elegibles)) / sum(pesos), 4)
+        # max(0, ...): mismo recorte que run_calc_sugerencias.py (hallazgo de
+        # /code-review -- ventas_cantidad signed puede dar un mes con
+        # rotacion neta negativa, y chk_sugerencias_rotacion exige >= 0).
+        r_rots = round(max(0.0, sum(p * v for p, v in zip(pesos, elegibles)) / sum(pesos)), 4)
         mean = sum(elegibles) / n
         if mean > 0:
             cv = (sum((v - mean) ** 2 for v in elegibles) / n) ** 0.5 / mean
             r_fiab = round(max(0.0, (1.0 - cv) * 100.0), 2)
         else:
             r_fiab = 0.0
-        cur.execute("SELECT SUM(cantidad) FROM stock_diario "
+        cur.execute("SELECT SUM(cantidad), MAX(fecha) FROM stock_diario "
                     "WHERE sku=%s AND fecha=(SELECT MAX(fecha) FROM stock_diario WHERE sku=%s)",
                     (sku, sku))
-        stock = max(0.0, float(cur.fetchone()[0] or 0))
-        r_qbk = round(stock / r_rots, 2) if r_rots > 0 else None
-
-    cur.execute("SELECT rotacion_sugerida, fiabilidad_porcentaje, dias_hasta_quiebre "
-                "FROM planilla_sugerencias WHERE sku=%s", (sku,))
-    sug = cur.fetchone() or (None, None, None)
+        stock_row = cur.fetchone()
+        stock = max(0.0, float(stock_row[0] or 0))
+        fecha_stock = stock_row[1]
+        # Issue #116: QBK es None si el stock conocido esta mas viejo que el umbral
+        stock_fresco = fecha_stock is not None and (fecha_ref_qbk - fecha_stock).days <= UMBRAL_DIAS_STOCK_VIEJO
+        r_qbk = round(stock / r_rots, 2) if r_rots > 0 and stock_fresco else None
     for nombre, sv, rv, tol in [("ROT.S", sug[0], r_rots, TOL),
                                 ("Fiabilidad", sug[1], r_fiab, 0.5),
                                 ("QBK", sug[2], r_qbk, 1.0)]:
