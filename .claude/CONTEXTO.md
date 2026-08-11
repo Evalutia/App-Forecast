@@ -3087,7 +3087,15 @@ Issue de higiene (severidad BAJA) con 6 sub-problemas independientes. Resueltos 
 
 **Suite completa (post-fixes):** 40/40 backend, 18/18 frontend, 107 passed/37 skipped ETL (los skipped son de siempre, tests de integración que requieren credenciales del WS externo).
 
-**#122 cerrado en código** (los 4 fixes directos + la migración escrita, con su pre-chequeo de duplicados, y verificada por lógica aislada); aplicar la migración 20 a producción y decidir sobre los 2 bordes documentados quedan como pasos separados.
+**Desplegado a producción** (commit `be20f68`, deploy de `webapi`/`webapp`/`etl` sin incidentes) y **migración 20 aplicada**, con un incidente real en el camino:
+
+- **Producción tiene 120.5M filas en `stock_diario`** (vs ~24M en la réplica local usada para verificar la migración) -- 5x el volumen, y `nulos=0`/`vacios=0` confirmado antes de tocar nada: el edge case de `deposito_id IS NULL` que la migración cierra nunca llegó a manifestarse en producción, a diferencia de la réplica.
+- **1er intento: `ERROR 1114 (HY000) "The table 'stock_diario' is full"`.** El `ALTER TABLE MODIFY COLUMN` con rebuild de InnoDB necesita espacio libre comparable al tamaño de la tabla (`stock_diario` pesa 27.46GB: 7.97GB datos + 19.49GB índices) para construir la copia nueva antes del swap, y el volumen de Docker (`/srv/evalutia/data`, 98GB) solo tenía 18GB libres. El `UPDATE` de backfill (parte del mismo script, statement previo) sí se había completado y quedó commiteado; el `ALTER` abortó limpio, sin dejar la columna en un estado intermedio (confirmado: seguía `NULL` después de la falla, cero filas afectadas a medias).
+- **Espacio liberado con confirmación explícita del usuario** antes de reintentar: 6GB de build cache de Docker (sin riesgo, automático) + ~10.6GB borrando 3 imágenes viejas tageadas `pre-ventas-mensuales-fix`/`pre-stock-resumen` (puntos de rollback deliberados de deploys de semanas atrás, reconstruibles desde git si hicieran falta -- no se tocaron sin preguntar primero). Total: 18GB -> 34GB libres.
+- **2do intento: éxito, pero tardó ~67 minutos** (vs los 5+ minutos observados en la réplica local de 24M filas) -- la fase final de InnoDB (aplicar el log de cambios acumulados durante el rebuild) se estiró porque `stock_diario` es una tabla productiva con escritura continua, no una tabla en pausa. El espacio en disco llegó a bajar hasta 7.0GB libres durante la copia antes de empezar a liberarse en la fase de commit/swap. Verificado al final: `IS_NULLABLE=NO`, `COLUMN_DEFAULT=''`, `COUNT(*)=120,562,536` (mismo total que antes de empezar, sin pérdida de filas).
+- **Lección para futuras migraciones de esquema sobre tablas grandes en esta VM:** medir espacio libre en `/srv/evalutia/data` (`df -h`) ANTES de lanzar cualquier `ALTER TABLE` que reconstruya una tabla de varios GB -- el volumen corre habitualmente por encima del 75% de uso incluso en estado normal, así que el margen real suele ser mucho menor de lo que parece. Considerar además agrandar el volumen EBS como fix de fondo (quedó propuesto, no decidido esta sesión).
+
+**#122 cerrado en código y en producción.** Quedan los 2 bordes documentados como aceptados (no resueltos, ver arriba) para si se retoman más adelante.
 
 ---
 
