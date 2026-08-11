@@ -3256,6 +3256,10 @@ Los otros tres hallazgos: el tooltip de la cabecera mensual seguía describiendo
 
 **Suite:** 46 frontend (8 nuevos + 3 del review), 224 ETL, tsc limpio.
 
+**Desplegado a producción** (commit `130f0b4`, rebuild de `webapp`). Sin migración ni recálculo: el valor desestacionalizado ya estaba calculado y viajando en el DTO desde #31/#32 -- lo único que cambió es cuál de los dos se muestra.
+
+**#130 cerrado en código y en producción.**
+
 ---
 
 ## Documentación adicional
