@@ -3322,6 +3322,24 @@ Recuperado con `run_backfill_ventas.sh` acotado a ese día. **65 grupos, cero er
 
 ---
 
+### Respuesta de Rodrigo al documento de #128 (2026-08-11)
+
+Contestó el mismo día. **No respondió ninguna de las cinco preguntas de #126** -- ese issue sigue abierto y con él sigue bloqueado #121. Lo que sí hizo fue contestar los tres puntos y agregar dos pedidos. Salieron tres tickets: #144, #145, #146.
+
+**1 · Contrapropuso la fórmula de extrapolación, y bien.** Propuso una *generalización* de la nuestra: `venta × [1 + w(D/d − 1)]` con `w = (d/D)^p`. Con `p = 1` da exactamente `venta × (2 − d/D)`, lo que implementamos en #129 -- él mismo lo marca en su tabla como "Evalutia (p=1)". Pide `p = 0.5`, o sea **proyectar más** de lo que propusimos. Sus cuatro ejemplos numéricos se verificaron y están correctos.
+
+Lo que él todavía no sabe: con `p = 0.5` **se pierde el tope**, que fue uno de los argumentos con los que le vendimos el cambio. El multiplicador deja de tender a 2 y crece sin límite -- ×6,29 con 1 día de 30. En el caso real de `I02552` (30 unidades en 1 día de 31): 59 con `p=1`, **192 con `p=0.5`**, 930 con la fórmula vieja.
+
+**Decisión (Nico):** mantener `p=1` por ahora. El argumento que se descartó fue "es nuestro producto" -- es el más débil y el que peor envejece si dentro de tres meses repone de menos. El que quedó: cambiar a `p=0.5` sería adivinar en la dirección opuesta, porque ninguno de los dos exponentes está medido. La nuestra al menos tiene un tope defendible. **La salida es medir**: para un mes donde el artículo se agotó el día N, sabemos cuánto vendió después con stock completo, así que se puede ver qué exponente habría acertado sobre años de historia. Eso además contesta en su mismo idioma, porque es exactamente lo que él pide en su punto 4. Va a #144.
+
+**2 · Su pregunta sobre el histórico: la respuesta es sí.** Preguntó si toma la venta real desde el primer ingreso (artículo reciente) o los últimos 12 meses (artículo viejo), sin importar quiebres ni meses en cero. Verificado en el código: hace exactamente eso. No requiere cambio.
+
+**3 · Pidió marcar los meses con ingreso de importación.** Un mes donde entró stock durante un quiebre se lee distinto de uno donde el artículo simplemente se agotó y no repuso. El dato existe (el stock diario permite ver si pasó de cero a positivo). Va a #145, bloqueado por #134 porque tocan el mismo criterio de color.
+
+**4 · Pidió poder cargar la rotación elegida por pedido** -- para evaluar la efectividad de la elección contra la venta real posterior y tener un monitor de quiebre. **Revierte lo decidido en #33 y ratificado en #107**, que excluyeron deliberadamente la columna `Rot. Manual`. La diferencia es que ahora la pide él y con un propósito que antes no estaba: cerrar el circuito entre lo decidido y lo que efectivamente pasó. Encaja con lo que midió #127 -- de 491 artículos comparados, sólo 13 quedaron con el valor que propone su sistema, así que hay criterio experto que hoy se pierde al cerrar el Excel. Va a #146 como ticket de definición: hay demasiado sin definir (dónde carga, qué identifica un pedido, contra qué horizonte se mide, qué es el monitor) como para implementar sin adivinar.
+
+---
+
 ## Documentación adicional
 
 | Archivo | Contenido |
