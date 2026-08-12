@@ -233,5 +233,7 @@ def test_issue_116_mes_normal_en_cero_ya_no_se_descarta_del_calculo(conn):
         # el SKU de prueba queda para siempre en la DB local/dev.
         with conn.cursor() as cur:
             cur.execute("DELETE FROM planilla_ventas_calculada WHERE sku = %s", (sku,))
+            # Issue #121: articulo_grupo tiene FK RESTRICT a articulos(sku).
+            cur.execute("DELETE FROM articulo_grupo WHERE sku = %s", (sku,))
             cur.execute("DELETE FROM articulos WHERE sku = %s", (sku,))
         conn.commit()

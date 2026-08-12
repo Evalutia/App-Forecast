@@ -335,6 +335,8 @@ def test_cargar_tickets_excluye_filas_con_cantidad_cero():
             # cortada a mitad de camino (kill/timeout entre el commit y el
             # finally) antes de insertar, en vez de fallar con PK duplicada.
             cur.execute("DELETE FROM ventas_historicas WHERE sku = %s", (sku,))
+            # Issue #121: articulo_grupo tiene FK RESTRICT a articulos(sku).
+            cur.execute("DELETE FROM articulo_grupo WHERE sku = %s", (sku,))
             cur.execute("DELETE FROM articulos WHERE sku = %s", (sku,))
             cur.execute(
                 "INSERT INTO articulos (sku, descripcion, grupo_id) VALUES (%s, %s, %s)",
@@ -364,6 +366,8 @@ def test_cargar_tickets_excluye_filas_con_cantidad_cero():
     finally:
         with conn.cursor() as cur:
             cur.execute("DELETE FROM ventas_historicas WHERE sku = %s", (sku,))
+            # Issue #121: articulo_grupo tiene FK RESTRICT a articulos(sku).
+            cur.execute("DELETE FROM articulo_grupo WHERE sku = %s", (sku,))
             cur.execute("DELETE FROM articulos WHERE sku = %s", (sku,))
         conn.commit()
         conn.close()

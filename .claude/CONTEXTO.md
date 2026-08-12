@@ -3362,6 +3362,26 @@ Y una excepción que apunta al otro lado: `C00190` en feb-2026, donde él tiene 
 
 ---
 
+### Issue #121 implementado: multi-grupo (2026-08-12)
+
+`/grill-me issue 121` primero (diseño), `/implement` después. Diseño resuelto:
+
+- **Esquema:** tabla puente `articulo_grupo(sku, grupo_id)` con TODAS las membresías reales (migración `infra/sql/21-articulo-grupo.sql`). `articulos.grupo_id` se conserva como "grupo principal" -- el de menor id entre los `visible_planilla=TRUE` de la membresía del artículo, para no volver a caer en un catch-all como 199/200.
+- **Backend:** `PlanillaRepository` (filtro de ventas, acotado de marca/género, desplegable de grupos -- 3 lugares) pasa de `WHERE a.GrupoId == grupoId` a `EXISTS` contra `articulo_grupo`, nunca `JOIN` directo (evita repetir la duplicación de #114).
+- **Línea de base medida antes de tocar nada:** 2.671 artículos (47,7% del catálogo) en el grupo 200 (catch-all, invisible en el filtro), el 100% de ellos con venta en los últimos 12 meses (257.777 unidades).
+
+**El primer diseño de `finalize_articulo_grupos.py` tenía un bug serio que atrapó el `/code-review` previo al commit, no yo:** hacía delete-and-reinsert de TODA `articulo_grupo` en cada corrida, asumiendo que el crawl completo de los ~65 grupos de una noche era la foto completa de la membresía. Falso: la llamada SOAP de un grupo ya conocido (`es_grupo_nuevo`=0) es **incremental** (ventana de 7 días, `FECHA_DESDE_INCREMENTAL`) -- solo el *primer* crawl de un grupo trae el catálogo completo. Con el diseño original, la segunda noche post-deploy ya habría borrado y reemplazado la tabla entera por el delta minúsculo de esa semana, vaciando el catálogo real en pocos días.
+
+**Fix:** `finalize_articulo_grupos.py` ahora recibe `full_pull_grupos` (los grupos cuyo pull *completo* de esta corrida tuvo éxito -- vacío casi todas las noches). Solo esos se `DELETE`-an antes de reinsertar; el resto es aditivo (`INSERT IGNORE`, nunca borra). `run_extract_articulos.sh` trackea esa lista y solo agrega un grupo si `es_grupo_nuevo=1` **y** la llamada tuvo éxito. Limitación aceptada, no nueva: una baja de membresía en un grupo ya "conocido" no se detecta hasta que ese grupo vuelva a hacer un pull completo -- mismo tipo de límite que ya tiene el resto de este ETL incremental.
+
+**Segundo hallazgo del mismo review:** la migración sembraba `articulo_grupo` desde `articulos.grupo_id` (para no dejar el filtro en cero mientras tanto) -- correcto, pero eso hace que `es_grupo_nuevo` diga "no" para casi todos los grupos existentes desde el primer momento, así que la membresía múltiple real (la razón de ser del issue) **nunca se termina de descubrir sola**. Se agregó `FORCE_FULL_PULL=1` a `run_extract_articulos.sh` como escape hatch operativo -- pendiente correrlo una vez manualmente contra producción para completar el descubrimiento real. Sin esa corrida, el filtro funciona pero el catálogo sigue mostrando solo el grupo que cada artículo ya tenía como principal, no sus grupos secundarios reales.
+
+**Otros dos hallazgos, corregidos:** `TRUNCATE articulo_grupo_stage` es DDL y hace commit implícito en MySQL -- rompía el "todo o nada" documentado de la transacción; se cambió a `DELETE FROM`. La nueva FK `articulo_grupo → articulos(sku)` (`ON DELETE RESTRICT`) podía romper fixtures de otros tests que hacían `DELETE FROM articulos` sin limpiar antes -- se agregó el `DELETE FROM articulo_grupo` correspondiente en `test_cron_jobs.py`, `test_run_calc_sugerencias.py` y `test_run_calc_planilla.py`.
+
+Migración aplicada y seed corrido en local y producción. 12/12 tests nuevos de Python (incluye uno que reproduce exactamente el bug que encontró el review) + 5/5 de C# + 45/45 del backend completo + 225/225 del ETL (13 fallos preexistentes por falta de `flock` en macOS, no relacionados).
+
+---
+
 ## Documentación adicional
 
 | Archivo | Contenido |

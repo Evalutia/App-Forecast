@@ -39,7 +39,13 @@ namespace DataAccess.Repositories.PlanillaDataAccess
         if (generoId.HasValue)
           articulosQuery = articulosQuery.Where(a => a.GeneroId == generoId);
         if (grupoId.HasValue)
-          articulosQuery = articulosQuery.Where(a => a.GrupoId == grupoId);
+          // Issue #121: pertenencia real (articulo_grupo), no el grupo "principal"
+          // (a.GrupoId) -- un articulo multi-grupo tiene que aparecer en el filtro
+          // de TODOS sus grupos, no solo el que quedo elegido como principal.
+          // EXISTS/IN, nunca JOIN directo contra articulo_grupo: un JOIN
+          // multiplicaria las filas de venta/stock del articulo por cada
+          // membresia (mismo patron de duplicacion que #114).
+          articulosQuery = articulosQuery.Where(a => _db.ArticuloGrupos.Any(ag => ag.Sku == a.Sku && ag.GrupoId == grupoId));
         var skusFiltrados = articulosQuery.Select(a => a.Sku);
         skuQuery = skuQuery.Where(s => skusFiltrados.Contains(s));
       }
@@ -165,7 +171,10 @@ namespace DataAccess.Repositories.PlanillaDataAccess
       // ni contar combinaciones grupo+marca/género que no existen.
       var articulosEnPlanilla = _db.Articulos.Where(a => skusEnPlanilla.Contains(a.Sku));
       if (grupoId.HasValue)
-        articulosEnPlanilla = articulosEnPlanilla.Where(a => a.GrupoId == grupoId);
+        // Issue #121: mismo criterio de pertenencia real que GetVentas -- si no, un
+        // articulo cuyo principal es OTRO grupo desaparece de marca/genero al filtrar
+        // por uno de sus grupos secundarios.
+        articulosEnPlanilla = articulosEnPlanilla.Where(a => _db.ArticuloGrupos.Any(ag => ag.Sku == a.Sku && ag.GrupoId == grupoId));
 
       var marcas = articulosEnPlanilla
           .Where(a => a.MarcaId != null)
@@ -190,8 +199,10 @@ namespace DataAccess.Repositories.PlanillaDataAccess
 
       // Grupos disponibles: cruzados contra planilla (igual que marca/género) + visible_planilla,
       // independiente del grupoId pedido — es la lista de opciones del dropdown, no se acota a sí misma.
+      // Issue #121: pertenencia real (articulo_grupo), no "principal" -- si no, un grupo
+      // real donde un articulo SOLO aparece como secundario nunca entraría al desplegable.
       var grupos = _db.Grupos
-          .Where(g => g.VisiblePlanilla && _db.Articulos.Any(a => a.GrupoId == g.Id && skusEnPlanilla.Contains(a.Sku)))
+          .Where(g => g.VisiblePlanilla && _db.ArticuloGrupos.Any(ag => ag.GrupoId == g.Id && skusEnPlanilla.Contains(ag.Sku)))
           .OrderBy(g => g.Descripcion)
           .Select(g => new { g.Id, g.Descripcion })
           .AsEnumerable()

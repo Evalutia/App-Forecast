@@ -354,6 +354,25 @@ def main():
       ts_carga = NOW(6)
     """
 
+    # Issue #121: cada grupo que devuelve un articulo es una membresia real
+    # (un articulo puede pertenecer a varios). Se acumula en la tabla de
+    # staging del crawl -- el volcado a articulo_grupo (delete-and-reinsert +
+    # recalculo de grupo_id "principal") lo hace finalize_articulo_grupos.py
+    # una sola vez al final de la corrida completa, no aca.
+    #
+    # Limitacion conocida, no resuelta aca: si un SKU falla al insertarse en
+    # `articulos` (except mas abajo), tambien se salta su fila de membresia
+    # -- si eso pasa durante el UNICO pull completo de un grupo (es_grupo_nuevo
+    # o FORCE_FULL_PULL), ese SKU puntual no vuelve a tener otra oportunidad
+    # de pull completo hasta que alguien lo fuerce de nuevo, porque el grupo
+    # ya va a figurar como "conocido" en corridas futuras. Cuesta poco en la
+    # practica (son fallas de insercion, ya de por si raras) y no es nuevo:
+    # el mismo tipo de dato parcial-y-nunca-reintentado ya existia para el
+    # resto de las columnas de `articulos` antes de este issue.
+    membership_sql = """
+    INSERT IGNORE INTO articulo_grupo_stage (sku, grupo_id) VALUES (%s, %s)
+    """
+
     rows_ins = 0
     rows_skip = 0
     skipped_samples = []
@@ -402,6 +421,7 @@ def main():
                             "ConsArticulosWeb",
                         ),
                     )
+                    cur.execute(membership_sql, (normalized["sku"], grupo_id))
                     rows_ins += 1
                 except Exception as e:
                     rows_skip += 1

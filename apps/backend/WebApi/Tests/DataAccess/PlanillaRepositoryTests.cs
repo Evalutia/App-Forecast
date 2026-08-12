@@ -105,5 +105,119 @@ namespace Tests.DataAccess
       items.Should().HaveCount(2);
       items.Select(i => i.Fila.Month).Should().BeEquivalentTo([6, 7]);
     }
+
+    // ── Issue #121: multi-grupo ──────────────────────────────────────────────
+
+    [Fact]
+    public void GetVentas_FiltraPorGrupoSecundario_ArticuloAparece_SinDuplicarFilas()
+    {
+      var repo = CreateRepo(out var db);
+
+      // SKU-1 pertenece a dos grupos reales; el "principal" (GrupoId en
+      // articulos, elegido por el ETL) es el 10, pero tambien pertenece al 20.
+      db.Grupos.AddRange(
+          new Grupo { Id = 10, Descripcion = "GRUPO PRINCIPAL" },
+          new Grupo { Id = 20, Descripcion = "GRUPO SECUNDARIO" }
+      );
+      db.Articulos.Add(new Articulo { Sku = "SKU-1", GrupoId = 10 });
+      db.ArticuloGrupos.AddRange(
+          new ArticuloGrupo { Sku = "SKU-1", GrupoId = 10 },
+          new ArticuloGrupo { Sku = "SKU-1", GrupoId = 20 }
+      );
+      db.PlanillasVentasCalculadas.Add(Fila("SKU-1", 2026, 7, "historico"));
+      db.SaveChanges();
+
+      // Antes del fix, filtrar por el grupo 20 (secundario) no traia nada --
+      // el filtro viejo comparaba contra a.GrupoId (solo el principal, 10).
+      var (items, total) = repo.GetVentas(page: 1, pageSize: 50, marcaId: null, generoId: null, grupoId: 20, estadoMes: null, criterioFrecuencia: null);
+
+      total.Should().Be(1);
+      items.Should().HaveCount(1, "un JOIN directo contra articulo_grupo duplicaria esta fila una vez por membresia (mismo bug que #114)");
+      items[0].Fila.Sku.Should().Be("SKU-1");
+    }
+
+    [Fact]
+    public void GetVentas_FiltraPorGrupoPrincipal_SigueFuncionando()
+    {
+      var repo = CreateRepo(out var db);
+
+      db.Grupos.Add(new Grupo { Id = 10, Descripcion = "GRUPO PRINCIPAL" });
+      db.Articulos.Add(new Articulo { Sku = "SKU-1", GrupoId = 10 });
+      db.ArticuloGrupos.Add(new ArticuloGrupo { Sku = "SKU-1", GrupoId = 10 });
+      db.PlanillasVentasCalculadas.Add(Fila("SKU-1", 2026, 7, "historico"));
+      db.SaveChanges();
+
+      var (items, total) = repo.GetVentas(page: 1, pageSize: 50, marcaId: null, generoId: null, grupoId: 10, estadoMes: null, criterioFrecuencia: null);
+
+      total.Should().Be(1);
+      items.Should().HaveCount(1);
+    }
+
+    [Fact]
+    public void GetVentas_FiltraPorGrupoAlQueNoPertenece_NoDevuelveNada()
+    {
+      var repo = CreateRepo(out var db);
+
+      db.Grupos.AddRange(
+          new Grupo { Id = 10, Descripcion = "GRUPO A" },
+          new Grupo { Id = 30, Descripcion = "GRUPO B" }
+      );
+      db.Articulos.Add(new Articulo { Sku = "SKU-1", GrupoId = 10 });
+      db.ArticuloGrupos.Add(new ArticuloGrupo { Sku = "SKU-1", GrupoId = 10 });
+      db.PlanillasVentasCalculadas.Add(Fila("SKU-1", 2026, 7, "historico"));
+      db.SaveChanges();
+
+      var (items, total) = repo.GetVentas(page: 1, pageSize: 50, marcaId: null, generoId: null, grupoId: 30, estadoMes: null, criterioFrecuencia: null);
+
+      total.Should().Be(0);
+      items.Should().BeEmpty();
+    }
+
+    [Fact]
+    public void GetFiltros_GrupoDondeElArticuloEsSoloSecundario_ApareceEnElDesplegable()
+    {
+      var repo = CreateRepo(out var db);
+
+      // Grupo 20 nunca es "principal" de ningun articulo -- solo secundario.
+      // Antes del fix, GetFiltros comparaba a.GrupoId == g.Id y este grupo
+      // jamas aparecia en el desplegable aunque tuviera articulos reales.
+      db.Grupos.AddRange(
+          new Grupo { Id = 10, Descripcion = "GRUPO PRINCIPAL", VisiblePlanilla = true },
+          new Grupo { Id = 20, Descripcion = "GRUPO SECUNDARIO", VisiblePlanilla = true }
+      );
+      db.Articulos.Add(new Articulo { Sku = "SKU-1", GrupoId = 10 });
+      db.ArticuloGrupos.AddRange(
+          new ArticuloGrupo { Sku = "SKU-1", GrupoId = 10 },
+          new ArticuloGrupo { Sku = "SKU-1", GrupoId = 20 }
+      );
+      db.PlanillasVentasCalculadas.Add(Fila("SKU-1", 2026, 7, "historico"));
+      db.SaveChanges();
+
+      var (_, _, grupos, _, _) = repo.GetFiltros(grupoId: null);
+
+      grupos.Select(g => g.Id).Should().BeEquivalentTo([10u, 20u]);
+    }
+
+    [Fact]
+    public void GetFiltros_GrupoCatchAllNoVisible_NuncaApareceEnElDesplegable()
+    {
+      var repo = CreateRepo(out var db);
+
+      db.Grupos.AddRange(
+          new Grupo { Id = 10, Descripcion = "GRUPO VISIBLE", VisiblePlanilla = true },
+          new Grupo { Id = 200, Descripcion = "Exportacion Web", VisiblePlanilla = false }
+      );
+      db.Articulos.Add(new Articulo { Sku = "SKU-1", GrupoId = 10 });
+      db.ArticuloGrupos.AddRange(
+          new ArticuloGrupo { Sku = "SKU-1", GrupoId = 10 },
+          new ArticuloGrupo { Sku = "SKU-1", GrupoId = 200 }
+      );
+      db.PlanillasVentasCalculadas.Add(Fila("SKU-1", 2026, 7, "historico"));
+      db.SaveChanges();
+
+      var (_, _, grupos, _, _) = repo.GetFiltros(grupoId: null);
+
+      grupos.Select(g => g.Id).Should().BeEquivalentTo([10u]);
+    }
   }
 }

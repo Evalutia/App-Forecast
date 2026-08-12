@@ -39,6 +39,8 @@ public class EvalutiaDbContext : DbContext
 
   public virtual DbSet<Grupo> Grupos { get; set; }
 
+  public virtual DbSet<ArticuloGrupo> ArticuloGrupos { get; set; }
+
   public virtual DbSet<StockResumen365> StockResumen365 { get; set; }
 
   public virtual DbSet<ConfiguracionSistema> ConfiguracionSistema { get; set; }
@@ -431,6 +433,19 @@ public class EvalutiaDbContext : DbContext
           .ValueGeneratedOnAddOrUpdate()
           .HasColumnType("timestamp(6)")
           .HasColumnName("actualizado_en");
+    });
+
+    modelBuilder.Entity<ArticuloGrupo>(entity =>
+    {
+      entity.HasKey(e => new { e.Sku, e.GrupoId }).HasName("PRIMARY");
+
+      entity.ToTable("articulo_grupo");
+
+      entity.Property(e => e.Sku)
+          .HasMaxLength(128)
+          .HasColumnName("sku");
+      entity.Property(e => e.GrupoId)
+          .HasColumnName("grupo_id");
     });
 
     modelBuilder.Entity<StockResumen365>(entity =>

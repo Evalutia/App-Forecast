@@ -244,6 +244,8 @@ def sku_articulo(conn):
         # (mismo patron que test_run_calc_planilla.py).
         cur.execute("DELETE FROM ventas_historicas WHERE sku = %s", (SKU_TEST,))
         cur.execute("DELETE FROM stock_diario WHERE sku = %s", (SKU_TEST,))
+        # Issue #121: articulo_grupo tiene FK RESTRICT a articulos(sku).
+        cur.execute("DELETE FROM articulo_grupo WHERE sku = %s", (SKU_TEST,))
         cur.execute("DELETE FROM articulos WHERE sku = %s", (SKU_TEST,))
         cur.execute(
             "INSERT INTO articulos (sku, descripcion, grupo_id) VALUES (%s, %s, %s)",
@@ -256,6 +258,8 @@ def sku_articulo(conn):
     with conn.cursor() as cur:
         cur.execute("DELETE FROM ventas_historicas WHERE sku = %s", (SKU_TEST,))
         cur.execute("DELETE FROM stock_diario WHERE sku = %s", (SKU_TEST,))
+        # Issue #121: articulo_grupo tiene FK RESTRICT a articulos(sku).
+        cur.execute("DELETE FROM articulo_grupo WHERE sku = %s", (SKU_TEST,))
         cur.execute("DELETE FROM articulos WHERE sku = %s", (SKU_TEST,))
     conn.commit()
 
