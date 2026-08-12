@@ -3340,6 +3340,28 @@ Lo que él todavía no sabe: con `p = 0.5` **se pierde el tope**, que fue uno de
 
 ---
 
+### Rodrigo respondió las cinco preguntas de #126 (2026-08-11)
+
+| | Respuesta | Consecuencia |
+|---|---|---|
+| **1 · Devoluciones** | "se toman como lo que son" | Ninguna: el criterio ya coincidía |
+| **2 · Fin de mes** | "no entiendo esto, dame más detalles" | Se le mandaron ejemplos con fecha, SKU y cantidad |
+| **3 · Merchandising** | **"no me interesa ver eso"** | Excluirlos de la planilla → **#147** |
+| **4 · Tóner** | "pasame la fecha de la diferencia" | Se le mandó el detalle mes a mes; apareció un patrón |
+| **5 · Grupos** | **"tienen que aparecer todos los artículos, voy a revisar que todos tengan el grupo"** | **Destraba #121** |
+
+**El punto 1 se cae solo:** verificado en producción que hay 5.384 filas con cantidad negativa **desde 2016**. No es que el histórico viejo careciera de devoluciones. El planteo original de #126 sobre "42 meses con negativos que no reflejamos" hay que revisarlo contra ese dato antes de concluir nada.
+
+**El punto 4 dio el hallazgo más valioso de la respuesta, y no es la fecha que pidió.** Al generar el detalle mes a mes de los cinco artículos apareció que **la diferencia va siempre en la misma dirección**: en 47 de 49 meses contamos *menos* que él, entre 1 y 23 unidades. Un error de cálculo daría diferencias en ambos sentidos; un sesgo sistemático apunta a **ventas que no estamos viendo**. La hipótesis más plausible es un depósito que no consultamos -- el cron pide sólo `1,5,8,9,10,11` y sólo podemos ver lo que pedimos. Se le preguntó directamente. Si se confirma, conecta con **#139** (depósitos hardcodeados) y explicaría buena parte del 11% de diferencia que midió #127.
+
+Y una excepción que apunta al otro lado: `C00190` en feb-2026, donde él tiene **−44** y nosotros **+45**. Nuestras ventas de ese mes son todas positivas y suman exactamente 45, así que hay una devolución grande que no nos llegó, pese a que en general sí capturamos negativos.
+
+**Sobre #121:** su respuesta fija el criterio (ningún artículo puede quedar fuera de los filtros) y él va a corregir los datos de su lado asignando grupos. Eso reduce el problema pero no lo elimina: la causa raíz sigue siendo que un artículo multi-grupo se guarda en uno solo. Nota de coordinación registrada en el issue: conviene medir el estado actual **antes** de que él reasigne, para no confundir el efecto de su corrección con el de la nuestra.
+
+**Quedan dos respuestas pendientes de su lado**: si existe otro depósito por donde salgan esas ventas, y cómo identificar el merchandising para poder excluirlo (#147 depende de eso).
+
+---
+
 ## Documentación adicional
 
 | Archivo | Contenido |
