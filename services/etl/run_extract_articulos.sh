@@ -60,10 +60,21 @@ done
 # Si vino --grupos/--id-grupo (o GRUPOS/ID_GRUPO por env) explicito, se empuja a
 # GROUPS para que get_grupos.py lo tome como override puntual (Issue #42) en vez
 # de consultar la tabla grupos.
+#
+# OVERRIDE_GRUPOS_ACTIVO, no inspeccionar "${GROUPS}" mas abajo (issue #121,
+# bug real encontrado corriendo esto en produccion): $GROUPS es una variable
+# ESPECIAL de bash (la lista de group-ids del proceso, ver `help groups` /
+# POSIX), no una env var libre -- como root vale literalmente "0", asi que
+# `[[ -n "${GROUPS:-}" ]]` da verdadero SIEMPRE, override o no. No se filtra
+# a subprocesos (no es una env var real, `printenv GROUPS` no la ve), asi
+# que get_grupos.py nunca sufrio esto -- el problema era solo este chequeo.
+OVERRIDE_GRUPOS_ACTIVO=0
 if [[ -n "${GRUPOS}" && "${GRUPOS}" != "0" ]]; then
   export GROUPS="${GRUPOS}"
+  OVERRIDE_GRUPOS_ACTIVO=1
 elif [[ -n "${ID_GRUPO}" && "${ID_GRUPO}" != "0" ]]; then
   export GROUPS="${ID_GRUPO}"
+  OVERRIDE_GRUPOS_ACTIVO=1
 fi
 
 # Derivar CHUNK_START si no está provisto (compatibilidad, ventana incremental)
@@ -253,7 +264,7 @@ XML
 # crawl parcial por diseno: reconstruir ahi borraria membresias reales de los
 # grupos que quedaron afuera de este run.
 CRAWL_COMPLETO=1
-if [[ -n "${GROUPS:-}" ]]; then
+if [[ "${OVERRIDE_GRUPOS_ACTIVO}" == "1" ]]; then
   CRAWL_COMPLETO=0
 fi
 
