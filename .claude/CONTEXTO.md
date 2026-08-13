@@ -3390,6 +3390,22 @@ Migración aplicada y seed corrido en local y producción. 12/12 tests nuevos de
 
 ---
 
+### #126 -- el "depósito faltante" del tóner era nuestro, no del cliente (2026-08-12/13)
+
+Antes de mandarle a Rodrigo la pregunta sobre un posible depósito no consultado (sesgo sistemático de -1 a -23 u/mes en 47 de 49 meses para 5 SKUs de tóner), Nico pidió investigar primero de nuestro lado -- confirmar que tenemos todos los depósitos y que la extracción no tiene fugas, antes de gastar el tiempo del cliente.
+
+**Dos agentes de `/code-review` en paralelo** (extracción+merge / agregación+planilla) más verificación directa en producción descartaron: gaps de carga (sin huecos desde 2016 para los 5 SKUs), depósitos desbalanceados (los 6 configurados tienen igual cantidad de filas siempre), filtros de signo ocultos, y pisado entre grupos multi-membresía (verificado con los datos reales de #121: ninguno de los 5 SKUs pertenece a más de un grupo de venta real).
+
+**Causa raíz real, ya documentada en este mismo repo desde el 4 de agosto pero nunca cerrada**: hasta el deploy de #80 (18/07/2026), el extractor clampeaba a 0 toda venta negativa (devolución) antes de guardarla -- el esquema era `UNSIGNED`. El backfill para recuperar ese histórico quedó explícitamente diferido a #64 y nunca se corrió. El caso extremo `C00190` feb-2026 (cliente -44, nosotros +45) cerraba matemáticamente: neto real -44 = +45 (venta) − 89 (devolución perdida por el clamp).
+
+**Piloto (2 grupos, 7 meses) confirmó con datos reales**: `C00190` feb-2026 pasó de +45 a -50 al recuperar una devolución de -95 del 03/02/2026 -- de 89 unidades de diferencia contra el cliente a 6.
+
+**Backfill completo corrido en producción** (66 grupos -- no 65, error de conteo propio corregido en el camino --, 12/08/2024 a 17/07/2026, ~14h40m, cero errores): **2.249 filas negativas recuperadas** en todo el catálogo. Verificado antes de lanzarlo: espacio en disco (`/srv/evalutia/data`, volumen separado del root, 71%→liberados 15GB de build cache→55%) y que el mismo `lock_backfill.sh` que ya usa `run_ofelia.sh` evita que choque con el cron nocturno (esa noche el cron efectivamente se saltea, no falla). Uso final del disco: 76% (23GB libres), sin sobresaltos -- casi todo el crecimiento fue upsert sobre filas ya existentes, no filas nuevas.
+
+**#126 queda cerrado en el punto del tóner/depósito, sin haberle preguntado nada al cliente.** Sigue abierto solo por el punto 2 (ajustes de fin de mes), pendiente de que Rodrigo responda a los ejemplos ya enviados.
+
+---
+
 ## Documentación adicional
 
 | Archivo | Contenido |
