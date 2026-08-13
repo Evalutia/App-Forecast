@@ -6,6 +6,15 @@ services:
     image: mysql:8.0
     container_name: evalutia-mysql
     command: --default-authentication-plugin=mysql_native_password --character-set-server=utf8mb4 --collation-server=utf8mb4_unicode_ci --innodb-buffer-pool-size=2147483648 --tmp-table-size=268435456 --max-heap-table-size=268435456
+    # Issue #136: sin limite, el OOM killer del kernel elige libremente entre
+    # TODOS los procesos de la maquina cuando falta memoria -- y puede matar
+    # a MySQL en vez del contenedor que realmente esta acaparando memoria
+    # (paso el 2026-08-13, ver docs del issue: una query sin acotar en el
+    # job mensual de elegibilidad tiro abajo la VM entera, no solo su propio
+    # contenedor). 2300m = el buffer pool de 2048m ya fijado arriba +
+    # margen para conexiones/overhead, en linea con el uso real observado
+    # en reposo (~2.07GB).
+    mem_limit: 2300m
     environment:
       MYSQL_DATABASE: ${MYSQL_DB}
       MYSQL_USER: ${MYSQL_USER}
@@ -110,6 +119,15 @@ services:
       context: .
       dockerfile: ./services/etl/Dockerfile
     container_name: evalutia-etl
+    # Issue #136: cubre con margen la corrida diaria (heap de Pentaho ya
+    # bajado a 768m via PENTAHO_DI_JAVA_OPTIONS + subprocesos python) --
+    # a proposito NO alcanza para el job mensual de elegibilidad tal como
+    # esta hoy (su query sin acotar contra ventas_historicas ya crecio mas
+    # de 1GB y seguia subiendo antes de cortarse sola, ver #148). Hasta que
+    # #148 la trocee en lotes, es preferible que el mensual muera contenido
+    # (OOM-killed solo este contenedor) a que vuelva a tirar abajo toda la
+    # maquina como el 2026-08-13.
+    mem_limit: 1200m
     env_file:
       - .env
     environment:
