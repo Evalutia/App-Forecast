@@ -192,7 +192,9 @@ const ESTADO_ENTRIES: LeyendaEntry[] = [
       'El mes tuvo stock y ventas, pero el artículo no tiene factor\n' +
       'estacional cargado para ese mes, así que no hay rotación\n' +
       'corregida que mostrar. La rotación sin corregir aparece en el\n' +
-      'tooltip de la celda y en la hoja "Detalle de cálculo" del Excel.',
+      'tooltip de la celda y en la hoja "Detalle de cálculo" del Excel.\n' +
+      'Un mes con quiebre y venta 0 NO cae acá: el factor sí está\n' +
+      'cargado y la celda muestra 0.',
   },
 ];
 
@@ -421,7 +423,8 @@ export default function PlanillaTable({ params, onPageChange, sugerencias, suger
                     'Promedio de meses cerrados, excluyendo el mes de referencia.\n' +
                     '  · Meses normales: rotación real ÷ factor estacional del mes\n' +
                     '  · Meses con quiebre: rotación ajustada por frecuencia ÷ factor estacional\n' +
-                    '  · Meses sin stock o sin factor: excluidos'
+                    '  · Meses con quiebre y venta 0: participan con rotación 0 (dato real, no se descartan)\n' +
+                    '  · Meses sin stock o sin factor estacional cargado: excluidos'
                   }
                 />
               </th>
@@ -446,9 +449,10 @@ export default function PlanillaTable({ params, onPageChange, sugerencias, suger
                   label="DDSTK"
                   tip={
                     'Demanda Diaria con Stock\n' +
-                    'Fórmula: Σ ventas del período ÷ Σ días con stock del período\n' +
+                    'Fórmula: Σ ventas de los meses con stock ÷ Σ días con stock de esos meses\n' +
                     'Tasa de venta diaria histórica promedio del artículo,\n' +
-                    'calculada sobre los 13 meses de la ventana.\n\n' +
+                    'calculada sobre los 13 meses de la ventana.\n' +
+                    'Un mes sin ningún día de stock no aporta venta al numerador.\n\n' +
                     `— = menos de ${DDSTK_MIN_DIAS_CON_STOCK} días con stock en toda la ventana\n` +
                     '(muy poca base para confiar en el número).'
                   }
