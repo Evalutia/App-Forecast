@@ -95,6 +95,7 @@ WS_URL=https://cliente.com/VsWebProduccion/SwNadWeb.asmx
 WS_USER=
 WS_PASS=
 WS_ID_GRUPO=201
+ID_EMPRESA=1
 S_DEPOSITOS=1,5,8,9,10,11
 WS_TIMEOUT_MS=30000
 WS_SOURCE_NAME=grupo201
@@ -120,6 +121,47 @@ TZ=UTC
 ```
 
 > Estas variables se inyectan al contenedor `etl` vía `env_file: .env` en `docker-compose.yml`.
+
+### `WS_URL` / `ID_EMPRESA` / `S_DEPOSITOS` — Issue #139
+
+Estos tres valores manejan la conexión al web service SOAP del cliente y qué
+depósitos entran en cada corrida. Hasta el #139 estaban **hardcodeados** en
+el `-param:` de `kitchen.sh` dentro de `run_ofelia.sh` (el cron automático de
+las 3 AM) — el único script que no seguía el patrón que ya usan
+`run_backfill_ventas.sh` y `run_extract_sales_chunk.sh` (leerlos de env con
+`: "${VAR:?missing}"`, sin default). Dos formas en que eso rompía en
+silencio:
+
+- Un depósito nuevo que el cliente abre queda afuera de la extracción sin que
+  nada lo señale — la planilla sigue calculando, solo que sobre datos
+  incompletos.
+- Si el proveedor del web service cambia la IP, hay que editar el script **y
+  reconstruir la imagen** para levantarlo de nuevo.
+
+Ahora `run_ofelia.sh` los lee de entorno igual que los demás scripts, y
+**falla rápido con un mensaje claro** (`WS_URL: missing`, etc.) si falta
+alguno — antes de tocar el lock de backfill o invocar Pentaho — en vez de
+dejar que `kitchen.sh` reciba un `-param:` vacío y falle mucho más adelante
+con un error críptico de Pentaho.
+
+**Dónde se cambian:** en el `.env` de la VM de producción (mismo archivo
+donde ya viven `MYSQL_*` y `CERT_*`), agregando/editando las claves `WS_URL`,
+`ID_EMPRESA` y `S_DEPOSITOS`.
+
+**Qué hacer para que tome efecto:** el servicio `etl` en `docker-compose.yml`
+usa `env_file: .env`, pero esas variables se leen **al crear el contenedor**,
+no en cada `docker exec` — un `docker compose restart etl` reinicia el mismo
+contenedor sin releer `.env`, así que no alcanza. Hace falta recrearlo (sin
+rebuild de imagen, la imagen no cambió):
+
+```bash
+docker compose up -d etl
+```
+
+Esto reemplaza el contenedor `evalutia-etl` con el `.env` actualizado; el
+cron de `ofelia` (`docker exec evalutia-etl /usr/local/bin/run_ofelia.sh`,
+ver `ofelia.ini`) ve las variables nuevas en la próxima corrida sin tocar
+código ni reconstruir nada.
 
 ---
 
