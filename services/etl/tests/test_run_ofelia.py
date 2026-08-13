@@ -178,6 +178,15 @@ def test_ofelia_sostiene_el_lock_mientras_corre(tmp_path):
         "CRON_JOBS": str(cron_stub),
         "KITCHEN": str(kitchen_stub),
         "BACKFILL_LOCK_FILE": str(lock),
+        # Issue #136: esta era la causa real del fallo sostenido en CI desde
+        # el 2026-08-11 (el fix de #119) -- no es un problema de timing. Este
+        # test arma su env a mano en vez de usar el fixture `entorno`
+        # compartido, y quedo desactualizado cuando #119 agrego esta
+        # variable: sin ella el script aborta ANTES de crear el lock
+        # ("no encuentro /app/.../lock_backfill.sh"), asi que ningun sleep
+        # ni poll iba a alcanzar nunca -- se reprodujo directo (RC=1, ese
+        # mensaje en stderr) antes de este fix.
+        "LOCK_BACKFILL_SH": str(SCRIPT.parent / "lock_backfill.sh"),
     }
     proc = subprocess.Popen([BASH, str(SCRIPT)], env=env,
                              stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
