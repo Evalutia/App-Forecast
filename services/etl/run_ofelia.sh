@@ -15,6 +15,21 @@ CRON_JOBS="${CRON_JOBS:-/app/services/etl/cron_jobs.py}"
 # Overridable solo para poder testear la orquestacion sin Pentaho (ver
 # tests/test_run_ofelia.py). En produccion siempre es el kitchen.sh real.
 KITCHEN="${KITCHEN:-/opt/pentaho/data-integration/kitchen.sh}"
+# Issue #102/#136: el mensual de elegibilidad econometrica vive aparte del
+# .kjb (no pasa por Pentaho), pero se encadena al final de esta corrida --
+# ver el bloque despues de KITCHEN mas abajo.
+EVAL_MENSUAL_SH="${EVAL_MENSUAL_SH:-/app/services/etl/run_eval_elegibilidad_mensual.sh}"
+
+# Issue #136: MySQL en reposo ya usa ~55% de los 3.7GB de la maquina, y
+# Pentaho nunca tuvo su heap ajustado -- el default de fabrica de spoon.sh
+# (de donde kitchen.sh delega) es "-Xms1024m -Xmx2048m". El diario SOLO, sin
+# el mensual superpuesto, ya corria al limite. Los pasos pesados de este job
+# (extraccion, calculo) corren como subprocesos python3 aparte, no dentro
+# del heap de Kettle, asi que 768m es generoso para lo que la JVM en si
+# necesita -- validado con una corrida real contra produccion antes de
+# confiar en el valor. spoon.sh ya lee esta variable de entorno si esta
+# seteada, no hace falta tocar el binario de Pentaho.
+export PENTAHO_DI_JAVA_OPTIONS="${PENTAHO_DI_JAVA_OPTIONS:--Xms256m -Xmx768m}"
 
 # Issue #44/#119: si hay un backfill historico corriendo (run_backfill_ventas.sh),
 # se saltea esta corrida del daily en vez de competir por ventas_historicas_stage
@@ -93,6 +108,23 @@ if [[ -n "${JOB_ID}" ]]; then
   # `stale`, es informativo: si el chequeo mismo esta roto (DB abajo,
   # consulta rota) no debe frenar una corrida que ya termino.
   python3 "${CRON_JOBS}" coherencia "${JOB_ID}" "${Y_ISO}" || true
+fi
+
+# Issue #136: el mensual de elegibilidad econometrica se encadena ACA, al
+# final del diario, en vez de por un horario fijo en ofelia.ini -- el diario
+# viene creciendo (2h09->2h44 en dos semanas) y un horario fijo vuelve a
+# quedar corto tarde o temprano. Solo corre el dia 1 de cada mes, y SOLO si
+# el diario de esa noche termino bien: es una medicion de tendencia (walk-
+# forward sobre historico ya cargado, no depende del dato de hoy en
+# particular) -- perderse un mes no cambia el resultado de forma material, y
+# encadenar un job pesado justo despues de una corrida que ya fallo (por
+# memoria o cualquier otro motivo) es la peor combinacion posible para la
+# maquina. Bookkeeping propio (jobs_historial, tipo_job='eval_elegibilidad')
+# via ml/run_eval_elegibilidad_dry_run.py -- no hace falta duplicarlo aca, y
+# su resultado no debe alterar el exit code de esta corrida diaria.
+if [[ "${RC}" -eq 0 && "$(date +%d)" == "01" ]]; then
+  echo "[OFELIA] Dia 1 del mes, diario OK -> corriendo mensual de elegibilidad econometrica."
+  "${EVAL_MENSUAL_SH}" || echo "[OFELIA][WARN] el mensual de elegibilidad fallo -- ver jobs_historial (tipo_job='eval_elegibilidad')." >&2
 fi
 
 exit "${RC}"

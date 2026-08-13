@@ -58,10 +58,46 @@ def entorno(tmp_path):
         exit ${{FAKE_ETL_RC:-0}}
         """)
 
+    eval_mensual_stub = _escribir(tmp_path / "eval_mensual_stub.sh", f"""
+        #!/usr/bin/env bash
+        echo "eval_mensual" >> "{llamadas}"
+        exit ${{FAKE_EVAL_RC:-0}}
+        """)
+
+    # Issue #136: el mensual solo se dispara el dia 1 -- para testear ambas
+    # ramas sin depender del reloj real, se intercepta "date +%d" (usado solo
+    # para esa decision). El script tambien usa "date -d yesterday +FORMATO"
+    # (linea Y/Y_ISO, preexistente) -- sintaxis GNU que no existe en el
+    # `date` de macOS (BSD), asi que sin interceptarla tambien estos tests
+    # nunca pasan localmente en este SO aunque la logica este bien (se
+    # confirmo reproduciendo el fallo: "illegal option -- d"). Se resuelve
+    # con Python (strftime portable) en vez de intentar traducir sintaxis
+    # GNU a BSD a mano.
+    date_stub_dir = tmp_path / "bin"
+    date_stub_dir.mkdir()
+    _escribir(date_stub_dir / "date", """
+        #!/usr/bin/env python3
+        import datetime as dt
+        import sys
+
+        args = sys.argv[1:]
+        if args == ["+%d"]:
+            print(__import__("os").environ.get("DIA_DEL_MES", "15"))
+        elif args[:2] == ["-d", "yesterday"] and len(args) == 3 and args[2].startswith("+"):
+            fmt = (args[2][1:]
+                   .replace("%Y", "{Y}").replace("%m", "{m}").replace("%d", "{d}"))
+            ayer = dt.date.today() - dt.timedelta(days=1)
+            print(fmt.format(Y=f"{ayer.year:04d}", m=f"{ayer.month:02d}", d=f"{ayer.day:02d}"))
+        else:
+            sys.exit(f"date stub: patron no soportado: {args}")
+        """)
+
     env = {
         **os.environ,
+        "PATH": f"{date_stub_dir}:{os.environ['PATH']}",
         "CRON_JOBS": str(cron_stub),
         "KITCHEN": str(kitchen_stub),
+        "EVAL_MENSUAL_SH": str(eval_mensual_stub),
         "BACKFILL_LOCK_FILE": str(tmp_path / "no-existe.lock"),
         # En produccion es /app/services/etl/lock_backfill.sh; aca se apunta al
         # del repo. Es ruta absoluta a proposito -- ver test_layout_de_produccion.
@@ -324,3 +360,51 @@ def test_falta_lock_backfill_aborta_con_mensaje_claro(entorno, tmp_path):
     assert proc.returncode != 0
     assert "no encuentro" in proc.stderr
     assert "no-existe.sh" in proc.stderr
+
+
+# ── Issue #136: heap de Pentaho + mensual encadenado ─────────────────────────
+
+def test_pentaho_di_java_options_tiene_un_default_bajo(entorno):
+    """
+    El heap de Pentaho nunca estuvo ajustado (default de fabrica 2048m) --
+    esto es lo que finalmente le da margen real a la maquina de 3.7GB.
+    """
+    proc, _ = _correr(entorno, FAKE_ETL_RC="0")
+    assert proc.returncode == 0
+    # No hay forma directa de leer el env var que ve KITCHEN (es un stub que
+    # no lo imprime) sin acoplar el test a su implementacion -- se verifica
+    # en su lugar que el wrapper define un default explicito y bajo, no el
+    # de fabrica, leyendo el propio export del script.
+    contenido = SCRIPT.read_text(encoding="utf-8")
+    assert 'PENTAHO_DI_JAVA_OPTIONS="${PENTAHO_DI_JAVA_OPTIONS:--Xms256m -Xmx768m}"' in contenido
+
+
+def test_dia_1_y_diario_ok_dispara_el_mensual(entorno):
+    proc, registro = _correr(entorno, FAKE_ETL_RC="0", DIA_DEL_MES="01")
+    assert proc.returncode == 0
+    assert "eval_mensual" in registro
+
+
+def test_dia_1_y_diario_fallido_NO_dispara_el_mensual(entorno):
+    """
+    El caso central de #136: encadenar un job pesado justo despues de una
+    corrida que ya murio (por memoria o cualquier otro motivo) es la peor
+    combinacion posible para una maquina sin margen.
+    """
+    proc, registro = _correr(entorno, FAKE_ETL_RC="9", DIA_DEL_MES="01")
+    assert proc.returncode == 9, "el exit code sigue siendo el del diario, no el del mensual"
+    assert "eval_mensual" not in registro
+
+
+def test_dia_distinto_de_1_no_dispara_el_mensual(entorno):
+    proc, registro = _correr(entorno, FAKE_ETL_RC="0", DIA_DEL_MES="15")
+    assert proc.returncode == 0
+    assert "eval_mensual" not in registro
+
+
+def test_mensual_fallido_no_cambia_el_exit_code_del_diario(entorno):
+    """El bookkeeping del mensual es propio (jobs_historial,
+    tipo_job='eval_elegibilidad') -- su fallo no debe voltear esta corrida."""
+    proc, registro = _correr(entorno, FAKE_ETL_RC="0", DIA_DEL_MES="01", FAKE_EVAL_RC="1")
+    assert proc.returncode == 0
+    assert "eval_mensual" in registro

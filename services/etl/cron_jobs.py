@@ -130,6 +130,14 @@ def cmd_end(job_id: str, exit_code: str, duracion_seg: str) -> int:
         "duracion_seg": float(duracion_seg),
         "resultado": "ok" if codigo == 0 else "error",
     }
+    # Issue #136: 137 = 128+9 (SIGKILL). En esta maquina, con memoria muy
+    # ajustada (ver docker-compose mem_limit), un SIGKILL casi siempre es el
+    # OOM killer del kernel -- pero es una inferencia, no una confirmacion
+    # contra dmesg del host (eso exigiria leer logs del host desde el
+    # contenedor). Se marca igual para que la fila sea legible sin tener que
+    # saber de memoria que "137" significa SIGKILL.
+    if codigo == 137:
+        detalle["posible_oom"] = True
     conn = db_connect()
     try:
         with conn.cursor() as cur:

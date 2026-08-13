@@ -119,6 +119,32 @@ def test_end_con_exit_code_distinto_de_cero_marca_fallido(conn, capsys):
     assert fila["detalle"]["exit_code"] == 1
 
 
+def test_end_con_exit_code_137_marca_posible_oom(conn, capsys):
+    """
+    Issue #136: 137 (SIGKILL) sin marcar es un numero pelado que solo alguien
+    que sepa que 128+9=SIGKILL puede leer -- inferencia, no confirmacion
+    contra dmesg del host, pero suficiente para que la fila sea reconocible.
+    """
+    cron_jobs.cmd_start()
+    job_id = int(capsys.readouterr().out.strip())
+
+    cron_jobs.cmd_end(str(job_id), "137", "5420.0")
+
+    fila = _fila(conn, job_id)
+    assert fila["estado"] == "fallido"
+    assert fila["detalle"]["posible_oom"] is True
+
+
+def test_end_con_exit_code_distinto_de_137_no_marca_oom(conn, capsys):
+    cron_jobs.cmd_start()
+    job_id = int(capsys.readouterr().out.strip())
+
+    cron_jobs.cmd_end(str(job_id), "1", "37.0")
+
+    fila = _fila(conn, job_id)
+    assert "posible_oom" not in fila["detalle"]
+
+
 def test_skip_deja_registro_terminal_no_ejecutando(conn, capsys):
     """
     Las noches salteadas por el lock del backfill (29-31/07) fueron invisibles
