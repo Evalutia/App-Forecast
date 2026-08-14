@@ -55,6 +55,11 @@ def entorno(tmp_path):
     kitchen_stub = _escribir(tmp_path / "kitchen_stub.sh", f"""
         #!/usr/bin/env bash
         echo "kitchen" >> "{llamadas}"
+        # Issue #139: se registran los argv completos (aparte de la linea
+        # "kitchen" de arriba, que varios tests existentes comparan por
+        # igualdad exacta) para poder verificar que WS_URL/ID_EMPRESA/
+        # S_DEPOSITOS llegan como -param: a la invocacion real.
+        echo "kitchen_args:$*" >> "{llamadas}"
         exit ${{FAKE_ETL_RC:-0}}
         """)
 
@@ -102,6 +107,13 @@ def entorno(tmp_path):
         # En produccion es /app/services/etl/lock_backfill.sh; aca se apunta al
         # del repo. Es ruta absoluta a proposito -- ver test_layout_de_produccion.
         "LOCK_BACKFILL_SH": str(SCRIPT.parent / "lock_backfill.sh"),
+        # Issue #139: ya no estan hardcodeados en el script -- el camino feliz
+        # de los demas tests necesita valores presentes para no chocar con el
+        # ": ${VAR:?missing}" de arriba. Los tests de #139 (mas abajo) los
+        # pisan/borran puntualmente para probar la validacion en si.
+        "WS_URL": "https://ws-stub.invalid:81",
+        "ID_EMPRESA": "1",
+        "S_DEPOSITOS": "1,5,8,9,10,11",
     }
     return {"env": env, "llamadas": llamadas, "tmp": tmp_path}
 
@@ -187,6 +199,11 @@ def test_ofelia_sostiene_el_lock_mientras_corre(tmp_path):
         # ni poll iba a alcanzar nunca -- se reprodujo directo (RC=1, ese
         # mensaje en stderr) antes de este fix.
         "LOCK_BACKFILL_SH": str(SCRIPT.parent / "lock_backfill.sh"),
+        # Issue #139: mismo motivo -- este test arma su env a mano, y sin
+        # estos tres el script ahora aborta ANTES de tocar el lock.
+        "WS_URL": "https://ws-stub.invalid:81",
+        "ID_EMPRESA": "1",
+        "S_DEPOSITOS": "1,5,8,9,10,11",
     }
     proc = subprocess.Popen([BASH, str(SCRIPT)], env=env,
                              stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
@@ -417,3 +434,54 @@ def test_mensual_fallido_no_cambia_el_exit_code_del_diario(entorno):
     proc, registro = _correr(entorno, FAKE_ETL_RC="0", DIA_DEL_MES="01", FAKE_EVAL_RC="1")
     assert proc.returncode == 0
     assert "eval_mensual" in registro
+
+
+# ── Issue #139: WS_URL/ID_EMPRESA/S_DEPOSITOS salen de .env, no del script ──
+#
+# Antes venian hardcodeados en el `-param:` de kitchen.sh (la IP cruda del
+# WS, la empresa, la lista de depositos) -- el unico script del cron
+# automatico que no seguia el patron ya establecido en run_backfill_ventas.sh
+# / run_extract_sales_chunk.sh (": ${VAR:?missing}", leido de env). Rompia en
+# silencio de dos formas: un deposito nuevo quedaba afuera de la extraccion
+# sin que nada lo señalara, y un cambio de IP del proveedor obligaba a editar
+# el script y reconstruir la imagen.
+
+def test_ws_url_id_empresa_y_depositos_se_propagan_a_kitchen(entorno):
+    """El AC central de #139: los tres valores tienen que llegar tal cual,
+    desde env, a la invocacion real de kitchen.sh -- no pueden seguir
+    hardcodeados en el script."""
+    proc, registro = _correr(
+        entorno, FAKE_ETL_RC="0",
+        WS_URL="https://otra-ip.example:8443",
+        ID_EMPRESA="7",
+        S_DEPOSITOS="2,3,42",
+    )
+
+    assert proc.returncode == 0
+    args_line = next(ln for ln in registro if ln.startswith("kitchen_args:"))
+    assert "-param:WS_URL=https://otra-ip.example:8443" in args_line
+    assert "-param:ID_EMPRESA=7" in args_line
+    assert "-param:S_DEPOSITOS=2,3,42" in args_line
+
+
+@pytest.mark.parametrize("falta", ["WS_URL", "ID_EMPRESA", "S_DEPOSITOS"])
+def test_falta_una_variable_de_config_aborta_con_mensaje_claro_antes_de_pentaho(entorno, falta):
+    """
+    Sin alguno de estos tres en el entorno, el script tiene que fallar rapido
+    con un mensaje de bash claro (`VARNAME: missing`) -- no dejar que
+    kitchen.sh reciba un -param: vacio y falle mucho mas adelante con un
+    error criptico de Pentaho. Tambien confirma que ni siquiera llega a
+    tomar el lock ni a invocar Pentaho: la validacion es lo primero que
+    corre el script.
+    """
+    env = dict(entorno["env"])
+    del env[falta]
+
+    proc = subprocess.run([BASH, str(SCRIPT)], env=env, capture_output=True, text=True)
+
+    assert proc.returncode != 0
+    assert falta in proc.stderr
+    assert "missing" in proc.stderr
+    registro = (entorno["llamadas"].read_text(encoding="utf-8").splitlines()
+                if entorno["llamadas"].exists() else [])
+    assert "kitchen" not in registro, "no debe llegar a invocar Pentaho sin config completa"
