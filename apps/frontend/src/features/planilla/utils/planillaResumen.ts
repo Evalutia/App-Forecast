@@ -37,6 +37,13 @@ export type EstadoCeldaRotacion =
  *
  * El resto conserva su estado, y con él su color: la señal de quiebre sigue
  * siendo información útil aunque el valor ya esté corregido.
+ *
+ * Issue #134: `sin_factor` queda reservado para cuando de verdad falta el
+ * factor estacional (`rotacionDiariaDesestacionalizada` null). Antes también
+ * se disparaba para meses `quiebre_parcial` con venta real 0 -- un efecto
+ * secundario del guard `rotacionDiariaReal > 0` que `rotacionDesestacionalizadaMes`
+ * ya no aplica -- y esa celda mentía: el factor sí estaba cargado, solo que
+ * el mes no vendió nada.
  */
 export function celdaRotacionMes(
   mes: PlanillaMesDto,
@@ -72,13 +79,25 @@ export function rotacionDesestacionalizadaMes(m: PlanillaMesDto): number | null 
   if (m.estadoMes === 'normal') {
     return m.rotacionDiariaDesestacionalizada;
   }
-  if (
-    m.estadoMes === 'quiebre_parcial' &&
-    m.rotacionAjustada != null &&
-    m.rotacionDiariaDesestacionalizada != null &&
-    m.rotacionDiariaReal != null &&
-    m.rotacionDiariaReal > 0
-  ) {
+  if (m.estadoMes !== 'quiebre_parcial' || m.rotacionDiariaDesestacionalizada == null) {
+    return null;
+  }
+  // Issue #134: con venta real 0 no hace falta derivar el factor por
+  // cociente -- el ETL ya persiste la desestacionalizada en 0 (0 ÷ cualquier
+  // factor da 0), así que el mes participa con ese valor real en vez de
+  // descartarse. Mismo criterio que #116 ya fijó para ROT.S: un mes cerrado
+  // sin ventas es un dato real, no un hueco. El guard viejo (`> 0`) tiraba
+  // estos meses aunque el valor ya estuviera disponible y fuera correcto --
+  // el sesgo iba siempre hacia arriba (se descartaban los meses malos, nunca
+  // los buenos).
+  if (m.rotacionDiariaReal === 0) {
+    return m.rotacionDiariaDesestacionalizada;
+  }
+  // rotacionDiariaReal < 0 (devoluciones netas superando la venta del mes,
+  // posible desde #80) sigue excluido: dividir por un real negativo daría una
+  // "rotación corregida" negativa sin sentido, y el bug que #134 vino a
+  // arreglar era el descarte de un 0 real, no el de un real negativo.
+  if (m.rotacionAjustada != null && m.rotacionDiariaReal != null && m.rotacionDiariaReal > 0) {
     return m.rotacionAjustada * (m.rotacionDiariaDesestacionalizada / m.rotacionDiariaReal);
   }
   return null;
@@ -102,10 +121,18 @@ export function calcularRotDesEstac(meses: PlanillaMesDto[]): number | null {
  * diaria de dos dígitos sin ninguna marca de que se calculó sobre casi
  * nada) -- se prefiere vacío a un número engañoso, mismo criterio que ya
  * usan ROT.S (mínimo de meses) y QBK (máximo de antigüedad del stock).
+ *
+ * Issue #134: el numerador solo suma la venta de los meses que también
+ * aportan al denominador (`diasConStock > 0`). Antes sumaba los 13 meses
+ * sin filtrar, así que un mes sin ningún día de stock aportaba venta pero no
+ * días, inflando el resultado -- la columna se define como "venta promedio
+ * por día en los días que hubo stock", no "venta total ÷ días con stock de
+ * otros meses".
  */
 export function calcularDdstk(meses: PlanillaMesDto[]): number | null {
-  const totalVentas = meses.reduce((s, m) => s + (m.ventasCantidad ?? 0), 0);
-  const totalDias = meses.reduce((s, m) => s + (m.diasConStock ?? 0), 0);
+  const mesesConStock = meses.filter((m) => (m.diasConStock ?? 0) > 0);
+  const totalVentas = mesesConStock.reduce((s, m) => s + (m.ventasCantidad ?? 0), 0);
+  const totalDias = mesesConStock.reduce((s, m) => s + (m.diasConStock ?? 0), 0);
   if (totalDias < DDSTK_MIN_DIAS_CON_STOCK) return null;
   return totalVentas / totalDias;
 }

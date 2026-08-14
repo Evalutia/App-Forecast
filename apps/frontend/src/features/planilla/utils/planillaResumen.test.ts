@@ -91,7 +91,10 @@ describe('calcularRotDesEstac', () => {
     expect(calcularRotDesEstac(meses)).toBeNull();
   });
 
-  it('quiebre_parcial con rotacionDiariaReal en 0 tambien se excluye (no se puede derivar el factor)', () => {
+  it('issue #134: quiebre_parcial con rotacionDiariaReal en 0 participa con la desestacionalizada, no se descarta', () => {
+    // Con venta real 0 no hace falta derivar por cociente: el mes participa
+    // con el valor que el ETL ya persiste, aunque no sea 0 en este caso de
+    // prueba (el fix no asume ningún valor puntual, usa el que venga).
     const meses = conReferencia([
       mes({
         estadoMes: 'quiebre_parcial',
@@ -101,6 +104,43 @@ describe('calcularRotDesEstac', () => {
       }),
       mes({ estadoMes: 'normal', rotacionDiariaDesestacionalizada: 2.0 }),
     ]);
+    // Bug viejo (guard `> 0`): el quiebre se descartaba -> (2.0)/1 = 2.0
+    // Fix: el quiebre participa con su desestacionalizada -> (3.0 + 2.0) / 2 = 2.5
+    expect(calcularRotDesEstac(meses)).toBe(2.5);
+  });
+
+  it('issue #134: quiebre_parcial con rotacionDiariaReal NEGATIVO se sigue excluyendo, no se divide por negativo', () => {
+    // Devoluciones netas superando la venta del mes (posible desde #80) dan
+    // rotacionDiariaReal < 0. El fix de #134 es específico para el 0 -- un
+    // real negativo no tiene una "rotación corregida" con sentido, así que
+    // el mes se sigue descartando, igual que antes de este ticket.
+    const meses = conReferencia([
+      mes({
+        estadoMes: 'quiebre_parcial',
+        rotacionAjustada: 6.0,
+        rotacionDiariaDesestacionalizada: 3.0,
+        rotacionDiariaReal: -2,
+      }),
+      mes({ estadoMes: 'normal', rotacionDiariaDesestacionalizada: 4.0 }),
+    ]);
+    // Si dividiera por el real negativo: 6.0 * (3.0 / -2) = -9.0, promedio -2.5 (sin sentido).
+    // Con el mes excluido, solo participa el normal.
+    expect(calcularRotDesEstac(meses)).toBe(4.0);
+  });
+
+  it('issue #134: mes de quiebre con venta 0 real (caso O00847) participa con rotación 0, no se descarta', () => {
+    // Caso real del ETL: con ventasCantidad=0 y dias_con_stock>0, rot_real=0 y
+    // rot_desest=round(0/factor,4)=0 -- el ETL persiste un 0 real, no un null.
+    const meses = conReferencia([
+      mes({
+        estadoMes: 'quiebre_parcial',
+        rotacionAjustada: 3.0,
+        rotacionDiariaDesestacionalizada: 0,
+        rotacionDiariaReal: 0,
+      }),
+      mes({ estadoMes: 'normal', rotacionDiariaDesestacionalizada: 4.0 }),
+    ]);
+    // Bug viejo: se descartaba -> 4.0. Fix: participa con 0 -> (0 + 4.0)/2 = 2.0
     expect(calcularRotDesEstac(meses)).toBe(2.0);
   });
 
@@ -148,6 +188,23 @@ describe('calcularDdstk', () => {
       mes({ diasConStock: 5, ventasCantidad: 10 }), // "de referencia", igual participa en DDSTK
     ];
     expect(calcularDdstk(meses)).toBe(2.0);
+  });
+
+  it('issue #134: ventas de un mes sin ningun dia con stock no inflan el numerador', () => {
+    const meses = [
+      mes({ diasConStock: 10, ventasCantidad: 20 }),
+      mes({ diasConStock: 0, ventasCantidad: 50 }), // vendió pese a no tener dias con stock ese mes
+    ];
+    // Bug viejo: (20 + 50) / 10 = 7. Fix: el mes sin stock no aporta al numerador -> 20 / 10 = 2.
+    expect(calcularDdstk(meses)).toBe(2.0);
+  });
+
+  it('issue #134: si TODOS los meses con venta estan sin dias de stock, el numerador queda en 0', () => {
+    const meses = [
+      mes({ diasConStock: 10, ventasCantidad: 0 }),
+      mes({ diasConStock: 0, ventasCantidad: 50 }),
+    ];
+    expect(calcularDdstk(meses)).toBe(0);
   });
 });
 
@@ -203,20 +260,31 @@ describe('celdaRotacionMes', () => {
     expect(celdaRotacionMes(normal).valor).toBe(calcularRotDesEstac(conReferencia([normal])));
   });
 
-  it('quiebre sin rotación real > 0 no es derivable: celda vacía y fuera del promedio', () => {
-    // El promedio ya lo excluía (#117, no se puede derivar el factor con real=0).
-    // La celda tiene que coincidir, o vuelve a mostrarse algo que el resumen ignora.
+  it('issue #134: quiebre con venta real 0 pero factor cargado muestra 0, no cae en sin_factor', () => {
+    // Antes (#130/bug viejo): el guard `rotacionDiariaReal > 0` volvía la celda
+    // 'sin_factor' aunque el factor estuviera cargado -- el lila mentía. La
+    // celda tiene que coincidir con lo que ahora promedia calcularRotDesEstac.
     const m = mes({
       estadoMes: 'quiebre_parcial',
       rotacionDiariaReal: 0, rotacionAjustada: 3, rotacionDiariaDesestacionalizada: 0,
     });
-    expect(celdaRotacionMes(m)).toEqual({ valor: null, estado: 'sin_factor' });
-    expect(calcularRotDesEstac(conReferencia([m]))).toBeNull();
+    expect(celdaRotacionMes(m)).toEqual({ valor: 0, estado: 'quiebre_parcial' });
+    expect(calcularRotDesEstac(conReferencia([m]))).toBe(0);
   });
 
   it('quiebre sin factor: también queda vacío y marcado como sin_factor', () => {
     const c = celdaRotacionMes(mes({
       estadoMes: 'quiebre_parcial', rotacionAjustada: 6, rotacionDiariaDesestacionalizada: null,
+    }));
+    expect(c).toEqual({ valor: null, estado: 'sin_factor' });
+  });
+
+  it('issue #134: quiebre con venta real 0 Y sin factor cargado sigue siendo sin_factor (falta de verdad)', () => {
+    // sin_factor tiene que quedar reservado para cuando el factor realmente
+    // no está -- no puede volver a dispararse como efecto secundario del
+    // valor de rotacionDiariaReal.
+    const c = celdaRotacionMes(mes({
+      estadoMes: 'quiebre_parcial', rotacionDiariaReal: 0, rotacionAjustada: 6, rotacionDiariaDesestacionalizada: null,
     }));
     expect(c).toEqual({ valor: null, estado: 'sin_factor' });
   });
