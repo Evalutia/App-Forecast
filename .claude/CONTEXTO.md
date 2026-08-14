@@ -3414,3 +3414,23 @@ Antes de mandarle a Rodrigo la pregunta sobre un posible depósito no consultado
 | `docs/script-de-prediccion.md` | Detalles de predict.py, modelos ML, ensemble |
 | `docs/catalogo-modelos-diccionario.md` | Diccionario de variables de entrada (`lag_N`, `period`, `trend`, `ds`/`y`, hiperparámetros ETS/SARIMA) de RF/XGB/Prophet/ETS/SARIMA -- issue #85/#98/#99 |
 | `services/etl/README_ETL_Diario_actualizado.md` | Flujo ETL completo, variables, backfills |
+
+---
+
+### #131, #132, #134, #136, #139 -- cerrados en la misma sesión (2026-08-13/14)
+
+`/grill-me issue 136` primero (memoria mal ajustada antes que horario), `/implement` después, con tres agentes en paralelo (worktrees aislados) para #134, #131+#132 y #139 mientras se implementaba #136 y se atendía un incidente de producción.
+
+**#136**: hallazgo que cambió el diseño -- MySQL en reposo ya usaba 55% de la RAM y Pentaho nunca tuvo su heap ajustado (default de fábrica 2GB). Se bajó a `-Xms256m -Xmx768m`, se encadenó el job mensual al final del diario (no por horario fijo, que quedaba corto con el diario creciendo), se agregó `mem_limit` en `mysql`/`etl` y se marcó `exit_code=137` como `posible_oom` en `jobs_historial`.
+
+**Incidente real durante la propia implementación**: corriendo el job mensual para medir su memoria, una query sin acotar en `eval_walkforward.py` (`ioworker/data.py`, ya documentado como problema recurrente desde #105) tiró la VM abajo ~30-40 min (swap lleno, SSH sin responder). Se abrió **#148** para el fix de fondo. `mem_limit` se fijó igual, con la info disponible, aceptando que el mensual muera contenido hasta que #148 lo arregle.
+
+**Los tres agentes en paralelo completaron su trabajo, pero con hallazgos reales al integrar:**
+- Dos de los agentes se cortaron a mitad de camino por errores de API/límite de gasto de la cuenta -- se retomaron (uno vía `SendMessage`, el otro terminado directamente en el worktree) sin perder el trabajo ya commiteado.
+- `/code-review` sobre #131+#132 antes de integrar encontró que `mark_step_failed.sh` nunca recibía `ETL_FAIL_MARKER` de Kettle (Kettle sustituye `${VAR}` como texto en `insertScript`, no lo exporta como env var -- el mecanismo coincidía por casualidad, no por diseño). Corregido pasándolo explícito a las 13 llamadas.
+- Al mergear las 3 ramas a mano (dos de ellas tocaban `run_ofelia.sh`), el auto-merge de git perdió silenciosamente dos asserts de un test de #139 sin marcar conflicto -- confirmado comparando contra la rama original. Restaurados.
+- La integración de #132 (trap de abort temprano) con #139 (validación de `WS_URL`) dejó la validación ANTES de que el trap se registrara -- un `WS_URL` faltante no habría quedado registrado. Reordenado. Un intento de "fix" adicional (exit/return explícito) se revirtió después de verificar con bash 5 real (Docker) que no hacía falta -- el problema que parecía arreglar era en realidad un bug de bash 3.2 (el `bash` que trae macOS, de 2007), no de producción.
+
+**Deploy con un gap real, no simulado**: el `.env` de producción nunca recibió `WS_URL`/`ID_EMPRESA`/`S_DEPOSITOS` (el propio #139 los movió ahí, pero aplicar el código sin ese paso manual es exactamente el tipo de gap que documenta #140). El cron de las 03:00 del 14/08 **falló de verdad** por esto -- y quedó registrado con causa clara (`abortado_temprano`, motivo legible) gracias a #132, en vez de morir en silencio como el 2026-08-11. Corregido en el momento y recuperado con un catch-up manual del día perdido, que además sirvió de validación real de todo lo demás: heap de Pentaho corriendo con `-Xmx768m` (confirmado en el propio proceso `java` de producción), la cadena completa del `.kjb` llegando a `SUCCESS`, `stale` sobreviviendo al merge de `end`.
+
+Los 5 issues cerrados con esta evidencia real, no solo con tests.
