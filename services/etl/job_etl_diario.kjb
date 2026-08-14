@@ -3,6 +3,76 @@
   <name>job_etl_diario</name>
   <description>Job diario: articulos, stockxml, ventas, merges y calculos</description>
 
+  <!--
+    Issue #131: tabla de decision "aborta vs marca y sigue", por paso.
+
+    Antes de este fix, 14 de los 16 hops originales eran unconditional=Y: la
+    cadena SIEMPRE llegaba a SUCCESS (que resetea el resultado interno de
+    Kettle), asi que kitchen.sh devolvia 0 aunque se hubiera roto la
+    extraccion de articulos, la de stock, predict.py o cualquiera de los 3
+    calculos. Confirmado corriendo un .kjb aislado con el mismo patron
+    contra kitchen.sh real (ver .claude/CONTEXTO.md, sesion #131).
+
+    Mecanismo: cada paso "marca y sigue" tiene un hop condicional
+    (evaluation=Y/N) a una entrada MARK X FAILED (mark_step_failed.sh) que
+    (a) toca ETL_FAIL_MARKER y (b) deja auditoria en jobs_historial, y
+    despues reconverge al siguiente paso normal. Al final de la cadena,
+    CHECK RUN RESULT revisa el marker: si algo fallo, termina en FAILURE
+    (job entry nativo ABORT) en vez de SUCCESS (SPECIAL, success=Y). Eso es
+    lo que de verdad cambia el exit code de kitchen.sh, que es lo unico que
+    run_ofelia.sh mira para decidir el estado en la fila OFICIAL de
+    jobs_historial.
+
+    Verificado contra kitchen.sh real (no solo por lectura de la spec) que
+    SPECIAL con success=N es un NO-OP en este motor: solo success=Y fuerza
+    el resultado (a exito); no existe un equivalente "forzar fallo" via
+    SPECIAL. El tipo correcto para terminar en fallo es el job entry nativo
+    ABORT, que si corta la ejecucion y deja el resultado del job en false.
+
+    ABORTA (unico caso):
+    * TRUNCATE VENTAS_STAGE (arranque): riesgo real de corrupcion
+      silenciosa. Si no se vacia, filas de una corrida anterior quedan
+      mezcladas con las de esta noche en ventas_historicas_stage, y el
+      MERGE (SUM/GROUP BY) infla cantidad sin que nada lo detecte, misma
+      familia de bug que #39/#113/#124. Es ademas el primer paso real:
+      abortar aca no tira trabajo ya hecho.
+
+    MARCA Y SIGUE (todo lo demas):
+    * RUN EXTRACT ARTICULOS: el catalogo se upsertea (idempotente); una
+      noche sin refresco no corrompe nada, solo queda desactualizado.
+    * TRUNCATE STOCK_DIARIO_STAGE (opcional): vestigial hoy, el merge que
+      le sigue es un no-op (el extractor escribe directo a stock_diario),
+      no hay riesgo de contaminacion cruzada como con ventas.
+    * RUN EXTRACT STOCKXML: mismo criterio que #124 para ventas, que falle
+      una fuente no debe bloquear a las demas.
+    * MERGE STAGING -> STOCK_DIARIO: hoy es un SELECT 1 (no-op), casi no
+      puede fallar salvo DB abajo; si pasa, el resto de los pasos SQL
+      fallan igual y marcan la corrida sin necesidad de un abort especial.
+    * RUN EXTRACT VENTAS: ya resuelto en #124, si falla NO corre el merge
+      (evita pisar ventas reales con ceros) pero la cadena sigue.
+    * MERGE STAGING -> VENTAS: mismo principio que #124. Si el INSERT
+      falla (deadlock, perdida de conexion, exactamente lo que tumbo
+      calc_planilla 3 noches seguidas en julio), predict.py y los 3
+      calculos siguen trabajando con el ventas_historicas de ayer,
+      degradado pero util, en vez de con nada.
+    * RUN PREDICT.PY: ejemplo explicito del ticket, que predict.py falle
+      no debe impedir que se recalcule la planilla.
+    * RUN CALC_PLANILLA / RUN CALC_SUGERENCIAS / RUN CALC_STOCK_RESUMEN:
+      calculos independientes entre si; que uno falle no debe bloquear a
+      los otros dos.
+    * CALC_UPSERT_VENTAS_MENSUALES: corre al final a proposito desde #112,
+      nada posterior lo lee.
+    * TRUNCATE VENTAS_STAGE END: limpieza de cortesia; la proxima corrida
+      se auto protege igual (el TRUNCATE VENTAS_STAGE del inicio es el que
+      realmente evita la corrupcion del merge).
+
+    Los wrappers run_calc_planilla.sh / run_calc_sugerencias.sh /
+    run_calc_stock_resumen.sh dejaron de terminar con exit 0 fijo. Antes
+    enmascaraban el codigo de salida real del script python de adentro,
+    asi que el hop condicional de esos 3 pasos hubiera sido inerte (Kettle
+    siempre los hubiera visto "exitosos").
+  -->
+
   <parameters>
     <parameter><name>WS_URL</name><default_value>${WS_URL}</default_value></parameter>
     <!-- Issue #51: mTLS con el Web Service. Se exponen como variables de entorno
@@ -35,6 +105,17 @@
     <parameter><name>FORCE_END</name><default_value></default_value></parameter>
 
     <parameter><name>LAST_TABLE</name><default_value>ventas_historicas_stage</default_value></parameter>
+
+    <!-- Issue #131: archivo de "algo fallo esta corrida", vive solo mientras
+         dura la corrida (lo crea/borra RESET FAIL MARKER, lo revisa CHECK RUN
+         RESULT al final). Parametrizado para poder aislar una corrida
+         puntual (ej. un reproceso manual concurrente con el cron real) sin
+         tocar el default: cada entrada MARK X FAILED se lo pasa a
+         mark_step_failed.sh como 3er argumento (hallazgo de code review:
+         Kettle sustituye ${ETL_FAIL_MARKER} como TEXTO en insertScript, no lo
+         exporta como variable de entorno del shell hijo, asi que sin pasarlo
+         explicito un cambio de este parametro rompe el gate en silencio). -->
+    <parameter><name>ETL_FAIL_MARKER</name><default_value>/tmp/etl_diario_run_failed.flag</default_value></parameter>
   </parameters>
 
   <connection>
@@ -53,7 +134,21 @@
       <name>START</name>
       <type>SPECIAL</type>
       <start>Y</start>
-      <xloc>64</xloc><yloc>64</yloc><draw>Y</draw>
+      <xloc>32</xloc><yloc>64</yloc><draw>Y</draw>
+    </entry>
+
+    <entry>
+      <name>RESET FAIL MARKER</name>
+      <type>SHELL</type>
+      <filename>/bin/sh</filename>
+      <work_directory>${Internal.Entry.Current.Directory}</work_directory>
+      <arguments><argument>-c</argument></arguments>
+      <insertScript>Y</insertScript>
+      <script><![CDATA[
+rm -f "${ETL_FAIL_MARKER}"
+      ]]></script>
+      <wait>Y</wait>
+      <xloc>140</xloc><yloc>64</yloc><draw>Y</draw>
     </entry>
 
     <entry>
@@ -63,7 +158,27 @@
       <sql><![CDATA[
 DELETE FROM ventas_historicas_stage;
       ]]></sql>
-      <xloc>240</xloc><yloc>64</yloc><draw>Y</draw>
+      <xloc>260</xloc><yloc>64</yloc><draw>Y</draw>
+    </entry>
+
+    <!-- Issue #131: UNICO paso que aborta la cadena entera (ver tabla arriba
+         del archivo): no vaciar el stage arriesga inflar ventas_historicas
+         en silencio via el SUM/GROUP BY del merge de mas abajo. -->
+    <entry>
+      <name>MARK TRUNCATE VENTAS_STAGE FAILED (ABORT)</name>
+      <type>SHELL</type>
+      <filename>/bin/sh</filename>
+      <work_directory>${Internal.Entry.Current.Directory}</work_directory>
+      <arguments><argument>-c</argument></arguments>
+      <insertScript>Y</insertScript>
+      <script><![CDATA[
+/bin/bash /app/services/etl/mark_step_failed.sh \
+  "TRUNCATE VENTAS_STAGE" \
+  "No se pudo vaciar ventas_historicas_stage antes de arrancar -- se aborta la corrida entera para no arriesgar mezclar filas de una corrida anterior con las de esta noche en el merge (riesgo de inflar ventas_historicas en silencio)." \
+  "${ETL_FAIL_MARKER}"
+      ]]></script>
+      <wait>Y</wait>
+      <xloc>260</xloc><yloc>200</yloc><draw>Y</draw>
     </entry>
 
     <entry>
@@ -77,7 +192,24 @@ DELETE FROM ventas_historicas_stage;
 /bin/bash /app/services/etl/run_extract_articulos.sh
       ]]></script>
       <wait>Y</wait>
-      <xloc>480</xloc><yloc>64</yloc><draw>Y</draw>
+      <xloc>420</xloc><yloc>64</yloc><draw>Y</draw>
+    </entry>
+
+    <entry>
+      <name>MARK ARTICULOS FAILED</name>
+      <type>SHELL</type>
+      <filename>/bin/sh</filename>
+      <work_directory>${Internal.Entry.Current.Directory}</work_directory>
+      <arguments><argument>-c</argument></arguments>
+      <insertScript>Y</insertScript>
+      <script><![CDATA[
+/bin/bash /app/services/etl/mark_step_failed.sh \
+  "RUN EXTRACT ARTICULOS" \
+  "El extractor de articulos termino con codigo de error -- ver log de la corrida. El catalogo queda con los datos de la ultima corrida buena." \
+  "${ETL_FAIL_MARKER}"
+      ]]></script>
+      <wait>Y</wait>
+      <xloc>420</xloc><yloc>200</yloc><draw>Y</draw>
     </entry>
 
     <entry>
@@ -88,7 +220,24 @@ DELETE FROM ventas_historicas_stage;
 -- si tenés tabla stage para stock, borrar; si no, se omite
 DELETE FROM stock_diario_stage;
       ]]></sql>
-      <xloc>720</xloc><yloc>64</yloc><draw>Y</draw>
+      <xloc>600</xloc><yloc>64</yloc><draw>Y</draw>
+    </entry>
+
+    <entry>
+      <name>MARK STOCK STAGE TRUNCATE FAILED</name>
+      <type>SHELL</type>
+      <filename>/bin/sh</filename>
+      <work_directory>${Internal.Entry.Current.Directory}</work_directory>
+      <arguments><argument>-c</argument></arguments>
+      <insertScript>Y</insertScript>
+      <script><![CDATA[
+/bin/bash /app/services/etl/mark_step_failed.sh \
+  "TRUNCATE STOCK_DIARIO_STAGE" \
+  "No se pudo vaciar stock_diario_stage -- hoy es vestigial (el merge siguiente es un no-op), asi que se continua sin riesgo de contaminacion cruzada conocido." \
+  "${ETL_FAIL_MARKER}"
+      ]]></script>
+      <wait>Y</wait>
+      <xloc>600</xloc><yloc>200</yloc><draw>Y</draw>
     </entry>
 
     <entry>
@@ -102,7 +251,24 @@ DELETE FROM stock_diario_stage;
 /bin/bash /app/services/etl/run_extract_stockxml.sh
       ]]></script>
       <wait>Y</wait>
-      <xloc>960</xloc><yloc>64</yloc><draw>Y</draw>
+      <xloc>780</xloc><yloc>64</yloc><draw>Y</draw>
+    </entry>
+
+    <entry>
+      <name>MARK STOCKXML FAILED</name>
+      <type>SHELL</type>
+      <filename>/bin/sh</filename>
+      <work_directory>${Internal.Entry.Current.Directory}</work_directory>
+      <arguments><argument>-c</argument></arguments>
+      <insertScript>Y</insertScript>
+      <script><![CDATA[
+/bin/bash /app/services/etl/mark_step_failed.sh \
+  "RUN EXTRACT STOCKXML" \
+  "El extractor de stock termino con codigo de error -- ver log de la corrida. stock_diario queda con los datos de la ultima corrida buena." \
+  "${ETL_FAIL_MARKER}"
+      ]]></script>
+      <wait>Y</wait>
+      <xloc>780</xloc><yloc>200</yloc><draw>Y</draw>
     </entry>
 
     <entry>
@@ -115,7 +281,24 @@ DELETE FROM stock_diario_stage;
 -- Aquí asumimos que run_extract_stockxml.py ya escribió en stock_diario.
 SELECT 1;
       ]]></sql>
-      <xloc>1200</xloc><yloc>64</yloc><draw>Y</draw>
+      <xloc>960</xloc><yloc>64</yloc><draw>Y</draw>
+    </entry>
+
+    <entry>
+      <name>MARK STOCK MERGE FAILED</name>
+      <type>SHELL</type>
+      <filename>/bin/sh</filename>
+      <work_directory>${Internal.Entry.Current.Directory}</work_directory>
+      <arguments><argument>-c</argument></arguments>
+      <insertScript>Y</insertScript>
+      <script><![CDATA[
+/bin/bash /app/services/etl/mark_step_failed.sh \
+  "MERGE STAGING -> STOCK_DIARIO" \
+  "El merge de stock fallo (probablemente DB no disponible) -- ver log de la corrida." \
+  "${ETL_FAIL_MARKER}"
+      ]]></script>
+      <wait>Y</wait>
+      <xloc>960</xloc><yloc>200</yloc><draw>Y</draw>
     </entry>
 
     <entry>
@@ -129,28 +312,24 @@ SELECT 1;
 /bin/bash /app/services/etl/run_extract_sales_chunk.sh
       ]]></script>
       <wait>Y</wait>
-      <xloc>1440</xloc><yloc>64</yloc><draw>Y</draw>
+      <xloc>1140</xloc><yloc>64</yloc><draw>Y</draw>
     </entry>
 
     <entry>
       <name>MARK VENTAS EXTRACT FAILED</name>
-      <type>SQL</type>
-      <connection>MYSQL_EVALUTIA</connection>
-      <sql><![CDATA[
--- Issue #124: rama de fallo de RUN EXTRACT VENTAS. Antes el hop era
--- unconditional y corria el MERGE igual aunque el extractor hubiera fallado
--- (respuesta vacia, JSON ilegible, o MensError del WS) -- ahora esa rama NO
--- toca ventas_historicas, solo deja registro explicito de que la noche fallo.
-INSERT INTO jobs_historial (tipo_job, estado, fecha_inicio, fecha_fin, detalle)
-VALUES (
-  'etl', 'fallido', NOW(6), NOW(6),
-  JSON_OBJECT(
-    'paso', 'RUN EXTRACT VENTAS',
-    'motivo', 'Fallo en uno o mas grupos/depositos de ConsStockVenta (respuesta vacia, JSON ilegible o MensError del WS) -- ver log de la corrida. ventas_historicas NO se tocó esta noche.'
-  )
-);
-      ]]></sql>
-      <xloc>1560</xloc><yloc>200</yloc><draw>Y</draw>
+      <type>SHELL</type>
+      <filename>/bin/sh</filename>
+      <work_directory>${Internal.Entry.Current.Directory}</work_directory>
+      <arguments><argument>-c</argument></arguments>
+      <insertScript>Y</insertScript>
+      <script><![CDATA[
+/bin/bash /app/services/etl/mark_step_failed.sh \
+  "RUN EXTRACT VENTAS" \
+  "Fallo en uno o mas grupos/depositos de ConsStockVenta (respuesta vacia, JSON ilegible o MensError del WS) -- ver log de la corrida. ventas_historicas NO se tocó esta noche (el hop condicional saltea el MERGE, Issue #124)." \
+  "${ETL_FAIL_MARKER}"
+      ]]></script>
+      <wait>Y</wait>
+      <xloc>1140</xloc><yloc>200</yloc><draw>Y</draw>
     </entry>
 
     <entry>
@@ -196,7 +375,153 @@ ON DUPLICATE KEY UPDATE
   ts_carga = VALUES(ts_carga),
   fuente   = VALUES(fuente);
       ]]></sql>
+      <xloc>1320</xloc><yloc>64</yloc><draw>Y</draw>
+    </entry>
+
+    <!-- Issue #131: mismo principio que la rama de fallo de RUN EXTRACT
+         VENTAS (#124): si el INSERT falla (deadlock, perdida de conexion,
+         exactamente lo que tumbo calc_planilla 3 noches seguidas en julio),
+         predict.py y los calculos siguen trabajando con el
+         ventas_historicas de ayer en vez de con nada. -->
+    <entry>
+      <name>MARK VENTAS MERGE FAILED</name>
+      <type>SHELL</type>
+      <filename>/bin/sh</filename>
+      <work_directory>${Internal.Entry.Current.Directory}</work_directory>
+      <arguments><argument>-c</argument></arguments>
+      <insertScript>Y</insertScript>
+      <script><![CDATA[
+/bin/bash /app/services/etl/mark_step_failed.sh \
+  "MERGE STAGING -> VENTAS" \
+  "El INSERT de ventas_historicas fallo (deadlock, perdida de conexion, etc.) -- ver log de la corrida. Los datos de ventas de hoy NO se cargaron; ventas_historicas sigue con lo de ayer." \
+  "${ETL_FAIL_MARKER}"
+      ]]></script>
+      <wait>Y</wait>
+      <xloc>1320</xloc><yloc>200</yloc><draw>Y</draw>
+    </entry>
+
+    <entry>
+      <name>RUN PREDICT.PY</name>
+      <type>SHELL</type>
+      <filename>/bin/sh</filename>
+      <work_directory>${Internal.Entry.Current.Directory}</work_directory>
+      <arguments><argument>-c</argument></arguments>
+      <insertScript>Y</insertScript>
+      <script><![CDATA[
+/app/services/etl/run_predict.sh
+      ]]></script>
+      <wait>Y</wait>
+      <xloc>1500</xloc><yloc>64</yloc><draw>Y</draw>
+    </entry>
+
+    <entry>
+      <name>MARK PREDICT FAILED</name>
+      <type>SHELL</type>
+      <filename>/bin/sh</filename>
+      <work_directory>${Internal.Entry.Current.Directory}</work_directory>
+      <arguments><argument>-c</argument></arguments>
+      <insertScript>Y</insertScript>
+      <script><![CDATA[
+/bin/bash /app/services/etl/mark_step_failed.sh \
+  "RUN PREDICT.PY" \
+  "predict.py termino con codigo de error -- ver log de la corrida. Las predicciones quedan con la ultima corrida buena; los calculos de planilla/sugerencias/stock igual corren." \
+  "${ETL_FAIL_MARKER}"
+      ]]></script>
+      <wait>Y</wait>
+      <xloc>1500</xloc><yloc>200</yloc><draw>Y</draw>
+    </entry>
+
+    <entry>
+      <name>RUN CALC_PLANILLA</name>
+      <type>SHELL</type>
+      <filename>/bin/sh</filename>
+      <work_directory>${Internal.Entry.Current.Directory}</work_directory>
+      <arguments><argument>-c</argument></arguments>
+      <insertScript>Y</insertScript>
+      <script><![CDATA[
+/app/services/etl/run_calc_planilla.sh
+      ]]></script>
+      <wait>Y</wait>
       <xloc>1680</xloc><yloc>64</yloc><draw>Y</draw>
+    </entry>
+
+    <entry>
+      <name>MARK CALC_PLANILLA FAILED</name>
+      <type>SHELL</type>
+      <filename>/bin/sh</filename>
+      <work_directory>${Internal.Entry.Current.Directory}</work_directory>
+      <arguments><argument>-c</argument></arguments>
+      <insertScript>Y</insertScript>
+      <script><![CDATA[
+/bin/bash /app/services/etl/mark_step_failed.sh \
+  "RUN CALC_PLANILLA" \
+  "run_calc_planilla.py termino con codigo de error -- ver log de la corrida (/tmp/calc_planilla.log) y su propio registro en jobs_historial (tipo_job='etl', subtipo distinto de cron_diario)." \
+  "${ETL_FAIL_MARKER}"
+      ]]></script>
+      <wait>Y</wait>
+      <xloc>1680</xloc><yloc>200</yloc><draw>Y</draw>
+    </entry>
+
+    <entry>
+      <name>RUN CALC_SUGERENCIAS</name>
+      <type>SHELL</type>
+      <filename>/bin/sh</filename>
+      <work_directory>${Internal.Entry.Current.Directory}</work_directory>
+      <arguments><argument>-c</argument></arguments>
+      <insertScript>Y</insertScript>
+      <script><![CDATA[
+/app/services/etl/run_calc_sugerencias.sh
+      ]]></script>
+      <wait>Y</wait>
+      <xloc>1860</xloc><yloc>64</yloc><draw>Y</draw>
+    </entry>
+
+    <entry>
+      <name>MARK CALC_SUGERENCIAS FAILED</name>
+      <type>SHELL</type>
+      <filename>/bin/sh</filename>
+      <work_directory>${Internal.Entry.Current.Directory}</work_directory>
+      <arguments><argument>-c</argument></arguments>
+      <insertScript>Y</insertScript>
+      <script><![CDATA[
+/bin/bash /app/services/etl/mark_step_failed.sh \
+  "RUN CALC_SUGERENCIAS" \
+  "run_calc_sugerencias.py termino con codigo de error -- ver log de la corrida (/tmp/calc_sugerencias.log)." \
+  "${ETL_FAIL_MARKER}"
+      ]]></script>
+      <wait>Y</wait>
+      <xloc>1860</xloc><yloc>200</yloc><draw>Y</draw>
+    </entry>
+
+    <entry>
+      <name>RUN CALC_STOCK_RESUMEN</name>
+      <type>SHELL</type>
+      <filename>/bin/sh</filename>
+      <work_directory>${Internal.Entry.Current.Directory}</work_directory>
+      <arguments><argument>-c</argument></arguments>
+      <insertScript>Y</insertScript>
+      <script><![CDATA[
+/app/services/etl/run_calc_stock_resumen.sh
+      ]]></script>
+      <wait>Y</wait>
+      <xloc>2040</xloc><yloc>64</yloc><draw>Y</draw>
+    </entry>
+
+    <entry>
+      <name>MARK CALC_STOCK_RESUMEN FAILED</name>
+      <type>SHELL</type>
+      <filename>/bin/sh</filename>
+      <work_directory>${Internal.Entry.Current.Directory}</work_directory>
+      <arguments><argument>-c</argument></arguments>
+      <insertScript>Y</insertScript>
+      <script><![CDATA[
+/bin/bash /app/services/etl/mark_step_failed.sh \
+  "RUN CALC_STOCK_RESUMEN" \
+  "run_calc_stock_resumen.py termino con codigo de error -- ver log de la corrida (/tmp/calc_stock_resumen.log)." \
+  "${ETL_FAIL_MARKER}"
+      ]]></script>
+      <wait>Y</wait>
+      <xloc>2040</xloc><yloc>200</yloc><draw>Y</draw>
     </entry>
 
     <entry>
@@ -286,63 +611,24 @@ ON DUPLICATE KEY UPDATE
   dias_con_stock  = VALUES(dias_con_stock),
   actualizado_en = CONVERT_TZ(NOW(6), @@session.time_zone, '+00:00');
       ]]></sql>
-      <xloc>1920</xloc><yloc>64</yloc><draw>Y</draw>
+      <xloc>2220</xloc><yloc>64</yloc><draw>Y</draw>
     </entry>
 
     <entry>
-      <name>RUN PREDICT.PY</name>
+      <name>MARK VENTAS_MENSUALES FAILED</name>
       <type>SHELL</type>
       <filename>/bin/sh</filename>
       <work_directory>${Internal.Entry.Current.Directory}</work_directory>
       <arguments><argument>-c</argument></arguments>
       <insertScript>Y</insertScript>
       <script><![CDATA[
-/app/services/etl/run_predict.sh
+/bin/bash /app/services/etl/mark_step_failed.sh \
+  "CALC_UPSERT_VENTAS_MENSUALES" \
+  "El upsert de ventas_mensuales fallo -- ver log de la corrida. Ningun paso posterior lo lee (Issue #112), asi que solo queda desactualizada esa tabla." \
+  "${ETL_FAIL_MARKER}"
       ]]></script>
       <wait>Y</wait>
-      <xloc>2160</xloc><yloc>64</yloc><draw>Y</draw>
-    </entry>
-
-    <entry>
-      <name>RUN CALC_PLANILLA</name>
-      <type>SHELL</type>
-      <filename>/bin/sh</filename>
-      <work_directory>${Internal.Entry.Current.Directory}</work_directory>
-      <arguments><argument>-c</argument></arguments>
-      <insertScript>Y</insertScript>
-      <script><![CDATA[
-/app/services/etl/run_calc_planilla.sh
-      ]]></script>
-      <wait>Y</wait>
-      <xloc>2280</xloc><yloc>64</yloc><draw>Y</draw>
-    </entry>
-
-    <entry>
-      <name>RUN CALC_SUGERENCIAS</name>
-      <type>SHELL</type>
-      <filename>/bin/sh</filename>
-      <work_directory>${Internal.Entry.Current.Directory}</work_directory>
-      <arguments><argument>-c</argument></arguments>
-      <insertScript>Y</insertScript>
-      <script><![CDATA[
-/app/services/etl/run_calc_sugerencias.sh
-      ]]></script>
-      <wait>Y</wait>
-      <xloc>2340</xloc><yloc>64</yloc><draw>Y</draw>
-    </entry>
-
-    <entry>
-      <name>RUN CALC_STOCK_RESUMEN</name>
-      <type>SHELL</type>
-      <filename>/bin/sh</filename>
-      <work_directory>${Internal.Entry.Current.Directory}</work_directory>
-      <arguments><argument>-c</argument></arguments>
-      <insertScript>Y</insertScript>
-      <script><![CDATA[
-/app/services/etl/run_calc_stock_resumen.sh
-      ]]></script>
-      <wait>Y</wait>
-      <xloc>2370</xloc><yloc>64</yloc><draw>Y</draw>
+      <xloc>2220</xloc><yloc>200</yloc><draw>Y</draw>
     </entry>
 
     <entry>
@@ -356,20 +642,93 @@ DELETE FROM ventas_historicas_stage;
     </entry>
 
     <entry>
+      <name>MARK TRUNCATE END FAILED</name>
+      <type>SHELL</type>
+      <filename>/bin/sh</filename>
+      <work_directory>${Internal.Entry.Current.Directory}</work_directory>
+      <arguments><argument>-c</argument></arguments>
+      <insertScript>Y</insertScript>
+      <script><![CDATA[
+/bin/bash /app/services/etl/mark_step_failed.sh \
+  "TRUNCATE VENTAS_STAGE END" \
+  "La limpieza de cortesia del stage al final de la corrida fallo -- de bajo riesgo: la proxima corrida se auto-protege igual con su propio TRUNCATE VENTAS_STAGE inicial." \
+  "${ETL_FAIL_MARKER}"
+      ]]></script>
+      <wait>Y</wait>
+      <xloc>2400</xloc><yloc>200</yloc><draw>Y</draw>
+    </entry>
+
+    <!-- Issue #131: gate final. Revisa si algun paso "marca y sigue" dejo
+         ETL_FAIL_MARKER tocado: si nada fallo, sigue a SUCCESS; si algo
+         fallo, va a FAILURE. Esto es lo que realmente determina el exit
+         code de kitchen.sh (verificado contra el motor real: sin este gate,
+         reconverger a SUCCESS resetea el resultado interno de Kettle y
+         kitchen.sh devuelve 0 aunque el marker este presente). -->
+    <entry>
+      <name>CHECK RUN RESULT</name>
+      <type>SHELL</type>
+      <filename>/bin/sh</filename>
+      <work_directory>${Internal.Entry.Current.Directory}</work_directory>
+      <arguments><argument>-c</argument></arguments>
+      <insertScript>Y</insertScript>
+      <script><![CDATA[
+if [ -f "${ETL_FAIL_MARKER}" ]; then
+  echo "[CHECK_RUN_RESULT] Al menos un paso fallo esta corrida (ver jobs_historial, detalle.resultado='paso_fallido')."
+  rm -f "${ETL_FAIL_MARKER}"
+  exit 1
+fi
+echo "[CHECK_RUN_RESULT] Ningun paso fallo esta corrida."
+exit 0
+      ]]></script>
+      <wait>Y</wait>
+      <xloc>2580</xloc><yloc>64</yloc><draw>Y</draw>
+    </entry>
+
+    <entry>
       <name>SUCCESS</name>
       <type>SPECIAL</type>
       <success>Y</success>
-      <xloc>2640</xloc><yloc>64</yloc><draw>Y</draw>
+      <xloc>2760</xloc><yloc>20</yloc><draw>Y</draw>
+    </entry>
+
+    <!-- Issue #131: NO es un SPECIAL con success=N. Verificado contra
+         kitchen.sh real que ese atributo es un no-op (Kettle solo lo
+         atiende para forzar EXITO en SUCCESS; no existe un equivalente
+         "forzar fallo"). El tipo real que corta la ejecucion y vuelve
+         false el resultado del job (y por lo tanto distinto de 0 el exit
+         code de kitchen.sh) es el job entry nativo ABORT. -->
+    <entry>
+      <name>FAILURE</name>
+      <type>ABORT</type>
+      <message>job_etl_diario: al menos un paso fallo esta corrida (ver jobs_historial, detalle.resultado='paso_fallido' o 'abortado_temprano').</message>
+      <xloc>2760</xloc><yloc>140</yloc><draw>Y</draw>
     </entry>
   </entries>
 
   <hops>
-    <hop><from>START</from><to>TRUNCATE VENTAS_STAGE</to><enabled>Y</enabled><unconditional>Y</unconditional></hop>
-    <hop><from>TRUNCATE VENTAS_STAGE</from><to>RUN EXTRACT ARTICULOS</to><enabled>Y</enabled><unconditional>Y</unconditional></hop>
-    <hop><from>RUN EXTRACT ARTICULOS</from><to>TRUNCATE STOCK_DIARIO_STAGE (opcional)</to><enabled>Y</enabled><unconditional>Y</unconditional></hop>
-    <hop><from>TRUNCATE STOCK_DIARIO_STAGE (opcional)</from><to>RUN EXTRACT STOCKXML</to><enabled>Y</enabled><unconditional>Y</unconditional></hop>
-    <hop><from>RUN EXTRACT STOCKXML</from><to>MERGE STAGING -> STOCK_DIARIO</to><enabled>Y</enabled><unconditional>Y</unconditional></hop>
-    <hop><from>MERGE STAGING -> STOCK_DIARIO</from><to>RUN EXTRACT VENTAS</to><enabled>Y</enabled><unconditional>Y</unconditional></hop>
+    <hop><from>START</from><to>RESET FAIL MARKER</to><enabled>Y</enabled><unconditional>Y</unconditional></hop>
+    <hop><from>RESET FAIL MARKER</from><to>TRUNCATE VENTAS_STAGE</to><enabled>Y</enabled><unconditional>Y</unconditional></hop>
+
+    <hop><from>TRUNCATE VENTAS_STAGE</from><to>RUN EXTRACT ARTICULOS</to><enabled>Y</enabled><evaluation>Y</evaluation><unconditional>N</unconditional></hop>
+    <hop><from>TRUNCATE VENTAS_STAGE</from><to>MARK TRUNCATE VENTAS_STAGE FAILED (ABORT)</to><enabled>Y</enabled><evaluation>N</evaluation><unconditional>N</unconditional></hop>
+    <hop><from>MARK TRUNCATE VENTAS_STAGE FAILED (ABORT)</from><to>FAILURE</to><enabled>Y</enabled><unconditional>Y</unconditional></hop>
+
+    <hop><from>RUN EXTRACT ARTICULOS</from><to>TRUNCATE STOCK_DIARIO_STAGE (opcional)</to><enabled>Y</enabled><evaluation>Y</evaluation><unconditional>N</unconditional></hop>
+    <hop><from>RUN EXTRACT ARTICULOS</from><to>MARK ARTICULOS FAILED</to><enabled>Y</enabled><evaluation>N</evaluation><unconditional>N</unconditional></hop>
+    <hop><from>MARK ARTICULOS FAILED</from><to>TRUNCATE STOCK_DIARIO_STAGE (opcional)</to><enabled>Y</enabled><unconditional>Y</unconditional></hop>
+
+    <hop><from>TRUNCATE STOCK_DIARIO_STAGE (opcional)</from><to>RUN EXTRACT STOCKXML</to><enabled>Y</enabled><evaluation>Y</evaluation><unconditional>N</unconditional></hop>
+    <hop><from>TRUNCATE STOCK_DIARIO_STAGE (opcional)</from><to>MARK STOCK STAGE TRUNCATE FAILED</to><enabled>Y</enabled><evaluation>N</evaluation><unconditional>N</unconditional></hop>
+    <hop><from>MARK STOCK STAGE TRUNCATE FAILED</from><to>RUN EXTRACT STOCKXML</to><enabled>Y</enabled><unconditional>Y</unconditional></hop>
+
+    <hop><from>RUN EXTRACT STOCKXML</from><to>MERGE STAGING -> STOCK_DIARIO</to><enabled>Y</enabled><evaluation>Y</evaluation><unconditional>N</unconditional></hop>
+    <hop><from>RUN EXTRACT STOCKXML</from><to>MARK STOCKXML FAILED</to><enabled>Y</enabled><evaluation>N</evaluation><unconditional>N</unconditional></hop>
+    <hop><from>MARK STOCKXML FAILED</from><to>MERGE STAGING -> STOCK_DIARIO</to><enabled>Y</enabled><unconditional>Y</unconditional></hop>
+
+    <hop><from>MERGE STAGING -> STOCK_DIARIO</from><to>RUN EXTRACT VENTAS</to><enabled>Y</enabled><evaluation>Y</evaluation><unconditional>N</unconditional></hop>
+    <hop><from>MERGE STAGING -> STOCK_DIARIO</from><to>MARK STOCK MERGE FAILED</to><enabled>Y</enabled><evaluation>N</evaluation><unconditional>N</unconditional></hop>
+    <hop><from>MARK STOCK MERGE FAILED</from><to>RUN EXTRACT VENTAS</to><enabled>Y</enabled><unconditional>Y</unconditional></hop>
+
     <!-- Issue #124: antes este hop era unconditional, el MERGE corria aunque
          la extracción hubiera fallado. Ahora solo sigue a MERGE si RUN EXTRACT
          VENTAS salió con éxito (exit 0); si falló, va a MARK VENTAS EXTRACT
@@ -379,21 +738,38 @@ DELETE FROM ventas_historicas_stage;
          que movio ese paso al final de la cadena). -->
     <hop><from>RUN EXTRACT VENTAS</from><to>MERGE STAGING -> VENTAS (con snapshot)</to><enabled>Y</enabled><evaluation>Y</evaluation><unconditional>N</unconditional></hop>
     <hop><from>RUN EXTRACT VENTAS</from><to>MARK VENTAS EXTRACT FAILED</to><enabled>Y</enabled><evaluation>N</evaluation><unconditional>N</unconditional></hop>
-    <!-- Issue #112: CALC_UPSERT_VENTAS_MENSUALES se movio del medio de la cadena
-         al final (despues de CALC_STOCK_RESUMEN). Estaba justo delante de todo lo
-         que ve el cliente y tardaba mas de 60 min, asi que calc_planilla y
-         calc_sugerencias no llegaban a correr y la planilla quedaba congelada
-         (#111). Ningun paso posterior lo necesita: ni predict.py ni los tres
-         run_calc_*.py leen ventas_mensuales (verificado). Corriendo ultimo, si
-         tarda o falla, los datos del cliente ya se actualizaron. -->
-    <hop><from>MERGE STAGING -> VENTAS (con snapshot)</from><to>RUN PREDICT.PY</to><enabled>Y</enabled><unconditional>Y</unconditional></hop>
     <hop><from>MARK VENTAS EXTRACT FAILED</from><to>RUN PREDICT.PY</to><enabled>Y</enabled><unconditional>Y</unconditional></hop>
-    <hop><from>RUN PREDICT.PY</from><to>RUN CALC_PLANILLA</to><enabled>Y</enabled><unconditional>Y</unconditional></hop>
-    <hop><from>RUN CALC_PLANILLA</from><to>RUN CALC_SUGERENCIAS</to><enabled>Y</enabled><unconditional>Y</unconditional></hop>
-    <hop><from>RUN CALC_SUGERENCIAS</from><to>RUN CALC_STOCK_RESUMEN</to><enabled>Y</enabled><unconditional>Y</unconditional></hop>
-    <hop><from>RUN CALC_STOCK_RESUMEN</from><to>CALC_UPSERT_VENTAS_MENSUALES</to><enabled>Y</enabled><unconditional>Y</unconditional></hop>
-    <hop><from>CALC_UPSERT_VENTAS_MENSUALES</from><to>TRUNCATE VENTAS_STAGE END</to><enabled>Y</enabled><unconditional>Y</unconditional></hop>
-    <hop><from>TRUNCATE VENTAS_STAGE END</from><to>SUCCESS</to><enabled>Y</enabled><unconditional>Y</unconditional></hop>
+
+    <hop><from>MERGE STAGING -> VENTAS (con snapshot)</from><to>RUN PREDICT.PY</to><enabled>Y</enabled><evaluation>Y</evaluation><unconditional>N</unconditional></hop>
+    <hop><from>MERGE STAGING -> VENTAS (con snapshot)</from><to>MARK VENTAS MERGE FAILED</to><enabled>Y</enabled><evaluation>N</evaluation><unconditional>N</unconditional></hop>
+    <hop><from>MARK VENTAS MERGE FAILED</from><to>RUN PREDICT.PY</to><enabled>Y</enabled><unconditional>Y</unconditional></hop>
+
+    <hop><from>RUN PREDICT.PY</from><to>RUN CALC_PLANILLA</to><enabled>Y</enabled><evaluation>Y</evaluation><unconditional>N</unconditional></hop>
+    <hop><from>RUN PREDICT.PY</from><to>MARK PREDICT FAILED</to><enabled>Y</enabled><evaluation>N</evaluation><unconditional>N</unconditional></hop>
+    <hop><from>MARK PREDICT FAILED</from><to>RUN CALC_PLANILLA</to><enabled>Y</enabled><unconditional>Y</unconditional></hop>
+
+    <hop><from>RUN CALC_PLANILLA</from><to>RUN CALC_SUGERENCIAS</to><enabled>Y</enabled><evaluation>Y</evaluation><unconditional>N</unconditional></hop>
+    <hop><from>RUN CALC_PLANILLA</from><to>MARK CALC_PLANILLA FAILED</to><enabled>Y</enabled><evaluation>N</evaluation><unconditional>N</unconditional></hop>
+    <hop><from>MARK CALC_PLANILLA FAILED</from><to>RUN CALC_SUGERENCIAS</to><enabled>Y</enabled><unconditional>Y</unconditional></hop>
+
+    <hop><from>RUN CALC_SUGERENCIAS</from><to>RUN CALC_STOCK_RESUMEN</to><enabled>Y</enabled><evaluation>Y</evaluation><unconditional>N</unconditional></hop>
+    <hop><from>RUN CALC_SUGERENCIAS</from><to>MARK CALC_SUGERENCIAS FAILED</to><enabled>Y</enabled><evaluation>N</evaluation><unconditional>N</unconditional></hop>
+    <hop><from>MARK CALC_SUGERENCIAS FAILED</from><to>RUN CALC_STOCK_RESUMEN</to><enabled>Y</enabled><unconditional>Y</unconditional></hop>
+
+    <hop><from>RUN CALC_STOCK_RESUMEN</from><to>CALC_UPSERT_VENTAS_MENSUALES</to><enabled>Y</enabled><evaluation>Y</evaluation><unconditional>N</unconditional></hop>
+    <hop><from>RUN CALC_STOCK_RESUMEN</from><to>MARK CALC_STOCK_RESUMEN FAILED</to><enabled>Y</enabled><evaluation>N</evaluation><unconditional>N</unconditional></hop>
+    <hop><from>MARK CALC_STOCK_RESUMEN FAILED</from><to>CALC_UPSERT_VENTAS_MENSUALES</to><enabled>Y</enabled><unconditional>Y</unconditional></hop>
+
+    <hop><from>CALC_UPSERT_VENTAS_MENSUALES</from><to>TRUNCATE VENTAS_STAGE END</to><enabled>Y</enabled><evaluation>Y</evaluation><unconditional>N</unconditional></hop>
+    <hop><from>CALC_UPSERT_VENTAS_MENSUALES</from><to>MARK VENTAS_MENSUALES FAILED</to><enabled>Y</enabled><evaluation>N</evaluation><unconditional>N</unconditional></hop>
+    <hop><from>MARK VENTAS_MENSUALES FAILED</from><to>TRUNCATE VENTAS_STAGE END</to><enabled>Y</enabled><unconditional>Y</unconditional></hop>
+
+    <hop><from>TRUNCATE VENTAS_STAGE END</from><to>CHECK RUN RESULT</to><enabled>Y</enabled><evaluation>Y</evaluation><unconditional>N</unconditional></hop>
+    <hop><from>TRUNCATE VENTAS_STAGE END</from><to>MARK TRUNCATE END FAILED</to><enabled>Y</enabled><evaluation>N</evaluation><unconditional>N</unconditional></hop>
+    <hop><from>MARK TRUNCATE END FAILED</from><to>CHECK RUN RESULT</to><enabled>Y</enabled><unconditional>Y</unconditional></hop>
+
+    <hop><from>CHECK RUN RESULT</from><to>SUCCESS</to><enabled>Y</enabled><evaluation>Y</evaluation><unconditional>N</unconditional></hop>
+    <hop><from>CHECK RUN RESULT</from><to>FAILURE</to><enabled>Y</enabled><evaluation>N</evaluation><unconditional>N</unconditional></hop>
   </hops>
 
   <job_parameters>

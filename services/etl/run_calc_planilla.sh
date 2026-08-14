@@ -1,7 +1,13 @@
 #!/usr/bin/env bash
-# run_calc_planilla.sh - Wrapper no-bloqueante para run_calc_planilla.py
+# run_calc_planilla.sh - Wrapper para run_calc_planilla.py.
 # Llamado desde job_etl_diario.kjb después de RUN PREDICT.PY.
-# Siempre termina con exit 0: un fallo aquí no aborta el job maestro.
+#
+# Issue #131: antes este wrapper terminaba SIEMPRE con exit 0, enmascarando
+# el codigo de salida real del script -- Pentaho (y cualquiera que lo
+# invocara) no tenia forma de saber que el calculo habia fallado. Ahora
+# propaga el exit code real; que un fallo aca no aborte el resto de la
+# cadena es una decision que toma el hop CONDICIONAL del .kjb (evaluation
+# Y/N -> MARK CALC_PLANILLA FAILED, ver comentario ahi), no este script.
 set -uo pipefail
 
 SELF_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -20,10 +26,9 @@ python3 "${SCRIPT}" 2>&1 | tee "${LOG}"
 rc=${PIPESTATUS[0]}
 
 if [[ ${rc} -ne 0 ]]; then
-  echo "[CALC_PLANILLA][WARN] El script terminó con código ${rc}. Ver ${LOG}." >&2
-  echo "[CALC_PLANILLA][WARN] El fallo de planilla no aborta el ETL — continuando."
+  echo "[CALC_PLANILLA][ERROR] El script terminó con código ${rc}. Ver ${LOG}." >&2
 else
   echo "[CALC_PLANILLA] OK"
 fi
 
-exit 0
+exit "${rc}"

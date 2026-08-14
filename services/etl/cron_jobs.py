@@ -19,17 +19,30 @@ Subcomandos:
       detalle.subtipo='cron_diario') e imprime el job_id.
 
   end <job_id> <exit_code> <duracion_seg>
-      Cierra la fila: 'exitoso' si exit_code == 0, 'fallido' si no.
+      Cierra la fila: 'exitoso' si exit_code == 0, 'fallido' si no. El
+      detalle se combina con JSON_MERGE_PATCH (Issue #132) en vez de
+      reemplazarse entero -- para que lo que haya escrito `stale` ANTES de
+      esta llamada (atraso "al entrar a la noche") sobreviva.
 
   skip <motivo>
-      Registra una noche salteada (ej. lock de backfill) como fila
-      terminal con detalle.resultado='omitido'. No es una corrida real:
-      queda distinguible de un 'exitoso' de verdad.
+      Issue #132: registra una noche salteada (ej. lock de backfill) como
+      fila terminal, estado='omitido' (ver infra/sql/22-*, agrega el valor
+      al ENUM). Antes se guardaba como 'exitoso' -- indistinguible de una
+      corrida real y buena (29-31/07/2026: tres noches salteadas, las tres
+      contadas como buenas). Ni 'exitoso' ni 'fallido' describen un skip
+      intencional -- no corrio nada que pudiera fallar, pero tampoco es una
+      corrida real.
 
-  stale [umbral_dias]
+  stale <job_id|-> [umbral_dias]
       Imprime cuantos dias de atraso tiene el dato de ventas
       (CURDATE() - MAX(fecha) de ventas_historicas) y sale con codigo 1
-      si supera el umbral (default 2). Read-only.
+      si supera el umbral (default 2). Issue #132: si <job_id> no es "-",
+      tambien guarda el resultado bajo detalle.atraso de esa fila (JSON_SET,
+      mismo patron que `coherencia`) -- antes esto solo se imprimia a
+      stdout, invisible fuera del log efimero de Docker, y no corria en la
+      rama de skip. Se llama ANTES de `start`->kitchen a proposito (mide el
+      atraso "al entrar a la noche"); sobrevive al `end` posterior porque
+      `end` ahora hace merge, no reemplazo.
 
   coherencia <job_id|-> [fecha_desde [fecha_hasta]]
       Issue #115. Compara, para cada sku-dia con venta en el rango, la venta
@@ -43,6 +56,33 @@ Subcomandos:
       dia de ayer (lo que el cron acaba de cargar). No bloqueante: un
       chequeo caido (DB abajo, consulta rota) se loguea y devuelve !=0, pero
       nunca levanta una excepcion que corte la corrida.
+
+  abort <motivo>
+      Issue #132: fallo ANTES de poder registrar `start` (ej. run_ofelia.sh
+      aborta por un archivo faltante, como paso el 2026-08-11 con
+      lock_backfill.sh) -- sin esto la unica huella era el log efimero de
+      Docker, que se pierde al recrear el contenedor. Fila terminal
+      'fallido' propia, sin job_id previo que cerrar.
+
+  mark_step_failed <paso> <motivo>
+      Issue #131: auditoria de un paso de job_etl_diario.kjb que fallo en
+      una rama "marca y sigue" (no aborta la cadena de Kettle). Fila
+      terminal 'fallido' propia -- lo que de verdad vuelve 'fallida' la fila
+      OFICIAL de la corrida (la de `start`/`end`) es que el propio .kjb,
+      al final, chequea el marker que este mismo llamado deja (ver
+      mark_step_failed.sh) y termina en la rama de fallo en vez de SUCCESS,
+      lo que hace que kitchen.sh salga con codigo != 0.
+
+  last_run [umbral_horas]
+      Issue #132: heartbeat del propio cron -- distinto de `stale`, que mide
+      la frescura del DATO. Esto mide si el cron SIQUIERA INTENTO correr:
+      imprime hace cuanto fue la ultima fila de tipo_job='etl' /
+      subtipo='cron_diario' (de CUALQUIER estado -- un intento fallido
+      todavia cuenta) y sale con codigo 1 si pasa el umbral (default 30h).
+      Pensado para invocarse a mano o desde un watchdog externo -- si el
+      scheduler (Ofelia) esta caido, run_ofelia.sh nunca corre y nada
+      *adentro* del propio bookkeeping puede detectarlo (paso el
+      2026-08-01: sin corrida no hay error, y sin error no hay señal).
 """
 
 import datetime as dt
@@ -55,6 +95,10 @@ import pymysql
 SUBTIPO = "cron_diario"
 UMBRAL_ATRASO_DIAS = 2  # el cron extrae "ayer": 1 dia de atraso es lo normal
 TOLERANCIA_RATIO = 0.1  # ratio venta/caida fuera de [0.9, 1.1] cuenta como anomalo
+# Issue #132: 30h (no 24h) le da margen a una corrida que arranca tarde o se
+# alarga sin que eso solo ya dispare el heartbeat -- el umbral es para
+# detectar que el scheduler no corrio EN ABSOLUTO, no para medir puntualidad.
+UMBRAL_LAST_RUN_HORAS = 30
 
 
 def db_connect():
@@ -124,8 +168,7 @@ def cmd_start() -> int:
 
 def cmd_end(job_id: str, exit_code: str, duracion_seg: str) -> int:
     codigo = int(exit_code)
-    detalle = {
-        "subtipo": SUBTIPO,
+    detalle_nuevo = {
         "exit_code": codigo,
         "duracion_seg": float(duracion_seg),
         "resultado": "ok" if codigo == 0 else "error",
@@ -137,15 +180,23 @@ def cmd_end(job_id: str, exit_code: str, duracion_seg: str) -> int:
     # contenedor). Se marca igual para que la fila sea legible sin tener que
     # saber de memoria que "137" significa SIGKILL.
     if codigo == 137:
-        detalle["posible_oom"] = True
+        detalle_nuevo["posible_oom"] = True
     conn = db_connect()
     try:
         with conn.cursor() as cur:
+            # Issue #132: JSON_MERGE_PATCH en vez de un simple %s -- antes esta
+            # UPDATE reemplazaba detalle entero, asi que cualquier cosa escrita
+            # ANTES de `end` (ej. detalle.atraso de `stale`, que corre a
+            # proposito antes de arrancar kitchen) se perdia sin dejar rastro.
+            # subtipo tambien sobrevive porque ya esta en el detalle que dejo
+            # `start` y el patch no lo toca.
             cur.execute(
-                "UPDATE jobs_historial SET estado = %s, fecha_fin = NOW(6), detalle = %s "
-                "WHERE id = %s",
+                "UPDATE jobs_historial "
+                "   SET estado = %s, fecha_fin = NOW(6), "
+                "       detalle = JSON_MERGE_PATCH(COALESCE(detalle, JSON_OBJECT()), CAST(%s AS JSON)) "
+                " WHERE id = %s",
                 ("exitoso" if codigo == 0 else "fallido",
-                 json.dumps(detalle, ensure_ascii=False), job_id),
+                 json.dumps(detalle_nuevo, ensure_ascii=False), job_id),
             )
         conn.commit()
     finally:
@@ -154,16 +205,15 @@ def cmd_end(job_id: str, exit_code: str, duracion_seg: str) -> int:
 
 
 def cmd_skip(motivo: str) -> int:
-    # 'exitoso' porque saltear es el comportamiento correcto y esperado (no es
-    # una falla); detalle.resultado='omitido' lo distingue de una corrida real.
-    # No se inventa un estado 'omitido': jobs_historial.estado es un ENUM
-    # cerrado ('en_cola','ejecutando','exitoso','fallido') y agregarle un valor
-    # exigiria migracion + aplicarla a mano en produccion (los volumenes ya
-    # creados no re-ejecutan docker-entrypoint-initdb.d).
+    # Issue #132: estado='omitido' (no 'exitoso') -- antes un skip por lock de
+    # backfill quedaba indistinguible de una corrida real y buena (29-31/07
+    # /2026: tres noches salteadas, las tres contadas como buenas). Requiere
+    # el valor en el ENUM (infra/sql/22-jobs-historial-estado-omitido.sql,
+    # mismo patron defensivo que 18-jobs-historial-eval-elegibilidad.sql).
     conn = db_connect()
     try:
         print(_insert(
-            conn, "exitoso",
+            conn, "omitido",
             {"subtipo": SUBTIPO, "resultado": "omitido", "motivo": motivo},
             terminal=True,
         ))
@@ -172,26 +222,63 @@ def cmd_skip(motivo: str) -> int:
     return 0
 
 
-def cmd_stale(umbral_dias: str = str(UMBRAL_ATRASO_DIAS)) -> int:
+def cmd_stale(job_id: str = "-", umbral_dias: str = str(UMBRAL_ATRASO_DIAS)) -> int:
     """
     Atraso medido sobre el DATO, no sobre el bookkeeping: una noche salteada
     o un job que muere antes del merge dejan el dato viejo igual, y eso es lo
     que ve el cliente en la planilla.
+
+    Issue #132: si <job_id> no es "-", el resultado tambien queda en
+    detalle.atraso de esa fila (JSON_SET, no pisa nada -- mismo patron que
+    `coherencia`). Antes esto solo se imprimia a stdout: invisible fuera del
+    log efimero de Docker, y ademas no corria en la rama de skip. Toda la
+    funcion es best-effort, igual que `coherencia` (conexion incluida,
+    hallazgo de /code-review -- antes solo el UPDATE de guardado estaba
+    protegido y una caida de MySQL en el SELECT principal tiraba un
+    traceback sin manejar en vez del mensaje limpio que el docstring ya
+    prometia): un fallo se loguea pero nunca cambia el codigo de salida mas
+    alla del 1 que ya usa para "hay atraso".
     """
     umbral = int(umbral_dias)
-    conn = db_connect()
     try:
-        with conn.cursor() as cur:
-            cur.execute("SELECT DATEDIFF(CURDATE(), MAX(fecha)) FROM ventas_historicas")
-            atraso = cur.fetchone()[0]
+        conn = db_connect()
+    except Exception as e:
+        print(f"[CRON][STALE] no se pudo conectar a MySQL: {e}", file=sys.stderr)
+        return 1
+
+    try:
+        try:
+            with conn.cursor() as cur:
+                cur.execute("SELECT DATEDIFF(CURDATE(), MAX(fecha)) FROM ventas_historicas")
+                atraso = cur.fetchone()[0]
+        except Exception as e:
+            print(f"[CRON][STALE] chequeo fallo (no bloquea el ETL): {e}", file=sys.stderr)
+            return 1
+
+        if atraso is None:
+            print("[CRON] Sin datos en ventas_historicas -- no se puede medir atraso.")
+            return 1
+
+        atraso = int(atraso)
+
+        if job_id and job_id != "-":
+            resultado = {"atraso_dias": atraso, "umbral_dias": umbral}
+            try:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        "UPDATE jobs_historial "
+                        "   SET detalle = JSON_SET(COALESCE(detalle, JSON_OBJECT()), "
+                        "                          '$.atraso', CAST(%s AS JSON)) "
+                        " WHERE id = %s",
+                        (json.dumps(resultado, ensure_ascii=False), job_id),
+                    )
+                conn.commit()
+            except Exception as e:
+                print(f"[CRON][STALE] no se pudo guardar en jobs_historial (job {job_id}): {e}",
+                      file=sys.stderr)
     finally:
         conn.close()
 
-    if atraso is None:
-        print("[CRON] Sin datos en ventas_historicas -- no se puede medir atraso.")
-        return 1
-
-    atraso = int(atraso)
     if atraso > umbral:
         print(f"[CRON][ATRASO] ventas_historicas tiene {atraso} dias de atraso "
               f"(umbral {umbral}). La planilla que ve el cliente esta desactualizada.")
@@ -307,9 +394,100 @@ def cmd_coherencia(job_id: str, fecha_desde: str = None, fecha_hasta: str = None
     return 0
 
 
+def cmd_abort(motivo: str) -> int:
+    """
+    Issue #132: fallo de run_ofelia.sh ANTES de poder llamar a `start` (ej.
+    falta un archivo requerido, como paso el 2026-08-11 con
+    lock_backfill.sh). Sin esto la unica huella era `docker logs` de ofelia,
+    efimero -- se pierde al recrear el contenedor. No hay job_id previo que
+    cerrar: es su propia fila terminal, igual que `skip`.
+    """
+    conn = db_connect()
+    try:
+        print(_insert(
+            conn, "fallido",
+            {"subtipo": SUBTIPO, "resultado": "abortado_temprano", "motivo": motivo},
+            terminal=True,
+        ))
+    finally:
+        conn.close()
+    return 0
+
+
+def cmd_mark_step_failed(paso: str, motivo: str) -> int:
+    """
+    Issue #131: auditoria de un paso de job_etl_diario.kjb que fallo en una
+    rama "marca y sigue" (no aborta la cadena de Kettle -- ver
+    mark_step_failed.sh, invocado desde el .kjb). Fila terminal 'fallido'
+    propia, desconectada del job_id de la corrida oficial (esa la abren/
+    cierran `start`/`end`, afuera de Kettle). Lo que de verdad vuelve
+    'fallida' la fila oficial es que el propio .kjb, al final de la cadena,
+    revisa el marker que este mismo llamado deja y termina en la rama de
+    fallo en vez de SUCCESS -- eso es lo que cambia el exit code de
+    kitchen.sh, que es lo unico que run_ofelia.sh de verdad mira.
+    """
+    conn = db_connect()
+    try:
+        print(_insert(
+            conn, "fallido",
+            {"subtipo": SUBTIPO, "resultado": "paso_fallido", "paso": paso, "motivo": motivo},
+            terminal=True,
+        ))
+    finally:
+        conn.close()
+    return 0
+
+
+def cmd_last_run(umbral_horas: str = str(UMBRAL_LAST_RUN_HORAS)) -> int:
+    """
+    Issue #132: heartbeat del propio cron, no del dato. Cuenta cualquier fila
+    de tipo_job='etl' + subtipo='cron_diario' sin importar su estado -- un
+    intento fallido (o incluso 'abortado_temprano') todavia demuestra que
+    run_ofelia.sh corrio. Si el SCHEDULER (Ofelia) esta caido, en cambio,
+    run_ofelia.sh nunca se ejecuta y no aparece ninguna fila nueva -- ni
+    buena ni mala (el caso del 2026-08-01). Pensado para invocarse a mano o
+    desde un watchdog externo al propio cron (por definicion, nada que viva
+    *adentro* del cron puede detectar que el cron no corrio).
+    """
+    umbral = float(umbral_horas)
+    conn = db_connect()
+    try:
+        with conn.cursor() as cur:
+            # fecha_inicio es TIMESTAMP: MySQL lo devuelve convertido al
+            # time_zone de LA SESION, no en UTC -- el contenedor de mysql
+            # corre en America/Montevideo (UTC-3, ver docker-compose.yml),
+            # asi que sin este SET la comparacion contra dt.utcnow() de mas
+            # abajo quedaria sesgada ~3h (mismo motivo por el que
+            # run_calc_planilla.py/run_calc_sugerencias.py/etc. hacen este
+            # mismo SET antes de comparar fechas de la DB contra Python).
+            cur.execute("SET time_zone = '+00:00'")
+            cur.execute(
+                "SELECT MAX(fecha_inicio) FROM jobs_historial "
+                "WHERE tipo_job = 'etl' AND detalle->>'$.subtipo' = %s",
+                (SUBTIPO,),
+            )
+            ultimo = cur.fetchone()[0]
+    finally:
+        conn.close()
+
+    if ultimo is None:
+        print("[CRON][LAST_RUN] jobs_historial no tiene ninguna corrida del cron registrada todavia.")
+        return 1
+
+    horas = (dt.datetime.utcnow() - ultimo).total_seconds() / 3600.0
+    if horas > umbral:
+        print(f"[CRON][LAST_RUN] la ultima corrida registrada fue hace {horas:.1f}h "
+              f"(umbral {umbral}h) -- el cron podria no estar corriendo (¿scheduler caido?).")
+        return 1
+
+    print(f"[CRON][LAST_RUN] ultima corrida hace {horas:.1f}h (umbral {umbral}h).")
+    return 0
+
+
 def main() -> int:
     if len(sys.argv) < 2:
-        print("[ERROR] Uso: cron_jobs.py start|end|skip|stale|coherencia ...", file=sys.stderr)
+        print("[ERROR] Uso: cron_jobs.py start|end|skip|stale|coherencia|abort|"
+              "mark_step_failed|last_run ...", file=sys.stderr)
         return 2
     sub, args = sys.argv[1], sys.argv[2:]
     if sub == "start" and not args:
@@ -318,10 +496,16 @@ def main() -> int:
         return cmd_end(*args)
     if sub == "skip" and len(args) == 1:
         return cmd_skip(*args)
-    if sub == "stale" and len(args) <= 1:
+    if sub == "stale" and len(args) <= 2:
         return cmd_stale(*args)
     if sub == "coherencia" and 1 <= len(args) <= 3:
         return cmd_coherencia(*args)
+    if sub == "abort" and len(args) == 1:
+        return cmd_abort(*args)
+    if sub == "mark_step_failed" and len(args) == 2:
+        return cmd_mark_step_failed(*args)
+    if sub == "last_run" and len(args) <= 1:
+        return cmd_last_run(*args)
     print(f"[ERROR] Subcomando/args invalidos: {sys.argv[1:]}", file=sys.stderr)
     return 2
 

@@ -155,20 +155,33 @@ def test_skip_deja_registro_terminal_no_ejecutando(conn, capsys):
     job_id = int(capsys.readouterr().out.strip())
 
     fila = _fila(conn, job_id)
-    assert fila["estado"] in ("exitoso", "fallido")
+    assert fila["estado"] == "omitido"
     assert fila["estado"] != "ejecutando"
     assert fila["fecha_fin"] is not None
     assert fila["detalle"]["resultado"] == "omitido"
     assert "backfill" in fila["detalle"]["motivo"]
 
 
+def test_skip_ya_no_se_cuenta_como_exitoso(conn, capsys):
+    """
+    Issue #132: antes un skip por lock de backfill quedaba con
+    estado='exitoso' -- indistinguible de una corrida real y buena
+    (29-31/07/2026: tres noches salteadas, las tres contadas como buenas).
+    """
+    cron_jobs.cmd_skip("backfill en curso")
+    job_id = int(capsys.readouterr().out.strip())
+
+    assert _fila(conn, job_id)["estado"] != "exitoso"
+
+
 def test_estado_usa_solo_valores_del_enum(conn, capsys):
     """
-    jobs_historial.estado es ENUM('en_cola','ejecutando','exitoso','fallido').
-    Un valor fuera del ENUM lo rechaza MySQL en runtime (o lo trunca a ''),
-    asi que ningun camino puede inventar estados nuevos sin migracion.
+    jobs_historial.estado es ENUM('en_cola','ejecutando','exitoso','fallido',
+    'omitido'). Un valor fuera del ENUM lo rechaza MySQL en runtime (o lo
+    trunca a ''), asi que ningun camino puede inventar estados nuevos sin
+    migracion (ver infra/sql/22-jobs-historial-estado-omitido.sql).
     """
-    validos = {"en_cola", "ejecutando", "exitoso", "fallido"}
+    validos = {"en_cola", "ejecutando", "exitoso", "fallido", "omitido"}
 
     cron_jobs.cmd_start()
     jid_run = int(capsys.readouterr().out.strip())
@@ -226,7 +239,7 @@ def test_stale_cuenta_dias_desde_el_ultimo_dato_de_ventas(conn, capsys):
     ventas_historicas), no sobre el bookkeeping del propio job: una noche
     salteada o un job que muere antes del merge dejan el dato viejo igual.
     """
-    rc = cron_jobs.cmd_stale("2")
+    rc = cron_jobs.cmd_stale("-", "2")
     salida = capsys.readouterr().out.strip()
 
     with conn.cursor() as cur:
@@ -238,18 +251,71 @@ def test_stale_cuenta_dias_desde_el_ultimo_dato_de_ventas(conn, capsys):
     assert rc == (1 if atraso_real > 2 else 0)
 
 
-def test_stale_no_escribe_nada(conn):
-    """El chequeo de atraso es read-only: no puede ensuciar jobs_historial."""
+def test_stale_con_job_id_guion_no_escribe_nada(conn):
+    """job_id='-' es el modo sin persistencia (uso manual/legacy) -- read-only."""
     with conn.cursor() as cur:
         cur.execute("SELECT COUNT(*) FROM jobs_historial")
         antes = cur.fetchone()[0]
 
-    cron_jobs.cmd_stale("2")
+    cron_jobs.cmd_stale("-", "2")
 
     conn.commit()  # refresca la vista de la transaccion
     with conn.cursor() as cur:
         cur.execute("SELECT COUNT(*) FROM jobs_historial")
         assert cur.fetchone()[0] == antes
+
+
+def test_stale_conexion_caida_no_propaga_excepcion(monkeypatch, capsys):
+    """
+    Hallazgo de /code-review: antes solo el UPDATE de guardado estaba
+    protegido -- una caida de MySQL en la conexion o el SELECT principal
+    tiraba un traceback sin manejar, pese a que el docstring ya prometia
+    el mismo comportamiento no-bloqueante que `coherencia`.
+    """
+    def _explota_conexion():
+        raise Exception("Can't connect to MySQL server")
+
+    monkeypatch.setattr(cron_jobs, "db_connect", _explota_conexion)
+
+    rc = cron_jobs.cmd_stale("-", "2")
+
+    assert rc == 1
+    assert "no se pudo conectar" in capsys.readouterr().err
+
+
+def test_stale_con_job_id_guarda_atraso_en_detalle(conn, capsys):
+    """
+    Issue #132: antes el resultado de `stale` solo se imprimia a stdout,
+    invisible fuera del log efimero de Docker, y no quedaba en
+    jobs_historial. Con un job_id valido, el resultado queda en
+    detalle.atraso (JSON_SET, mismo patron que `coherencia`).
+    """
+    cron_jobs.cmd_start()
+    job_id = int(capsys.readouterr().out.strip())
+
+    cron_jobs.cmd_stale(str(job_id), "2")
+
+    fila = _fila(conn, job_id)
+    assert "atraso_dias" in fila["detalle"]["atraso"]
+    assert fila["detalle"]["atraso"]["umbral_dias"] == 2
+
+
+def test_stale_sobrevive_al_end_posterior(conn, capsys):
+    """
+    Issue #132: `stale` corre ANTES de `end` a proposito (mide el atraso "al
+    entrar a la noche"). Antes, `end` reemplazaba detalle entero y esto se
+    hubiera perdido -- ahora `end` hace JSON_MERGE_PATCH, asi que sobrevive.
+    """
+    cron_jobs.cmd_start()
+    job_id = int(capsys.readouterr().out.strip())
+
+    cron_jobs.cmd_stale(str(job_id), "2")
+    cron_jobs.cmd_end(str(job_id), "0", "12.0")
+
+    fila = _fila(conn, job_id)
+    assert "atraso" in fila["detalle"]
+    assert fila["detalle"]["exit_code"] == 0
+    assert fila["detalle"]["subtipo"] == "cron_diario"
 
 
 # ---------------------------------------------------------------------------
@@ -449,3 +515,128 @@ def test_cmd_coherencia_conexion_caida_no_propaga_excepcion(monkeypatch, capsys)
 
     assert rc == 1
     assert "no se pudo conectar" in capsys.readouterr().err
+
+
+# ---------------------------------------------------------------------------
+# end (Issue #132) -- merge del detalle, no reemplazo.
+# ---------------------------------------------------------------------------
+
+def test_end_hace_merge_no_pisa_lo_que_ya_habia_en_detalle(conn, capsys):
+    """
+    Antes `end` reemplazaba detalle entero -- cualquier cosa escrita antes
+    (ej. por `stale`) se perdia sin dejar rastro. Ahora usa JSON_MERGE_PATCH.
+    """
+    cron_jobs.cmd_start()
+    job_id = int(capsys.readouterr().out.strip())
+
+    with conn.cursor() as cur:
+        cur.execute(
+            "UPDATE jobs_historial SET detalle = JSON_SET(detalle, '$.marca_previa', 'seguia-aca') "
+            "WHERE id = %s", (job_id,),
+        )
+    conn.commit()
+
+    cron_jobs.cmd_end(str(job_id), "0", "5.0")
+
+    fila = _fila(conn, job_id)
+    assert fila["detalle"]["marca_previa"] == "seguia-aca"
+    assert fila["detalle"]["exit_code"] == 0
+
+
+# ---------------------------------------------------------------------------
+# abort (Issue #132) -- fallo previo a `start`.
+# ---------------------------------------------------------------------------
+
+def test_abort_inserta_fila_terminal_fallido_con_motivo(conn, capsys):
+    """
+    El caso del 2026-08-11: run_ofelia.sh aborto antes de poder llamar a
+    `start` (lock_backfill.sh faltante) y no quedo ninguna fila en
+    jobs_historial -- la unica huella fue el log efimero de Docker.
+    """
+    rc = cron_jobs.cmd_abort("no encuentro /app/services/etl/lock_backfill.sh")
+    assert rc == 0
+    job_id = int(capsys.readouterr().out.strip())
+
+    fila = _fila(conn, job_id)
+    assert fila["tipo_job"] == "etl"
+    assert fila["estado"] == "fallido"
+    assert fila["fecha_fin"] is not None
+    assert fila["detalle"]["resultado"] == "abortado_temprano"
+    assert "lock_backfill.sh" in fila["detalle"]["motivo"]
+    assert fila["detalle"]["subtipo"] == "cron_diario"
+
+
+# ---------------------------------------------------------------------------
+# mark_step_failed (Issue #131) -- auditoria de un paso "marca y sigue".
+# ---------------------------------------------------------------------------
+
+def test_mark_step_failed_inserta_fila_terminal_fallido_con_paso_y_motivo(conn, capsys):
+    rc = cron_jobs.cmd_mark_step_failed("RUN CALC_PLANILLA", "codigo de salida 1")
+    assert rc == 0
+    job_id = int(capsys.readouterr().out.strip())
+
+    fila = _fila(conn, job_id)
+    assert fila["tipo_job"] == "etl"
+    assert fila["estado"] == "fallido"
+    assert fila["fecha_fin"] is not None
+    assert fila["detalle"]["resultado"] == "paso_fallido"
+    assert fila["detalle"]["paso"] == "RUN CALC_PLANILLA"
+    assert fila["detalle"]["motivo"] == "codigo de salida 1"
+
+
+# ---------------------------------------------------------------------------
+# last_run (Issue #132) -- heartbeat del propio cron, no del dato.
+# ---------------------------------------------------------------------------
+
+def test_last_run_sin_corridas_previas_da_fallo(conn, monkeypatch):
+    """Tabla vacia (de subtipo cron_diario): no se puede afirmar que el cron corrio."""
+    with conn.cursor() as cur:
+        cur.execute("DELETE FROM jobs_historial WHERE detalle->>'$.subtipo' = 'cron_diario'")
+    conn.commit()
+
+    assert cron_jobs.cmd_last_run() == 1
+
+
+def test_last_run_corrida_reciente_da_ok(conn, capsys):
+    cron_jobs.cmd_start()
+    capsys.readouterr()
+
+    assert cron_jobs.cmd_last_run("30") == 0
+
+
+def test_last_run_no_se_desfasa_por_husos_horarios(conn, capsys):
+    """
+    Regresion: fecha_inicio es TIMESTAMP y MySQL lo devuelve en el time_zone
+    de LA SESION (el contenedor de mysql corre en America/Montevideo,
+    UTC-3) -- comparar eso contra dt.utcnow() sin convertir a UTC primero
+    infla el resultado en ~3h. Un umbral ajustado (1h) sobre una fila recien
+    insertada detecta el sesgo: con el bug, "horas" daba ~3 en vez de ~0.
+    """
+    cron_jobs.cmd_start()
+    capsys.readouterr()
+
+    assert cron_jobs.cmd_last_run("1") == 0
+
+
+def test_last_run_corrida_vieja_supera_umbral(conn, capsys):
+    """
+    Cuenta cualquier estado -- un intento fallido/abortado todavia demuestra
+    que el cron corrio; lo que importa es la fecha, no el resultado.
+    """
+    cron_jobs.cmd_start()
+    job_id = int(capsys.readouterr().out.strip())
+    with conn.cursor() as cur:
+        cur.execute(
+            "UPDATE jobs_historial SET fecha_inicio = NOW(6) - INTERVAL 3 DAY WHERE id = %s",
+            (job_id,),
+        )
+    conn.commit()
+
+    assert cron_jobs.cmd_last_run("30") == 1
+
+
+def test_last_run_umbral_por_defecto_es_generoso(conn, capsys):
+    """No debe dispararse por una corrida que arranco un poco mas tarde de lo usual."""
+    cron_jobs.cmd_start()
+    capsys.readouterr()
+    assert cron_jobs.cmd_last_run() == 0
