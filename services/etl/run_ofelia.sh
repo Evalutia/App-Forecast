@@ -37,6 +37,30 @@ KITCHEN="${KITCHEN:-/opt/pentaho/data-integration/kitchen.sh}"
 # ver el bloque despues de KITCHEN mas abajo.
 EVAL_MENSUAL_SH="${EVAL_MENSUAL_SH:-/app/services/etl/run_eval_elegibilidad_mensual.sh}"
 
+# Issue #132: si este script aborta ANTES de poder registrar `start` (ej. el
+# chequeo de LOCK_BACKFILL_SH de mas abajo, que fue justo lo que paso el
+# 2026-08-11 con un cron que murio en 346ms sin dejar mas huella que el log
+# efimero de Docker), la observabilidad que trajo #111 se pierde exactamente
+# en la clase de fallo que #111 vino a resolver. Este trap es la red de
+# seguridad: si el script termina con codigo != 0 y todavia no llegamos a
+# intentar `start` (ETL_ARRANCADO sigue en 0), deja un registro con causa
+# antes de morir. ETL_ARRANCADO se pone en 1 apenas se intenta `start` (haya
+# salido bien o mal) -- de ahi en mas cualquier fallo es "durante" la
+# corrida, no "antes de arrancarla", y ya tiene su propio manejo (`end`, o el
+# exit code que preserva la ultima linea del script).
+OFELIA_ABORT_MOTIVO=""
+ETL_ARRANCADO=0
+_registrar_abort_temprano() {
+  local rc=$?
+  [[ "${ETL_ARRANCADO}" == "1" ]] && return
+  [[ "${rc}" -eq 0 ]] && return
+  local motivo="${OFELIA_ABORT_MOTIVO:-fallo inesperado antes de arrancar el ETL (rc=${rc}, ultimo comando: ${BASH_COMMAND})}"
+  echo "[OFELIA][ERROR] corrida abortada antes de arrancar el ETL: ${motivo}" >&2
+  python3 "${CRON_JOBS}" abort "${motivo}" >/dev/null 2>&1 \
+    || echo "[OFELIA][WARN] no se pudo registrar el abort temprano en jobs_historial." >&2
+}
+trap _registrar_abort_temprano EXIT
+
 # Issue #136: MySQL en reposo ya usa ~55% de los 3.7GB de la maquina, y
 # Pentaho nunca tuvo su heap ajustado -- el default de fabrica de spoon.sh
 # (de donde kitchen.sh delega) es "-Xms1024m -Xmx2048m". El diario SOLO, sin
@@ -67,21 +91,27 @@ BACKFILL_LOCK_FILE="${BACKFILL_LOCK_FILE:-/app/data/backfill.lock}"
 # convencion que CRON_JOBS de arriba, overridable para los tests.
 LOCK_BACKFILL_SH="${LOCK_BACKFILL_SH:-/app/services/etl/lock_backfill.sh}"
 if [[ ! -f "${LOCK_BACKFILL_SH}" ]]; then
-  echo "[OFELIA][ERROR] no encuentro ${LOCK_BACKFILL_SH} -- abortando sin tocar nada." >&2
+  OFELIA_ABORT_MOTIVO="no encuentro ${LOCK_BACKFILL_SH} -- abortando sin tocar nada."
+  echo "[OFELIA][ERROR] ${OFELIA_ABORT_MOTIVO}" >&2
   exit 1
 fi
 source "${LOCK_BACKFILL_SH}"
 if ! tomar_lock_backfill "${BACKFILL_LOCK_FILE}"; then
   echo "[OFELIA] Backfill en curso (${BACKFILL_LOCK_FILE}) — se saltea la corrida diaria de esta noche."
-  python3 "${CRON_JOBS}" skip "backfill en curso (${BACKFILL_LOCK_FILE})" >/dev/null \
-    || echo "[OFELIA][WARN] no se pudo registrar la noche salteada en jobs_historial." >&2
+  # Issue #132: antes esto se descartaba con >/dev/null -- `skip` imprime su
+  # propio job_id (mismo patron que `start`), y sin capturarlo no habia forma
+  # de despues adjuntarle el chequeo de atraso (`stale`) a ESA fila. Una
+  # noche salteada quedaba con estado='exitoso' (ver cron_jobs.py) e
+  # invisible para `stale`, indistinguible de una noche buena.
+  SKIP_JOB_ID="$(python3 "${CRON_JOBS}" skip "backfill en curso (${BACKFILL_LOCK_FILE})" || true)"
+  if [[ "${SKIP_JOB_ID}" =~ ^[0-9]+$ ]]; then
+    python3 "${CRON_JOBS}" stale "${SKIP_JOB_ID}" || true
+  else
+    echo "[OFELIA][WARN] no se pudo registrar la noche salteada en jobs_historial." >&2
+    python3 "${CRON_JOBS}" stale - || true
+  fi
   exit 0
 fi
-
-# Atraso del dato al entrar a la noche. Sale con codigo 1 cuando hay atraso
-# (no es un fallo del chequeo), asi que se ignora el codigo a proposito:
-# es informativo y no debe abortar la corrida que justamente viene a arreglarlo.
-python3 "${CRON_JOBS}" stale || true
 
 # Solo stdout alimenta JOB_ID (la sustitucion de comandos no captura stderr),
 # asi que los avisos del script -- ej. corridas zombi cerradas -- siguen
@@ -93,6 +123,10 @@ if [[ ! "${JOB_ID}" =~ ^[0-9]+$ ]]; then
   echo "[OFELIA][WARN] no se pudo registrar el inicio en jobs_historial; la corrida sigue igual." >&2
   JOB_ID=""
 fi
+# A partir de aca cualquier fallo es "durante" la corrida (tiene su propia
+# fila y su propio manejo), no un abort temprano sin explicacion -- se
+# desarma la red de seguridad del trap de arriba.
+ETL_ARRANCADO=1
 T0=${SECONDS}
 
 Y=$(date -d "yesterday" +%d/%m/%Y)
@@ -101,6 +135,20 @@ Y=$(date -d "yesterday" +%d/%m/%Y)
 # alguna vez cruzara la medianoche, dos "yesterday" calculados en momentos
 # distintos podrian discrepar y el chequeo mediria el dia equivocado.
 Y_ISO=$(date -d "yesterday" +%Y-%m-%d)
+
+# Issue #132: atraso del dato "al entrar a la noche", ANTES de que kitchen
+# tenga chance de arreglarlo -- por eso corre aca y no despues. Sale con
+# codigo 1 cuando hay atraso (no es un fallo del chequeo), asi que se ignora
+# el codigo a proposito: es informativo y no debe abortar la corrida que
+# justamente viene a arreglarlo. Si JOB_ID es valido, el resultado tambien
+# queda escrito en detalle.atraso de esa fila (antes solo se imprimia a
+# stdout, invisible fuera del log efimero de Docker) -- sobrevive al `end`
+# de mas abajo porque `end` ahora hace merge del detalle, no reemplazo.
+if [[ -n "${JOB_ID}" ]]; then
+  python3 "${CRON_JOBS}" stale "${JOB_ID}" || true
+else
+  python3 "${CRON_JOBS}" stale - || true
+fi
 
 set +e
 "${KITCHEN}" \
@@ -120,10 +168,12 @@ if [[ -n "${JOB_ID}" ]]; then
     || echo "[OFELIA][WARN] no se pudo cerrar el registro ${JOB_ID} en jobs_historial." >&2
 
   # Issue #115: coherencia venta-vs-stock del dia que se acaba de cargar.
-  # Va DESPUES de `end` a proposito -- `end` reescribe todo el detalle de la
-  # fila, asi que si corriera antes este resultado se perderia. Igual que
-  # `stale`, es informativo: si el chequeo mismo esta roto (DB abajo,
-  # consulta rota) no debe frenar una corrida que ya termino.
+  # Va DESPUES de `end` a proposito -- `end` hace merge del detalle (Issue
+  # #132), pero igual conviene mantener el orden: si `end` no llegara a
+  # correr (ETL murio de una forma que ni siquiera deja `RC` utilizable)
+  # esto tampoco deberia. Igual que `stale`, es informativo: si el chequeo
+  # mismo esta roto (DB abajo, consulta rota) no debe frenar una corrida que
+  # ya termino.
   python3 "${CRON_JOBS}" coherencia "${JOB_ID}" "${Y_ISO}" || true
 fi
 

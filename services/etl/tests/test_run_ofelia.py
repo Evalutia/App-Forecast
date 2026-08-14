@@ -46,6 +46,8 @@ def entorno(tmp_path):
         sub = sys.argv[1]
         if sub == "start":
             print("4242")
+        elif sub == "skip":
+            print("9999")   # Issue #132: skip tambien devuelve un job_id (para stale)
         elif sub == "stale":
             print("[CRON][ATRASO] 9 dias")
             sys.exit(1)   # atraso detectado: NO es un fallo del chequeo
@@ -155,7 +157,7 @@ def test_atraso_detectado_no_aborta_la_corrida(entorno):
     """`stale` sale con 1 cuando hay atraso; eso no debe frenar el ETL."""
     proc, registro = _correr(entorno, FAKE_ETL_RC="0")
 
-    assert "cron:stale" in registro
+    assert any(ln.startswith("cron:stale") for ln in registro)
     assert "kitchen" in registro, "el ETL tiene que correr igual"
     assert proc.returncode == 0
 
@@ -249,6 +251,32 @@ def test_lock_de_backfill_saltea_y_deja_registro(entorno):
         assert proc.returncode == 0
         assert any(ln.startswith("cron:skip") for ln in registro)
         assert "kitchen" not in registro, "no debe correr el ETL con backfill en curso"
+    finally:
+        os.close(fd)
+
+
+def test_lock_de_backfill_saltea_y_tambien_corre_stale(entorno):
+    """
+    Issue #132: antes `stale` no corria en absoluto en la rama de skip -- una
+    noche salteada no dejaba ninguna señal de atraso, ni siquiera impresa.
+    Ademas, `skip` ahora devuelve su propio job_id (antes se descartaba con
+    >/dev/null) para que `stale` pueda escribirle el resultado.
+    """
+    lock = entorno["tmp"] / "backfill.lock"
+    lock.touch()
+
+    fd = os.open(lock, os.O_RDWR)
+    try:
+        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+
+        proc, registro = _correr(entorno, BACKFILL_LOCK_FILE=str(lock))
+
+        assert proc.returncode == 0
+        skip_lineas = [ln for ln in registro if ln.startswith("cron:skip")]
+        stale_lineas = [ln for ln in registro if ln.startswith("cron:stale")]
+        assert skip_lineas and stale_lineas
+        # el job_id que devolvio skip (9999, del stub) se le pasa a stale
+        assert stale_lineas[0].split()[1] == "9999"
     finally:
         os.close(fd)
 
@@ -386,6 +414,61 @@ def test_falta_lock_backfill_aborta_con_mensaje_claro(entorno, tmp_path):
     assert proc.returncode != 0
     assert "no encuentro" in proc.stderr
     assert "no-existe.sh" in proc.stderr
+
+
+# ── Issue #132: fallo previo al arranque del ETL queda registrado ───────────
+
+def test_falta_lock_backfill_registra_abort_temprano_en_jobs_historial(entorno, tmp_path):
+    """
+    El caso real del 2026-08-11: el cron murio en 346ms (lock_backfill.sh
+    faltante) y la unica huella fue el log efimero de Docker -- no quedaba
+    ninguna fila en jobs_historial porque el script abortaba ANTES de poder
+    llamar a `start`. Ahora un trap de salida deja un `abort` con la causa.
+    """
+    proc, registro = _correr(entorno, LOCK_BACKFILL_SH=str(tmp_path / "no-existe.sh"))
+
+    assert proc.returncode != 0
+    abort_lineas = [ln for ln in registro if ln.startswith("cron:abort")]
+    assert abort_lineas, "debe registrar el abort temprano en jobs_historial"
+    assert "no-existe.sh" in abort_lineas[0]
+    # no debe haber intentado un start/end normal -- el abort es su propio camino
+    assert not [ln for ln in registro if ln.startswith("cron:start")]
+
+
+def test_corrida_ok_no_dispara_el_trap_de_abort_temprano(entorno):
+    """El trap de seguridad no debe ensuciar jobs_historial en el camino feliz."""
+    proc, registro = _correr(entorno, FAKE_ETL_RC="0")
+
+    assert proc.returncode == 0
+    assert not [ln for ln in registro if ln.startswith("cron:abort")]
+
+
+def test_fallo_del_etl_ya_arrancado_no_dispara_el_trap_de_abort_temprano(entorno):
+    """
+    Un ETL que arranca y falla (RC!=0) ya tiene su propio manejo (`end` deja
+    el registro fallido) -- el trap de abort temprano es solo para fallos
+    ANTES de `start`, no debe duplicarse ni pisar ese camino.
+    """
+    proc, registro = _correr(entorno, FAKE_ETL_RC="9")
+
+    assert proc.returncode == 9
+    assert not [ln for ln in registro if ln.startswith("cron:abort")]
+    assert any(ln.startswith("cron:end") for ln in registro)
+
+
+def test_skip_no_dispara_el_trap_de_abort_temprano(entorno):
+    """Saltear por lock es una decision valida (exit 0) -- no es un abort."""
+    lock = entorno["tmp"] / "backfill.lock"
+    lock.touch()
+
+    fd = os.open(lock, os.O_RDWR)
+    try:
+        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        proc, registro = _correr(entorno, BACKFILL_LOCK_FILE=str(lock))
+        assert proc.returncode == 0
+        assert not [ln for ln in registro if ln.startswith("cron:abort")]
+    finally:
+        os.close(fd)
 
 
 # ── Issue #136: heap de Pentaho + mensual encadenado ─────────────────────────

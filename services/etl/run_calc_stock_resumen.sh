@@ -1,7 +1,12 @@
 #!/usr/bin/env bash
-# run_calc_stock_resumen.sh - Wrapper no-bloqueante para run_calc_stock_resumen.py
+# run_calc_stock_resumen.sh - Wrapper para run_calc_stock_resumen.py.
 # Llamado desde job_etl_diario.kjb después de RUN CALC_SUGERENCIAS.
-# Siempre termina con exit 0: un fallo aquí no aborta el job maestro.
+#
+# Issue #131: antes este wrapper terminaba SIEMPRE con exit 0, enmascarando
+# el codigo de salida real del script. Ahora propaga el exit code real; que
+# un fallo aca no aborte el resto de la cadena es una decision que toma el
+# hop CONDICIONAL del .kjb (evaluation Y/N -> MARK CALC_STOCK_RESUMEN
+# FAILED), no este script.
 set -uo pipefail
 
 SELF_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -20,10 +25,9 @@ python3 "${SCRIPT}" 2>&1 | tee "${LOG}"
 rc=${PIPESTATUS[0]}
 
 if [[ ${rc} -ne 0 ]]; then
-  echo "[CALC_STOCK_RESUMEN][WARN] El script terminó con código ${rc}. Ver ${LOG}." >&2
-  echo "[CALC_STOCK_RESUMEN][WARN] El fallo no aborta el ETL — continuando."
+  echo "[CALC_STOCK_RESUMEN][ERROR] El script terminó con código ${rc}. Ver ${LOG}." >&2
 else
   echo "[CALC_STOCK_RESUMEN] OK"
 fi
 
-exit 0
+exit "${rc}"
