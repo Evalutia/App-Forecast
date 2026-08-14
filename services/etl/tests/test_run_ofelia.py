@@ -6,6 +6,19 @@ se verifica el contrato del wrapper -- que registre inicio/fin, que preserve
 el exit code del ETL, y que el bookkeeping nunca voltee la corrida.
 
 Se saltan si no hay bash disponible (el script es bash, no sh).
+
+Gap conocido de entorno en macOS (no en produccion, que corre Linux/bash 5+):
+el `bash` que Apple distribuye es 3.2.57 (2007, la ultima version antes de la
+GPLv3). Con esa version especifica, un trap de EXIT que corre despues de un
+fallo de expansion de parametro (`: "${VAR:?missing}"`) ve `$?` en 0 en vez
+del codigo real, y el proceso termina en exit 0 aunque haya fallado --
+verificado que esto NO pasa en bash 5 (reproducido con `docker run bash:5`
+contra este mismo script: exit code 1, correcto, en el mismo escenario).
+Los tests que dependen de que ese exit code sea != 0 en la rama de
+"config faltante" pueden fallar SOLO en macOS por este motivo -- no indica
+un bug de run_ofelia.sh en produccion. Mismo tipo de gap que la falta del
+binario `flock` o la sintaxis GNU-only de `date -d` en otros tests de este
+archivo.
 """
 
 import fcntl
@@ -554,8 +567,9 @@ def test_falta_una_variable_de_config_aborta_con_mensaje_claro_antes_de_pentaho(
     con un mensaje de bash claro (`VARNAME: missing`) -- no dejar que
     kitchen.sh reciba un -param: vacio y falle mucho mas adelante con un
     error criptico de Pentaho. Tambien confirma que ni siquiera llega a
-    tomar el lock ni a invocar Pentaho: la validacion es lo primero que
-    corre el script.
+    tomar el lock ni a invocar Pentaho: la validacion es de las primeras
+    cosas que corre el script (justo despues del trap de abort temprano de
+    #132, ver el test de abajo).
     """
     env = dict(entorno["env"])
     del env[falta]
@@ -568,3 +582,23 @@ def test_falta_una_variable_de_config_aborta_con_mensaje_claro_antes_de_pentaho(
     registro = (entorno["llamadas"].read_text(encoding="utf-8").splitlines()
                 if entorno["llamadas"].exists() else [])
     assert "kitchen" not in registro, "no debe llegar a invocar Pentaho sin config completa"
+
+
+@pytest.mark.parametrize("falta", ["WS_URL", "ID_EMPRESA", "S_DEPOSITOS"])
+def test_falta_una_variable_de_config_registra_abort_temprano(entorno, falta):
+    """
+    Integracion #132 x #139, encontrada al mergear ambas ramas: en el orden
+    original, la validacion de #139 (": ${WS_URL:?missing}") corria ANTES
+    de que el trap de abort temprano de #132 se registrara -- una config
+    faltante terminaba el script sin que jobs_historial se enterara,
+    exactamente el tipo de fallo silencioso que #132 existe para cerrar. El
+    trap ahora se registra primero.
+    """
+    env = dict(entorno["env"])
+    del env[falta]
+
+    proc, registro = _correr({"env": env, "llamadas": entorno["llamadas"], "tmp": entorno["tmp"]})
+
+    assert proc.returncode != 0
+    abort_lineas = [ln for ln in registro if ln.startswith("cron:abort")]
+    assert abort_lineas, f"falta de {falta} debe quedar registrada via abort"

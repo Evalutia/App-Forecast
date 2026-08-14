@@ -11,23 +11,6 @@ set -euo pipefail
 # El bookkeeping nunca puede voltear la corrida: cada llamada se aisla y su
 # fallo solo se loguea. El ETL manda; el registro es observabilidad.
 
-# Issue #139: WS_URL, ID_EMPRESA y S_DEPOSITOS salen de .env (env_file del
-# servicio `etl` en docker-compose.yml), igual que el resto de la
-# configuracion real (MYSQL_*, CERT_*) y que el patron ya establecido en
-# run_backfill_ventas.sh / run_extract_sales_chunk.sh -- este era el unico
-# script del cron automatico que los tenia hardcodeados en el `-param:` de
-# kitchen.sh. Dos formas en que eso rompia en silencio: (a) un deposito nuevo
-# que abre el cliente quedaba afuera de la extraccion sin que nada lo
-# señalara, la planilla seguia calculando sobre datos incompletos; (b) si el
-# proveedor del WS cambiaba la IP, habia que editar este script Y reconstruir
-# la imagen para levantarlo de nuevo. Se valida ACA, antes de tomar el lock o
-# tocar Pentaho, para fallar rapido con un mensaje claro en vez de que
-# kitchen.sh reciba "-param:WS_URL=" vacio y falle mucho mas adelante con un
-# error criptico de Pentaho.
-: "${WS_URL:?missing}"
-: "${ID_EMPRESA:?missing}"
-: "${S_DEPOSITOS:?missing}"
-
 CRON_JOBS="${CRON_JOBS:-/app/services/etl/cron_jobs.py}"
 # Overridable solo para poder testear la orquestacion sin Pentaho (ver
 # tests/test_run_ofelia.py). En produccion siempre es el kitchen.sh real.
@@ -48,6 +31,13 @@ EVAL_MENSUAL_SH="${EVAL_MENSUAL_SH:-/app/services/etl/run_eval_elegibilidad_mens
 # salido bien o mal) -- de ahi en mas cualquier fallo es "durante" la
 # corrida, no "antes de arrancarla", y ya tiene su propio manejo (`end`, o el
 # exit code que preserva la ultima linea del script).
+#
+# Se registra ANTES de la validacion de #139 de mas abajo (WS_URL/
+# ID_EMPRESA/S_DEPOSITOS) a proposito -- integrando ambos issues se detecto
+# que, en el orden original, un WS_URL faltante disparaba el `:?missing` de
+# bash y terminaba el script ANTES de que este trap existiera, asi que esa
+# falla puntual quedaba otra vez sin registrar en jobs_historial pese a ser
+# exactamente el tipo de abort temprano que #132 vino a resolver.
 OFELIA_ABORT_MOTIVO=""
 ETL_ARRANCADO=0
 _registrar_abort_temprano() {
@@ -60,6 +50,23 @@ _registrar_abort_temprano() {
     || echo "[OFELIA][WARN] no se pudo registrar el abort temprano en jobs_historial." >&2
 }
 trap _registrar_abort_temprano EXIT
+
+# Issue #139: WS_URL, ID_EMPRESA y S_DEPOSITOS salen de .env (env_file del
+# servicio `etl` en docker-compose.yml), igual que el resto de la
+# configuracion real (MYSQL_*, CERT_*) y que el patron ya establecido en
+# run_backfill_ventas.sh / run_extract_sales_chunk.sh -- este era el unico
+# script del cron automatico que los tenia hardcodeados en el `-param:` de
+# kitchen.sh. Dos formas en que eso rompia en silencio: (a) un deposito nuevo
+# que abre el cliente quedaba afuera de la extraccion sin que nada lo
+# señalara, la planilla seguia calculando sobre datos incompletos; (b) si el
+# proveedor del WS cambiaba la IP, habia que editar este script Y reconstruir
+# la imagen para levantarlo de nuevo. Se valida ACA, antes de tomar el lock o
+# tocar Pentaho, para fallar rapido con un mensaje claro en vez de que
+# kitchen.sh reciba "-param:WS_URL=" vacio y falle mucho mas adelante con un
+# error criptico de Pentaho.
+: "${WS_URL:?missing}"
+: "${ID_EMPRESA:?missing}"
+: "${S_DEPOSITOS:?missing}"
 
 # Issue #136: MySQL en reposo ya usa ~55% de los 3.7GB de la maquina, y
 # Pentaho nunca tuvo su heap ajustado -- el default de fabrica de spoon.sh
