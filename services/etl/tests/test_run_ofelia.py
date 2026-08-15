@@ -105,11 +105,14 @@ def entorno(tmp_path):
     # confirmo reproduciendo el fallo: "illegal option -- d"). Se resuelve
     # con Python (strftime portable) en vez de intentar traducir sintaxis
     # GNU a BSD a mano.
+    # Issue #133: agrega el patron "-d '<ISO> -N days' +FORMATO" (usado para
+    # SALES_FORCE_START, 7 dias terminando ayer).
     date_stub_dir = tmp_path / "bin"
     date_stub_dir.mkdir()
     _escribir(date_stub_dir / "date", """
         #!/usr/bin/env python3
         import datetime as dt
+        import re
         import sys
 
         args = sys.argv[1:]
@@ -120,6 +123,15 @@ def entorno(tmp_path):
                    .replace("%Y", "{Y}").replace("%m", "{m}").replace("%d", "{d}"))
             ayer = dt.date.today() - dt.timedelta(days=1)
             print(fmt.format(Y=f"{ayer.year:04d}", m=f"{ayer.month:02d}", d=f"{ayer.day:02d}"))
+        elif (len(args) == 3 and args[0] == "-d"
+              and re.fullmatch(r"\\d{4}-\\d{2}-\\d{2} -\\d+ days", args[1])
+              and args[2].startswith("+")):
+            fecha_str, delta_str = args[1].split(" -")
+            base = dt.date.fromisoformat(fecha_str)
+            resultado = base - dt.timedelta(days=int(delta_str.split()[0]))
+            fmt = (args[2][1:]
+                   .replace("%Y", "{Y}").replace("%m", "{m}").replace("%d", "{d}"))
+            print(fmt.format(Y=f"{resultado.year:04d}", m=f"{resultado.month:02d}", d=f"{resultado.day:02d}"))
         else:
             sys.exit(f"date stub: patron no soportado: {args}")
         """)
@@ -360,6 +372,30 @@ def test_coherencia_corre_despues_de_end_con_el_job_id(entorno):
     # fecha ISO explicita (mismo "ayer" que FORCE_START/FORCE_END), no una
     # recalculada por cron_jobs.py despues de que corrio KITCHEN.
     assert re.fullmatch(r"\d{4}-\d{2}-\d{2}", partes[2])
+
+
+def test_stock_gaps_corre_despues_de_end_con_el_job_id(entorno):
+    """
+    Issue #133: mismo criterio que coherencia -- corre despues de `end`, con
+    el mismo job_id. Code review: fechas ISO explicitas (mismo rango de 7
+    dias que SALES_FORCE_START/END), calculadas UNA sola vez antes de
+    KITCHEN -- no debe dejar que cmd_stock_gaps recalcule "ayer" de forma
+    independiente despues de una corrida que puede cruzar medianoche.
+    """
+    proc, registro = _correr(entorno, FAKE_ETL_RC="0")
+
+    assert proc.returncode == 0
+    idx_end = next(i for i, ln in enumerate(registro) if ln.startswith("cron:end"))
+    idx_stock_gaps = next(i for i, ln in enumerate(registro) if ln.startswith("cron:stock_gaps"))
+    assert idx_stock_gaps > idx_end, "stock_gaps debe correr despues de end"
+    partes = registro[idx_stock_gaps].split()
+    assert partes[1] == "4242"  # job_id devuelto por start
+
+    import datetime as dt
+    ayer = dt.date.today() - dt.timedelta(days=1)
+    hace_7 = ayer - dt.timedelta(days=6)
+    assert partes[2] == hace_7.isoformat()
+    assert partes[3] == ayer.isoformat()
 
 
 def test_coherencia_caida_no_impide_que_ofelia_devuelva_el_rc_del_etl(entorno, tmp_path):
@@ -691,3 +727,30 @@ def test_check_only_nunca_recibe_argumentos_de_aplicacion(entorno):
     assert proc.returncode == 0
     args_line = next(ln for ln in registro if ln.startswith("apply_migrations:"))
     assert args_line.strip() == "apply_migrations:--check-only"
+
+
+# ── Issue #133: ventana de ventas desacoplada de la de stock ────────────────
+# FORCE_START/FORCE_END siguen siendo de un solo dia (stock, sin tocar);
+# SALES_FORCE_START/SALES_FORCE_END son nuevos, 7 dias terminando ayer, para
+# que una noche perdida se reponga sola en la corrida siguiente.
+
+def test_sales_force_start_end_se_propagan_a_kitchen_como_ventana_de_7_dias(entorno):
+    proc, registro = _correr(entorno, FAKE_ETL_RC="0")
+
+    assert proc.returncode == 0
+    args_line = next(ln for ln in registro if ln.startswith("kitchen_args:"))
+
+    import re
+    m_start = re.search(r"-param:SALES_FORCE_START=(\S+)", args_line)
+    m_end = re.search(r"-param:SALES_FORCE_END=(\S+)", args_line)
+    m_force_end = re.search(r"-param:FORCE_END=(\S+)", args_line)
+    assert m_start and m_end and m_force_end
+
+    import datetime as dt
+    ayer = dt.date.today() - dt.timedelta(days=1)
+    hace_7 = ayer - dt.timedelta(days=6)
+    assert m_start.group(1) == f"{hace_7:%d/%m/%Y}"
+    assert m_end.group(1) == f"{ayer:%d/%m/%Y}"
+    # SALES_FORCE_END coincide con FORCE_END (mismo "ayer") -- confirma que
+    # no son dos calculos de "ayer" independientes que podrian discrepar.
+    assert m_end.group(1) == m_force_end.group(1)

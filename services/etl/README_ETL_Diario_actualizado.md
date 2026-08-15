@@ -375,6 +375,48 @@ ORDER BY p.sku, p.modelo, p.fecha_predicha;
 
 ---
 
+## Recuperación de una noche perdida — Issue #133
+
+`run_ofelia.sh` extrae con `FORCE_START=FORCE_END=ayer` (un solo día) para
+`RUN EXTRACT STOCKXML` — necesario, porque `ConsStockXml` devuelve siempre
+la foto de **hoy** sin importar la fecha pedida (`assert_ventana_no_peligrosa`
+en `run_extract_stockxml.sh` rechaza cualquier rango de más de un día). Antes
+del #133, ese mismo par de parámetros también forzaba a un solo día a
+`RUN EXTRACT VENTAS` — así que si una noche el cron moría (backfill en
+curso, contenedor caído, lo que sea), el día perdido **nunca se reponía
+solo**: la corrida siguiente volvía a pedir únicamente "ayer".
+
+A diferencia de stock, **ventas sí es recuperable** — el web service acepta
+rangos históricos. Ahora `RUN EXTRACT VENTAS` recibe su propio par de
+parámetros, `SALES_FORCE_START`/`SALES_FORCE_END`, calculados por
+`run_ofelia.sh` como una ventana de **7 días terminando ayer** (no solo el
+día de ayer). Cada corrida vuelve a pedir y fusionar esos 7 días — seguro
+de repetir, el merge es `INSERT ... ON DUPLICATE KEY UPDATE` — así que una
+noche perdida se repone sola en la corrida siguiente, sin intervención
+manual, mientras el hueco tenga menos de una semana.
+
+`FORCE_START`/`FORCE_END` (sin el prefijo `SALES_`) siguen existiendo tal
+cual, sin tocar, y siguen siendo de un solo día — solo los usa
+`RUN EXTRACT STOCKXML`.
+
+**Huecos de stock, que no son recuperables:** `cron_jobs.py stock_gaps`
+(nuevo, llamado desde `run_ofelia.sh` junto a `coherencia`) revisa los
+últimos 7 días de `stock_diario` — misma ventana que la recuperación de
+ventas — y deja registrado en `jobs_historial.detalle.stock_gaps` qué
+fechas no tienen **ninguna** fila. Es puramente informativo (no bloqueante,
+mismo criterio que `coherencia`): un hueco de stock no se puede rellenar,
+así que lo único que corresponde es que quede visible en vez de
+silencioso.
+
+```sql
+SELECT id, fecha_inicio, JSON_EXTRACT(detalle, '$.stock_gaps') AS stock_gaps
+FROM jobs_historial
+WHERE tipo_job = 'etl' AND JSON_EXTRACT(detalle, '$.stock_gaps.num_dias_sin_datos') > 0
+ORDER BY id DESC LIMIT 10;
+```
+
+---
+
 ## Notas y buenas prácticas
 
 - `CHUNK_DAYS`: si el WS es lento, usá 7–15 días para balancear llamadas/tiempo.  

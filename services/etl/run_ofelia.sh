@@ -164,6 +164,25 @@ Y=$(date -d "yesterday" +%d/%m/%Y)
 # distintos podrian discrepar y el chequeo mediria el dia equivocado.
 Y_ISO=$(date -d "yesterday" +%Y-%m-%d)
 
+# Issue #133: ventana de 7 dias terminando ayer, SOLO para RUN EXTRACT
+# VENTAS (parametros propios, ver job_etl_diario.kjb) -- FORCE_START/
+# FORCE_END de arriba siguen siendo de un solo dia, sin tocar, para
+# RUN EXTRACT STOCKXML (ConsStockXml devuelve siempre la foto de HOY, un
+# rango multi-dia ahi pisaria stock_diario real bajo fechas equivocadas,
+# ver assert_ventana_no_peligrosa en run_extract_stockxml.sh). Ventas si es
+# recuperable -- el WS acepta rangos historicos -- asi que cada corrida
+# vuelve a pedir y fusionar los ultimos 7 dias (el merge es
+# ON DUPLICATE KEY UPDATE, seguro repetir), no solo ayer: una noche perdida
+# se repone sola en la corrida siguiente sin intervencion manual.
+SALES_FORCE_START=$(date -d "${Y_ISO} -6 days" +%d/%m/%Y)
+SALES_FORCE_END="${Y}"
+# Mismo rango que arriba, en ISO -- se lo pasamos explicito a `stock_gaps`
+# (code review: sin esto, cmd_stock_gaps recalculaba "ayer" con
+# dt.date.today() de forma independiente, MINUTOS U HORAS despues de que
+# esta linea corrio -- si la corrida cruza medianoche, la ventana de
+# stock_gaps podria quedar corrida un dia respecto de la de ventas/coherencia).
+SALES_FORCE_START_ISO=$(date -d "${Y_ISO} -6 days" +%Y-%m-%d)
+
 # Issue #132: atraso del dato "al entrar a la noche", ANTES de que kitchen
 # tenga chance de arreglarlo -- por eso corre aca y no despues. Sale con
 # codigo 1 cuando hay atraso (no es un fallo del chequeo), asi que se ignora
@@ -187,6 +206,7 @@ set +e
   "-param:MYSQL_USER=evalutia" "-param:MYSQL_PASSWORD=evalutia" "-param:MYSQL_PORT=3306" \
   "-param:PREDICT_PERIODS=2" "-param:PREDICT_MODEL_SET=classic" "-param:PREDICT_RESAMPLE_RULE=QS" "-param:PREDICT_VERSION=mvp-001" \
   "-param:FORCE_START=$Y" "-param:FORCE_END=$Y" \
+  "-param:SALES_FORCE_START=${SALES_FORCE_START}" "-param:SALES_FORCE_END=${SALES_FORCE_END}" \
   "-param:CERT_PATH=${CERT_PATH:-}" "-param:CACERT_PATH=${CACERT_PATH:-}" "-param:CERT_PASSWORD=${CERT_PASSWORD:-}"
 RC=$?
 set -e
@@ -203,6 +223,13 @@ if [[ -n "${JOB_ID}" ]]; then
   # mismo esta roto (DB abajo, consulta rota) no debe frenar una corrida que
   # ya termino.
   python3 "${CRON_JOBS}" coherencia "${JOB_ID}" "${Y_ISO}" || true
+
+  # Issue #133: hueco de stock (dias sin NINGUNA fila en stock_diario) --
+  # fechas explicitas (mismo rango ISO que SALES_FORCE_START/END, calculado
+  # una sola vez antes de KITCHEN) para no recalcular "ayer" de forma
+  # independiente despues de una corrida que puede cruzar medianoche. Mismo
+  # criterio que `coherencia`: informativo, nunca frena la corrida.
+  python3 "${CRON_JOBS}" stock_gaps "${JOB_ID}" "${SALES_FORCE_START_ISO}" "${Y_ISO}" || true
 fi
 
 # Issue #136: el mensual de elegibilidad econometrica se encadena ACA, al

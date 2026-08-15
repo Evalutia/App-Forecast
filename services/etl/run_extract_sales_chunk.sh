@@ -27,8 +27,20 @@ if [[ -n "${ID_GRUPO}" && -z "${GROUPS:-}" && -z "${GRUPOS:-}" ]]; then
 fi
 
 # Derivar CHUNK_START / CHUNK_END si no están provistos
+#
+# Issue #133: SALES_FORCE_START/SALES_FORCE_END (parametros propios de
+# run_ofelia.sh/job_etl_diario.kjb, ventana de 7 dias) tienen prioridad
+# sobre FORCE_START/FORCE_END -- esos siguen siendo de un solo dia,
+# compartidos con RUN EXTRACT STOCKXML (ver run_extract_stockxml.sh), y
+# forzar ventas a un solo dia todas las noches era justamente el bug de
+# #133: una noche perdida no se reponia sola. FORCE_START/FORCE_END se deja
+# como fallback para invocaciones manuales que no conozcan las variables
+# nuevas -- mismo comportamiento de antes.
 if [ -z "${CHUNK_START:-}" ] || [ -z "${CHUNK_END:-}" ]; then
-  if [ -n "${FORCE_START:-}" ] && [ -n "${FORCE_END:-}" ]; then
+  if [ -n "${SALES_FORCE_START:-}" ] && [ -n "${SALES_FORCE_END:-}" ]; then
+    CHUNK_START="${SALES_FORCE_START}"
+    CHUNK_END="${SALES_FORCE_END}"
+  elif [ -n "${FORCE_START:-}" ] && [ -n "${FORCE_END:-}" ]; then
     CHUNK_START="${FORCE_START}"
     CHUNK_END="${FORCE_END}"
   else
@@ -43,6 +55,8 @@ if [ -z "${CHUNK_START:-}" ] || [ -z "${CHUNK_END:-}" ]; then
     fi
   fi
 fi
+
+echo "[INFO] Sales window: ${CHUNK_START} -> ${CHUNK_END}"
 
 BASE="$(printf '%s' "${WS_URL}" | sed -E 's,/+$,,')"
 ENDPOINT="${BASE}/VsWebProduccion/SwNadWeb.asmx"

@@ -57,6 +57,18 @@ Subcomandos:
       chequeo caido (DB abajo, consulta rota) se loguea y devuelve !=0, pero
       nunca levanta una excepcion que corte la corrida.
 
+  stock_gaps <job_id|-> [fecha_desde [fecha_hasta]]
+      Issue #133. Pregunta distinta de `coherencia`: fechas en el rango sin
+      NINGUNA fila en stock_diario (ausencia total de dato, no calidad del
+      dato). A diferencia de ventas -- recuperable en la corrida siguiente
+      via SALES_FORCE_START/END, ver run_ofelia.sh -- un dia de stock
+      perdido no se puede volver a pedir (ConsStockXml devuelve siempre la
+      foto de HOY). Guarda el resultado bajo detalle.stock_gaps de la fila
+      <job_id> (JSON_SET, mismo patron que `coherencia`). Sin fechas, mide
+      los ultimos 7 dias terminando ayer (no 1, como coherencia -- misma
+      ventana que la recuperacion de ventas). No bloqueante: un chequeo
+      caido se loguea y devuelve !=0, pero nunca corta la corrida.
+
   abort <motivo>
       Issue #132: fallo ANTES de poder registrar `start` (ej. run_ofelia.sh
       aborta por un archivo faltante, como paso el 2026-08-11 con
@@ -341,6 +353,11 @@ def _calcular_coherencia(conn, fecha_desde: str, fecha_hasta: str) -> dict:
     }
 
 
+def _ayer_iso() -> str:
+    """Code review de #133: antes duplicado en cmd_coherencia y cmd_stock_gaps."""
+    return (dt.date.today() - dt.timedelta(days=1)).isoformat()
+
+
 def cmd_coherencia(job_id: str, fecha_desde: str = None, fecha_hasta: str = None) -> int:
     """
     No bloqueante (#115): un chequeo caido -- DB abajo, tabla renombrada, lo
@@ -349,7 +366,7 @@ def cmd_coherencia(job_id: str, fecha_desde: str = None, fecha_hasta: str = None
     (la leccion de #111/#114).
     """
     if fecha_desde is None:
-        fecha_desde = fecha_hasta = (dt.date.today() - dt.timedelta(days=1)).isoformat()
+        fecha_desde = fecha_hasta = _ayer_iso()
     elif fecha_hasta is None:
         fecha_hasta = fecha_desde
 
@@ -391,6 +408,104 @@ def cmd_coherencia(job_id: str, fecha_desde: str = None, fecha_hasta: str = None
           f"{resultado['pct_anomalo']}% anomalo "
           f"({resultado['num_anomalos']}/{resultado['num_observaciones']} filas, "
           f"ratio venta/caida fuera de [{1 - TOLERANCIA_RATIO:.1f}, {1 + TOLERANCIA_RATIO:.1f}]).")
+    return 0
+
+
+def _calcular_stock_gaps(conn, fecha_desde: str, fecha_hasta: str) -> dict:
+    """
+    Fechas en [fecha_desde, fecha_hasta] sin NINGUNA fila en stock_diario --
+    pregunta distinta de _calcular_coherencia (que compara venta contra
+    caida de stock para fechas CON dato): esto detecta la ausencia total de
+    dato para un dia. Issue #133: a diferencia de ventas (recuperable, el WS
+    acepta rangos historicos), un dia de stock perdido no se puede volver a
+    pedir -- ConsStockXml devuelve siempre la foto de HOY sin importar la
+    fecha pedida (ver assert_ventana_no_peligrosa en run_extract_stockxml.sh).
+    Calcula el calendario completo en Python en vez de un generate_series en
+    SQL -- mas simple, y el rango nunca es mas que unos pocos dias.
+    """
+    desde = dt.date.fromisoformat(fecha_desde)
+    hasta = dt.date.fromisoformat(fecha_hasta)
+    todas_las_fechas = set()
+    d = desde
+    while d <= hasta:
+        todas_las_fechas.add(d)
+        d += dt.timedelta(days=1)
+
+    with conn.cursor() as cur:
+        cur.execute(
+            "SELECT DISTINCT fecha FROM stock_diario WHERE fecha BETWEEN %(desde)s AND %(hasta)s",
+            {"desde": fecha_desde, "hasta": fecha_hasta},
+        )
+        fechas_con_dato = {row[0] for row in cur.fetchall()}
+
+    faltantes = sorted(todas_las_fechas - fechas_con_dato)
+    return {
+        "fecha_desde": fecha_desde,
+        "fecha_hasta": fecha_hasta,
+        "dias_sin_datos": [d.isoformat() for d in faltantes],
+        "num_dias_sin_datos": len(faltantes),
+    }
+
+
+def cmd_stock_gaps(job_id: str, fecha_desde: str = None, fecha_hasta: str = None) -> int:
+    """
+    Issue #133: hace visible un hueco de stock que NO se puede recuperar --
+    mismo criterio de no-bloqueo que cmd_coherencia (un chequeo caido se
+    loguea y jamas frena el ETL), pero pregunta distinta (presencia/ausencia
+    de dato, no calidad del dato).
+
+    Default de 7 dias terminando ayer si NO se pasa ninguna fecha (no 1 dia,
+    como coherencia) -- misma ventana que la recuperacion de ventas (ver
+    SALES_FORCE_START/END en run_ofelia.sh), para que un hueco de hace un
+    par de noches siga visible en corridas sucesivas. Si se pasa solo
+    fecha_desde, se acota a ESE unico dia (mismo criterio que cmd_coherencia)
+    -- code review: la version anterior ignoraba fecha_desde en ese caso y
+    recalculaba fecha_hasta como "ayer" igual, corriendo silenciosamente
+    sobre una ventana distinta a la pedida.
+    """
+    if fecha_desde is None:
+        fecha_hasta = _ayer_iso()
+        fecha_desde = (dt.date.fromisoformat(fecha_hasta) - dt.timedelta(days=6)).isoformat()
+    elif fecha_hasta is None:
+        fecha_hasta = fecha_desde
+
+    try:
+        conn = db_connect()
+    except Exception as e:
+        print(f"[CRON][STOCK_GAPS] no se pudo conectar a MySQL: {e}", file=sys.stderr)
+        return 1
+
+    try:
+        resultado = _calcular_stock_gaps(conn, fecha_desde, fecha_hasta)
+    except Exception as e:
+        print(f"[CRON][STOCK_GAPS] chequeo fallo (no bloquea el ETL): {e}", file=sys.stderr)
+        conn.close()
+        return 1
+
+    if job_id and job_id != "-":
+        try:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "UPDATE jobs_historial "
+                    "   SET detalle = JSON_SET(COALESCE(detalle, JSON_OBJECT()), "
+                    "                          '$.stock_gaps', CAST(%s AS JSON)) "
+                    " WHERE id = %s",
+                    (json.dumps(resultado, ensure_ascii=False), job_id),
+                )
+            conn.commit()
+        except Exception as e:
+            print(f"[CRON][STOCK_GAPS] no se pudo guardar en jobs_historial (job {job_id}): {e}",
+                  file=sys.stderr)
+    conn.close()
+
+    if resultado["num_dias_sin_datos"] == 0:
+        print(f"[CRON][STOCK_GAPS] {fecha_desde}..{fecha_hasta}: sin huecos "
+              f"(stock_diario tiene datos todos los dias del rango).")
+        return 0
+
+    print(f"[CRON][STOCK_GAPS] {fecha_desde}..{fecha_hasta}: "
+          f"{resultado['num_dias_sin_datos']} dia(s) sin ningun dato de stock: "
+          f"{', '.join(resultado['dias_sin_datos'])}")
     return 0
 
 
@@ -486,7 +601,7 @@ def cmd_last_run(umbral_horas: str = str(UMBRAL_LAST_RUN_HORAS)) -> int:
 
 def main() -> int:
     if len(sys.argv) < 2:
-        print("[ERROR] Uso: cron_jobs.py start|end|skip|stale|coherencia|abort|"
+        print("[ERROR] Uso: cron_jobs.py start|end|skip|stale|coherencia|stock_gaps|abort|"
               "mark_step_failed|last_run ...", file=sys.stderr)
         return 2
     sub, args = sys.argv[1], sys.argv[2:]
@@ -500,6 +615,8 @@ def main() -> int:
         return cmd_stale(*args)
     if sub == "coherencia" and 1 <= len(args) <= 3:
         return cmd_coherencia(*args)
+    if sub == "stock_gaps" and 1 <= len(args) <= 3:
+        return cmd_stock_gaps(*args)
     if sub == "abort" and len(args) == 1:
         return cmd_abort(*args)
     if sub == "mark_step_failed" and len(args) == 2:

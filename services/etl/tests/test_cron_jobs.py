@@ -518,6 +518,151 @@ def test_cmd_coherencia_conexion_caida_no_propaga_excepcion(monkeypatch, capsys)
 
 
 # ---------------------------------------------------------------------------
+# stock_gaps (Issue #133) -- huecos de stock que NO se pueden recuperar
+# (a diferencia de ventas), deben quedar visibles.
+# ---------------------------------------------------------------------------
+
+def test_stock_gaps_sin_huecos_cuando_todos_los_dias_tienen_dato(conn, sku_articulo):
+    _cargar_stock(conn, sku_articulo, "2030-03-10", 10)
+    _cargar_stock(conn, sku_articulo, "2030-03-11", 9)
+    _cargar_stock(conn, sku_articulo, "2030-03-12", 8)
+
+    resultado = cron_jobs._calcular_stock_gaps(conn, "2030-03-10", "2030-03-12")
+
+    assert resultado["num_dias_sin_datos"] == 0
+    assert resultado["dias_sin_datos"] == []
+
+
+def test_stock_gaps_detecta_el_dia_del_medio_faltante(conn, sku_articulo):
+    """La firma real de #133: 2026-08-10 sin ninguna fila tras el cron caido del 11."""
+    _cargar_stock(conn, sku_articulo, "2030-03-10", 10)
+    # 2030-03-11 -- sin cargar, el hueco
+    _cargar_stock(conn, sku_articulo, "2030-03-12", 8)
+
+    resultado = cron_jobs._calcular_stock_gaps(conn, "2030-03-10", "2030-03-12")
+
+    assert resultado["num_dias_sin_datos"] == 1
+    assert resultado["dias_sin_datos"] == ["2030-03-11"]
+
+
+def test_stock_gaps_varios_skus_un_solo_dia_no_cuenta_como_hueco(conn, sku_articulo):
+    """Alcanza con que UN sku tenga dato ese dia -- la pregunta es sobre la
+    tabla completa, no sobre un sku puntual."""
+    _cargar_stock(conn, sku_articulo, "2030-03-15", 5)
+
+    resultado = cron_jobs._calcular_stock_gaps(conn, "2030-03-15", "2030-03-15")
+
+    assert resultado["num_dias_sin_datos"] == 0
+
+
+def test_stock_gaps_rango_totalmente_vacio_marca_todos_los_dias(conn):
+    resultado = cron_jobs._calcular_stock_gaps(conn, "2031-02-01", "2031-02-03")
+
+    assert resultado["num_dias_sin_datos"] == 3
+    assert resultado["dias_sin_datos"] == ["2031-02-01", "2031-02-02", "2031-02-03"]
+
+
+def test_cmd_stock_gaps_guarda_bajo_detalle_stock_gaps_sin_pisar_lo_de_end(conn, sku_articulo, capsys):
+    cron_jobs.cmd_start()
+    job_id = int(capsys.readouterr().out.strip())
+    cron_jobs.cmd_end(str(job_id), "0", "42.0")
+    capsys.readouterr()
+
+    _cargar_stock(conn, sku_articulo, "2030-03-10", 10)
+    # 2030-03-11 sin cargar
+
+    rc = cron_jobs.cmd_stock_gaps(str(job_id), "2030-03-10", "2030-03-11")
+    assert rc == 0
+
+    fila = _fila(conn, job_id)
+    assert fila["detalle"]["exit_code"] == 0  # lo que escribio `end` sigue ahi
+    assert fila["detalle"]["stock_gaps"]["num_dias_sin_datos"] == 1
+    assert fila["detalle"]["stock_gaps"]["dias_sin_datos"] == ["2030-03-11"]
+
+
+def test_cmd_stock_gaps_con_job_id_guion_no_escribe_nada(conn, sku_articulo, capsys):
+    with conn.cursor() as cur:
+        cur.execute("SELECT COUNT(*) FROM jobs_historial")
+        antes = cur.fetchone()[0]
+
+    rc = cron_jobs.cmd_stock_gaps("-", "2030-03-20", "2030-03-20")
+    assert rc == 0
+    assert "1 dia(s) sin ningun dato de stock" in capsys.readouterr().out
+
+    conn.commit()
+    with conn.cursor() as cur:
+        cur.execute("SELECT COUNT(*) FROM jobs_historial")
+        assert cur.fetchone()[0] == antes
+
+
+def test_cmd_stock_gaps_default_sin_fechas_usa_ventana_de_7_dias(conn, monkeypatch):
+    """Misma ventana que la recuperacion de ventas -- no solo ayer, como coherencia."""
+    capturado = {}
+
+    def _fake_calcular(conn_, desde, hasta):
+        capturado["desde"] = desde
+        capturado["hasta"] = hasta
+        return {"fecha_desde": desde, "fecha_hasta": hasta,
+                "dias_sin_datos": [], "num_dias_sin_datos": 0}
+
+    monkeypatch.setattr(cron_jobs, "_calcular_stock_gaps", _fake_calcular)
+
+    cron_jobs.cmd_stock_gaps("-")
+
+    ayer = dt.date.today() - dt.timedelta(days=1)
+    hace_7 = ayer - dt.timedelta(days=6)
+    assert capturado["hasta"] == ayer.isoformat()
+    assert capturado["desde"] == hace_7.isoformat()
+
+
+def test_cmd_stock_gaps_con_solo_fecha_desde_se_acota_a_ese_unico_dia(conn, monkeypatch):
+    """
+    Code review de #133: la version original ignoraba fecha_desde en este
+    caso (setState fecha_hasta="ayer" igual, corriendo sobre una ventana
+    distinta a la pedida en silencio). Mismo criterio que cmd_coherencia:
+    con un solo argumento de fecha, se acota a ese unico dia.
+    """
+    capturado = {}
+
+    def _fake_calcular(conn_, desde, hasta):
+        capturado["desde"] = desde
+        capturado["hasta"] = hasta
+        return {"fecha_desde": desde, "fecha_hasta": hasta,
+                "dias_sin_datos": [], "num_dias_sin_datos": 0}
+
+    monkeypatch.setattr(cron_jobs, "_calcular_stock_gaps", _fake_calcular)
+
+    cron_jobs.cmd_stock_gaps("-", "2030-05-10")
+
+    assert capturado["desde"] == "2030-05-10"
+    assert capturado["hasta"] == "2030-05-10"
+
+
+def test_cmd_stock_gaps_chequeo_roto_no_propaga_excepcion(conn, monkeypatch, capsys):
+    def _explota(conn_, desde, hasta):
+        raise Exception("Table 'evalutia.stock_diario' doesn't exist")
+
+    monkeypatch.setattr(cron_jobs, "_calcular_stock_gaps", _explota)
+
+    rc = cron_jobs.cmd_stock_gaps("-", "2030-01-15", "2030-01-15")
+
+    assert rc == 1
+    assert "no bloquea el ETL" in capsys.readouterr().err
+
+
+def test_cmd_stock_gaps_conexion_caida_no_propaga_excepcion(monkeypatch, capsys):
+    def _explota_conexion():
+        raise Exception("Can't connect to MySQL server")
+
+    monkeypatch.setattr(cron_jobs, "db_connect", _explota_conexion)
+
+    rc = cron_jobs.cmd_stock_gaps("-", "2030-01-15", "2030-01-15")
+
+    assert rc == 1
+    assert "no se pudo conectar" in capsys.readouterr().err
+
+
+# ---------------------------------------------------------------------------
 # end (Issue #132) -- merge del detalle, no reemplazo.
 # ---------------------------------------------------------------------------
 
