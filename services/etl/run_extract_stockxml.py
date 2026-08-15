@@ -183,6 +183,7 @@ except Exception as e:
 
 rows_ins = 0
 rows_skip = 0
+rows_failed = 0
 
 with conn.cursor() as cur:
     for sku, stock, deposito in rows:
@@ -219,12 +220,31 @@ with conn.cursor() as cur:
                 cur.execute(insert_sql, (sku, fecha, cantidad_val, deposito_val, fuente))
             else:
                 cur.execute(insert_sql, (sku, fecha, cantidad_val, fuente))
+            # Issue #141 (code-review post-implement): commit por fila, no
+            # uno solo al final del loop. Un deadlock lo resuelve InnoDB
+            # haciendo ROLLBACK de la transaccion ENTERA, no solo de la fila
+            # que lo disparo -- con un commit unico al final, esa fila N
+            # fallida se llevaba puestas las filas 1..N-1 ya insertadas (y
+            # contadas en rows_ins) sin que el script se enterara. Comitear
+            # apenas cada fila se escribe la deja durable de inmediato, asi
+            # que una falla posterior solo puede perder su propia fila.
+            conn.commit()
             rows_ins += 1
-        except Exception:
-            rows_skip += 1
+        except Exception as e:
+            # Issue #141: un error real de escritura (deadlock, columna
+            # invalida, conexion caida a mitad de loop) se contaba antes como
+            # rows_skip, indistinguible de un skip legitimo (SKU no filtrado,
+            # stock no interpretable) -- rows_failed lo separa para que al
+            # final del script se pueda fallar fuerte en vez de reportar
+            # "todo OK" con filas que en realidad nunca se escribieron.
+            print(f"[ERROR] fila no escrita, excepcion de MySQL sku={sku} deposito={deposito_val}: {e}")
+            conn.rollback()
+            rows_failed += 1
             continue
 
-    conn.commit()
-
 conn.close()
-print(f"[INFO] Inserted/Upserted {rows_ins} rows into stock_diario (skipped {rows_skip})")
+print(f"[INFO] Inserted/Upserted {rows_ins} rows into stock_diario (skipped {rows_skip}, failed {rows_failed})")
+
+if rows_failed:
+    print(f"[ERROR] {rows_failed} fila(s) no se pudieron escribir por una excepcion de MySQL")
+    raise SystemExit(1)

@@ -20,6 +20,13 @@ ID_GRUPO="${ID_GRUPO:-}"
 S_DEPOSITOS="${S_DEPOSITOS:-}"
 CANTREG="${CANTREG:-20000}"
 
+# Issue #141: mismo default que run_extract_articulos.sh -- llamada de foto
+# unica por depósito, no un rango multi-dia como el backfill. Sin esto, si el
+# WS acepta la conexion y nunca responde, el curl de mas abajo quedaba
+# colgado para siempre.
+CURL_CONNECT_TIMEOUT="${CURL_CONNECT_TIMEOUT:-20}"
+CURL_MAX_TIME="${CURL_MAX_TIME:-120}"
+
 BASE="$(printf '%s' "${WS_URL}" | sed -E 's,/+$,,')"
 ENDPOINT="${BASE}/VsWebProduccion/SwNadWeb.asmx"
 
@@ -121,7 +128,9 @@ XML
 XML
   } > "$TMP_REQ"
 
-  curl -sS --http1.1 \
+  if ! curl -sS --http1.1 \
+    --connect-timeout "${CURL_CONNECT_TIMEOUT}" \
+    --max-time "${CURL_MAX_TIME}" \
     --cert-type P12 \
     --cert "${CERT_PATH}:${CERT_PASSWORD}" \
     --cacert "${CACERT_PATH}" \
@@ -130,7 +139,10 @@ XML
     -H "SOAPAction: \"${WS_SOAP_ACTION}\"" \
     --data-binary @"$TMP_REQ" \
     "${ENDPOINT}" \
-    -o "$TMP_XML"
+    -o "$TMP_XML"; then
+    echo "[ERROR] curl falló contra ${ENDPOINT} (deposito ${dep})"
+    return 12
+  fi
 
   if [[ ! -s "$TMP_XML" ]]; then
     echo "[ERROR] Respuesta vacía de ConsStockXml para deposito ${dep}"
@@ -159,7 +171,10 @@ XML
   # importante: que python tenga fechas y empresa
   export CHUNK_START CHUNK_END ID_EMPRESA
 
-  python3 /app/services/etl/run_extract_stockxml.py || true
+  if ! python3 /app/services/etl/run_extract_stockxml.py; then
+    echo "[ERROR] Escritura a MySQL falló para deposito ${dep}"
+    return 13
+  fi
 
   unset __FORCED_DEPOSITO
   trap - RETURN
@@ -167,6 +182,7 @@ XML
 }
 
 process_current_window() {
+  local FAILED_DEPOSITOS=()
   if [[ "${S_DEPOSITOS}" == *","* ]]; then
     local OLD_IFS="$IFS"
     IFS=","
@@ -174,14 +190,26 @@ process_current_window() {
       dep="$(echo "$dep" | tr -d '[:space:]')"
       [[ -z "$dep" ]] && continue
       echo "[INFO] Ejecutando ConsStockXml para deposito: ${dep}"
-      call_for_deposito "${dep}" || true
+      if ! call_for_deposito "${dep}"; then
+        echo "[WARN] Deposito ${dep} FALLÓ, continuando con el siguiente..."
+        FAILED_DEPOSITOS+=("${dep}")
+      fi
     done
     IFS="$OLD_IFS"
   else
     local dep="${S_DEPOSITOS:-}"
     echo "[INFO] Ejecutando ConsStockXml para deposito: ${dep:-<vacio>}"
-    call_for_deposito "${dep:-}" || true
+    if ! call_for_deposito "${dep:-}"; then
+      echo "[WARN] Deposito ${dep:-<vacio>} FALLÓ"
+      FAILED_DEPOSITOS+=("${dep:-<vacio>}")
+    fi
   fi
+
+  if [[ ${#FAILED_DEPOSITOS[@]} -gt 0 ]]; then
+    echo "[ERROR] ${#FAILED_DEPOSITOS[@]} deposito(s) fallaron: ${FAILED_DEPOSITOS[*]}"
+    return 1
+  fi
+  return 0
 }
 
 # ---------------------------
@@ -203,7 +231,7 @@ if [[ -n "${CHUNK_START:-}" && -n "${CHUNK_END:-}" ]]; then
   export CHUNK_START CHUNK_END ID_EMPRESA
   echo "[INFO] Stock window (externo): ${CHUNK_START} -> ${CHUNK_END}"
   process_current_window
-  exit 0
+  exit $?
 fi
 
 # ---------------------------
@@ -263,3 +291,4 @@ export CHUNK_START CHUNK_END ID_EMPRESA
 
 echo "[INFO] Stock window: ${CHUNK_START} -> ${CHUNK_END}"
 process_current_window
+exit $?

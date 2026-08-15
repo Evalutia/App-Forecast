@@ -16,14 +16,23 @@
 #     ... rama de "ya hay otro proceso corriendo" ...
 #   fi
 #
-# Limitacion conocida, no resuelta acá (code-review post-implement): el fd
-# 200 lo heredan los procesos hijos (kitchen.sh, y lo que kitchen.sh a su vez
-# ejecute) salvo que se cierre a mano -- bash no tiene forma nativa de
-# marcarlo close-on-exec. Si algún día un hijo de kitchen.sh sobrevive a la
-# muerte de run_ofelia.sh (un proceso colgado, un demonio que algún paso deje
-# vivo sin querer), ese hijo se queda con el lock tomado para siempre. Diagnóstico
-# si pasa: `fuser "${BACKFILL_LOCK_FILE}"` o `lsof "${BACKFILL_LOCK_FILE}"`
-# para encontrar y matar el proceso que lo sigue reteniendo.
+# Limitacion conocida (code-review post-implement): el fd 200 lo heredan los
+# procesos hijos (kitchen.sh, y lo que kitchen.sh a su vez ejecute) salvo que
+# se cierre a mano -- bash no tiene forma nativa de marcarlo close-on-exec. Si
+# algún día un hijo de kitchen.sh sobrevive a la muerte de run_ofelia.sh (un
+# proceso colgado, un demonio que algún paso deje vivo sin querer), ese hijo
+# se queda con el lock tomado. Diagnóstico si pasa: `fuser
+# "${BACKFILL_LOCK_FILE}"` o `lsof "${BACKFILL_LOCK_FILE}"` para encontrar y
+# matar el proceso que lo sigue reteniendo.
+#
+# Issue #141: esto YA NO es "para siempre" para el paso mas propenso a
+# colgarse (RUN EXTRACT STOCKXML, un curl SOAP sin timeout hasta ese issue) --
+# job_etl_diario.kjb envuelve ese paso puntual con
+# `timeout --kill-after=30s 1200s`, asi que un hijo colgado ahi se mata solo
+# dentro de una ventana acotada y el fd se libera. La limitacion de fondo
+# (bash no puede marcar el fd close-on-exec) sigue existiendo tal cual -- solo
+# está acotada para ese paso, no eliminada. Otro paso que llegara a colgarse
+# sin su propio timeout volvería a retener el lock indefinidamente.
 tomar_lock_backfill() {
   local lock_file="$1"
   mkdir -p "$(dirname "${lock_file}")"

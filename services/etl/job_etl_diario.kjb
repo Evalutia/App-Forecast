@@ -248,7 +248,13 @@ DELETE FROM stock_diario_stage;
       <arguments><argument>-c</argument></arguments>
       <insertScript>Y</insertScript>
       <script><![CDATA[
-/bin/bash /app/services/etl/run_extract_stockxml.sh
+# Issue #141: timeout con techo duro, no solo el --max-time del curl interno
+# del script -- cualquier otro hijo que se cuelgue (la escritura a MySQL, por
+# ejemplo) retenia el fd 200 del lock de backfill (ver lock_backfill.sh) para
+# siempre, porque bash no puede marcarlo close-on-exec. --kill-after manda
+# SIGKILL si el arbol de procesos ignora el SIGTERM inicial, así el fd queda
+# liberado dentro de una ventana acotada pase lo que pase adentro.
+timeout --kill-after=30s 1200s /bin/bash /app/services/etl/run_extract_stockxml.sh
       ]]></script>
       <wait>Y</wait>
       <xloc>780</xloc><yloc>64</yloc><draw>Y</draw>
