@@ -28,8 +28,19 @@ set -euo pipefail
 : "${MYSQL_HOST:=mysql}"
 : "${MYSQL_PORT:=3306}"
 : "${MYSQL_DB:?missing}"
-: "${MYSQL_USER:?missing}"
-: "${MYSQL_PASSWORD:?missing}"
+
+# Encontrado corriendo esto de verdad contra produccion: 01-init.sql hace
+# CREATE USER/GRANT (privilegios de INSTANCIA, no de la base evalutia) --
+# el usuario de aplicacion (MYSQL_USER, ALL PRIVILEGES solo sobre
+# evalutia.*) no alcanza, aunque sobre CUALQUIER OTRO archivo si alcance
+# (son todos CREATE TABLE/ALTER TABLE/CREATE INDEX dentro de esa base).
+# root es la identidad correcta para un runner de migraciones en general --
+# mismo criterio que docker-entrypoint-initdb.d, que siempre corre como
+# root. Nombre de variable propio (no MYSQL_USER/MYSQL_PASSWORD) para que
+# los tests puedan seguir usando el usuario de aplicacion cuando sus
+# archivos sinteticos no necesitan privilegios de instancia.
+: "${MIGRATIONS_MYSQL_USER:=root}"
+: "${MIGRATIONS_MYSQL_PASSWORD:=${MYSQL_ROOT_PASSWORD:?missing}}"
 
 SELF_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # Overridable solo para poder testear contra un directorio sintetico de
@@ -54,9 +65,9 @@ esac
 # visible en texto plano para cualquiera con acceso a `ps aux`/`docker top`
 # mientras el proceso corre (el chequeo --check-only se invoca ~diario desde
 # run_ofelia.sh).
-export MYSQL_PWD="${MYSQL_PASSWORD}"
+export MYSQL_PWD="${MIGRATIONS_MYSQL_PASSWORD}"
 _mysql() {
-  mysql --protocol=TCP -h "${MYSQL_HOST}" -P "${MYSQL_PORT}" -u "${MYSQL_USER}" "$@"
+  mysql --protocol=TCP -h "${MYSQL_HOST}" -P "${MYSQL_PORT}" -u "${MIGRATIONS_MYSQL_USER}" "$@"
 }
 
 # Bootstrap defensivo: la tabla de tracking tiene que existir para poder

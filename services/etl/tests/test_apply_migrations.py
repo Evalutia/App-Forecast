@@ -38,6 +38,14 @@ REQUIRED_ENV = {
     "MYSQL_DB": os.environ.get("MYSQL_DB", "evalutia"),
     "MYSQL_USER": os.environ.get("MYSQL_USER", "evalutia"),
     "MYSQL_PASSWORD": os.environ.get("MYSQL_PASSWORD", "evalutia"),
+    # El script real usa MIGRATIONS_MYSQL_USER/PASSWORD (default root, ver
+    # apply_migrations.sh -- 01-init.sql necesita CREATE USER/GRANT, que el
+    # usuario de aplicacion no tiene). Los archivos sinteticos de estos
+    # tests solo hacen CREATE TABLE/INSERT dentro de evalutia.*, asi que el
+    # usuario de aplicacion alcanza -- se fija explicito para no depender
+    # de que el entorno de test tenga MYSQL_ROOT_PASSWORD.
+    "MIGRATIONS_MYSQL_USER": os.environ.get("MYSQL_USER", "evalutia"),
+    "MIGRATIONS_MYSQL_PASSWORD": os.environ.get("MYSQL_PASSWORD", "evalutia"),
 }
 
 
