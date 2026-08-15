@@ -229,6 +229,17 @@ de esto: `docker-entrypoint-initdb.d` ya corrió los archivos completos, y
 cada uno se auto-registró al final — `schema_migrations` queda poblada
 igual, sin pasar por `apply_migrations.sh`.
 
+**Resuelve también el Issue #138** (esquema local distinto al de
+producción): correr `apply_migrations.sh` en local aplica cualquier
+migración que haya quedado pendiente ahí (fue exactamente lo que pasó con
+la migración 20, `deposito_id NOT NULL` — el `ALTER` tardaba sobre la tabla
+local de millones de filas y quedó sin correr). Comparar `schema_migrations`
+entre dos entornos (`SELECT filename FROM schema_migrations ORDER BY
+filename`) es la forma de detectar una divergencia de esquema sin comparar
+columna por columna a mano — verificado 2026-08-15: diff completo de
+`information_schema.COLUMNS` entre local y producción, cero diferencias en
+las 19 tablas de `evalutia`.
+
 ---
 
 ## Docker Compose (servicio `etl` resumido)
