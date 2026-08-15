@@ -15,6 +15,9 @@ export interface PlanillaMesDto {
   valorHistorico: number | null;
   valorAjustado: number | null;
   criterioFrecuencia: 'historico' | 'promedio' | 'real_extrapolado' | null;
+  // Issue #137: "V/E" persistido por el ETL -- antes se recalculaba aca
+  // mismo reimplementando extrapolacion_mes() de run_calc_planilla.py.
+  ventaOExtrapolacion: number | null;
 }
 
 export interface PlanillaVentasDto {

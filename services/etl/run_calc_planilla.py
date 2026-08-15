@@ -212,6 +212,47 @@ def extrapolacion_mes(
     return round(ventas * (2 - dias_con_stock / dias_naturales), 2)
 
 
+def _venta_real_o_extrapolada(
+    ventas_real: int, extrapolacion: float | None, es_quiebre: bool
+) -> float | None:
+    """
+    Nucleo compartido entre venta_o_extrapolacion() y
+    valor_ajustado_y_criterio() -- "cuanto vendio el mes, en su version sin
+    corregir por historico": la venta real si no hubo quiebre, la
+    extrapolacion si lo hubo. Extraido en #137 (code review) para que un
+    cambio futuro a esta regla no pueda divergir entre las dos funciones
+    que la usan -- exactamente la clase de bug que #137 elimino para el
+    split ETL/frontend, ahora tambien cerrada adentro del propio ETL.
+    """
+    return extrapolacion if es_quiebre else float(ventas_real)
+
+
+def venta_o_extrapolacion(
+    estado_mes: str, ventas_cantidad: int, extrapolacion: float | None
+) -> float | None:
+    """
+    Issue #137: "V/E" de la hoja de detalle -- venta real del mes, o su
+    extrapolacion si hubo quiebre. Hasta ahora se recalculaba en el browser
+    (TypeScript, reimplementando esta misma formula en exportPlanilla.ts) en
+    vez de leerse persistida como VAj -- las dos solo coincidian si el ETL
+    habia vuelto a correr despues del ultimo cambio de formula (#129 dejo
+    una ventana real de una hora en produccion con VAj y V/E
+    contradiciendose en la misma fila). Se persiste aca, calculada por la
+    misma funcion en la misma corrida que valor_ajustado_y_criterio(), para
+    que la desincronizacion quede estructuralmente imposible.
+
+    NO es lo mismo que `valor_no_historico` en valor_ajustado_y_criterio:
+    ese tiene un fallback a ventas_cantidad cuando es_quiebre y
+    extrapolacion es None (sin_stock sin historico) -- V/E en cambio queda
+    en None para sin_stock siempre, sin excepcion (mismo criterio que la
+    hoja "Criterios" promete: "Vacia si el mes no tuvo stock").
+    """
+    if estado_mes == "sin_stock":
+        return None
+    es_quiebre = estado_mes != "normal"
+    return _venta_real_o_extrapolada(ventas_cantidad, extrapolacion, es_quiebre)
+
+
 def valor_ajustado_y_criterio(
     tickets: int,
     ventas_real: int,
@@ -243,7 +284,7 @@ def valor_ajustado_y_criterio(
             return (round(historico, 2), "historico")
         return (round(float(ventas_real), 2), "real_extrapolado")
 
-    valor_no_historico = extrapolacion if es_quiebre else float(ventas_real)
+    valor_no_historico = _venta_real_o_extrapolada(ventas_real, extrapolacion, es_quiebre)
 
     if tickets >= TICKETS_ALTO_MIN:
         return (round(valor_no_historico, 2), "real_extrapolado")
@@ -496,6 +537,7 @@ def calcular_filas(conn: pymysql.Connection) -> tuple[list[dict], int, int, int]
             "valor_historico":                   None,  # se rellena en paso 2
             "valor_ajustado":                    None,  # se rellena en paso 2
             "criterio_frecuencia":               None,  # se rellena en paso 2
+            "venta_o_extrapolacion":              None,  # se rellena en paso 2
         })
 
     # ── Paso 2: frecuencia de quiebre por SKU ─────────────────────────────────
@@ -568,6 +610,9 @@ def calcular_filas(conn: pymysql.Connection) -> tuple[list[dict], int, int, int]
             historico,
             es_quiebre,
         )
+        fila["venta_o_extrapolacion"] = venta_o_extrapolacion(
+            fila["estado_mes"], fila["ventas_cantidad"], extrapolacion,
+        )
 
     skus_procesados = len({f["sku"] for f in filas})
     dist = {lvl: sum(1 for f in filas if f["frecuencia_nivel"] == lvl and f["month"] == meses[0][1] and f["year"] == meses[0][0]) for lvl in ("alta","media","baja")}
@@ -588,14 +633,16 @@ _SQL_INSERT = """
          ventas_cantidad, dias_con_stock, dias_naturales_mes,
          rotacion_diaria_real, rotacion_diaria_bruta, rotacion_diaria_desestacionalizada,
          estado_mes, frecuencia_nivel, rotacion_ajustada,
-         tickets_mes, valor_historico, valor_ajustado, criterio_frecuencia, ts_carga)
+         tickets_mes, valor_historico, valor_ajustado, criterio_frecuencia,
+         venta_o_extrapolacion, ts_carga)
     VALUES
         (%(sku)s, %(year)s, %(month)s,
          %(ventas_cantidad)s, %(dias_con_stock)s, %(dias_naturales_mes)s,
          %(rotacion_diaria_real)s, %(rotacion_diaria_bruta)s,
          %(rotacion_diaria_desestacionalizada)s,
          %(estado_mes)s, %(frecuencia_nivel)s, %(rotacion_ajustada)s,
-         %(tickets_mes)s, %(valor_historico)s, %(valor_ajustado)s, %(criterio_frecuencia)s, NOW(6))
+         %(tickets_mes)s, %(valor_historico)s, %(valor_ajustado)s, %(criterio_frecuencia)s,
+         %(venta_o_extrapolacion)s, NOW(6))
 """
 
 def escribir_planilla(conn: pymysql.Connection, filas: list[dict]) -> None:

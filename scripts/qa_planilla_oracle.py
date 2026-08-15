@@ -149,7 +149,7 @@ def verificar_sku(cur, sku, ventana, cerrados, ref):
     cur.execute("SELECT year, month, ventas_cantidad, dias_con_stock, dias_naturales_mes, "
                 "rotacion_diaria_real, rotacion_diaria_desestacionalizada, estado_mes, "
                 "frecuencia_nivel, rotacion_ajustada, tickets_mes, valor_historico, "
-                "valor_ajustado, criterio_frecuencia "
+                "valor_ajustado, criterio_frecuencia, venta_o_extrapolacion "
                 "FROM planilla_ventas_calculada WHERE sku=%s ORDER BY year, month", (sku,))
     stored = {(r[0], r[1]): r for r in cur.fetchall()}
     faltantes = [ym for ym in ventana if ym not in stored]
@@ -187,7 +187,7 @@ def verificar_sku(cur, sku, ventana, cerrados, ref):
     for ym in sorted(stored):
         y, m = ym
         (s_vta, s_ds, s_dn, s_rot, s_rde, s_est, s_niv, s_raj, s_tick, s_hist,
-         s_vaj, s_crit) = stored[ym][2:]
+         s_vaj, s_crit, s_ve) = stored[ym][2:]
         r_vta, r_tick = raw_v.get(ym, (0, 0))
         r_ds = raw_ds.get(ym, 0)
         dn = dias_mes(y, m)
@@ -223,6 +223,13 @@ def verificar_sku(cur, sku, ventana, cerrados, ref):
         else:
             extrap = round(r_vta * (2 - r_ds / dn), 2)
         es_quiebre = r_est != "normal"
+        # Issue #137: "V/E" (venta real o extrapolacion) -- None para
+        # sin_stock siempre (mismo criterio que venta_o_extrapolacion() en
+        # run_calc_planilla.py), vta real si no hubo quiebre, extrap si lo
+        # hubo. r_ds<=0 <=> sin_stock (invariante ya verificado: quiebre_parcial
+        # siempre tiene dias_con_stock>0), asi que "extrap if es_quiebre" ya
+        # da None para sin_stock sin necesitar un caso aparte.
+        r_ve = extrap if es_quiebre else float(r_vta)
         if es_quiebre and extrap is None:
             r_vaj, r_crit = ((round(historico, 2), "historico") if historico is not None
                              else (round(float(r_vta), 2), "real_extrapolado"))
@@ -246,13 +253,14 @@ def verificar_sku(cur, sku, ventana, cerrados, ref):
             ("hist", s_hist, historico, feq(s_hist, historico)),
             ("vaj", s_vaj, r_vaj, feq(s_vaj, r_vaj)),
             ("criterio", s_crit, r_crit, s_crit == r_crit),
+            ("venta_o_extrap", s_ve, r_ve, feq(s_ve, r_ve)),
         ]
         malos = [c for c in checks if not c[3]]
         for nombre, sv, rv, _bien in malos:
             print(f"    {y}-{m:02d} {nombre}: almacenado={sv} recomputado={rv} -> MISMATCH")
         fallas += len(malos)
     if fallas == 0:
-        print(f"  Meses: {len(stored)} filas x 10 campos verificados contra tablas crudas -> OK")
+        print(f"  Meses: {len(stored)} filas x 11 campos verificados contra tablas crudas -> OK")
     niv_ref = stored.get(ref, [None] * 9)[8] if ref in stored else None
     if niv_ref is not None and niv_ref != nivel:
         print(f"    frecuencia_nivel: almacenado={niv_ref} recomputado={nivel} -> MISMATCH")

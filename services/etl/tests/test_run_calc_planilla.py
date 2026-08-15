@@ -14,6 +14,7 @@ from run_calc_planilla import (
     extrapolacion_mes,
     meses_disponibles_historico,
     valor_ajustado_y_criterio,
+    venta_o_extrapolacion,
     ventana_meses,
 )
 
@@ -263,6 +264,35 @@ def test_sin_base_para_proyectar_devuelve_none(ds, dn):
     lo hace caer a Historico.
     """
     assert extrapolacion_mes(ventas=10, dias_con_stock=ds, dias_naturales=dn) is None
+
+
+# ── venta_o_extrapolacion() -- Issue #137 ────────────────────────────────────
+# "V/E" de la hoja de detalle, persistido para que ya no haga falta
+# recalcularlo en el browser (la fuente de la desincronizacion real de #129).
+
+def test_venta_o_extrapolacion_mes_normal_es_la_venta_real():
+    assert venta_o_extrapolacion("normal", ventas_cantidad=42, extrapolacion=None) == 42.0
+
+
+def test_venta_o_extrapolacion_sin_stock_es_none_sin_importar_la_extrapolacion():
+    """
+    Distinto de valor_no_historico (dentro de valor_ajustado_y_criterio):
+    ese cae a ventas_cantidad cuando sin_stock+sin historico. V/E en cambio
+    queda vacio siempre para sin_stock, igual que promete la hoja
+    "Criterios" ("Vacia si el mes no tuvo stock").
+    """
+    assert venta_o_extrapolacion("sin_stock", ventas_cantidad=5, extrapolacion=None) is None
+    assert venta_o_extrapolacion("sin_stock", ventas_cantidad=5, extrapolacion=9.17) is None
+
+
+def test_venta_o_extrapolacion_quiebre_parcial_usa_la_extrapolacion():
+    assert venta_o_extrapolacion("quiebre_parcial", ventas_cantidad=6, extrapolacion=10.8) == 10.8
+
+
+def test_venta_o_extrapolacion_quiebre_parcial_sin_extrapolacion_es_none():
+    """No deberia pasar en la practica (quiebre_parcial siempre tiene
+    dias_con_stock > 0), pero no debe inventar un valor si pasara."""
+    assert venta_o_extrapolacion("quiebre_parcial", ventas_cantidad=6, extrapolacion=None) is None
 
 
 # ── Fallbacks no cubiertos por el mail (decididos en la sesion de grill-me) ──

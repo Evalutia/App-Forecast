@@ -387,6 +387,9 @@ public class EvalutiaDbContext : DbContext
       entity.Property(e => e.CriterioFrecuencia)
           .HasColumnType("enum('historico','promedio','real_extrapolado')")
           .HasColumnName("criterio_frecuencia");
+      entity.Property(e => e.VentaOExtrapolacion)
+          .HasPrecision(10, 2)
+          .HasColumnName("venta_o_extrapolacion");
     });
 
     modelBuilder.Entity<PlanillaSugerencias>(entity =>

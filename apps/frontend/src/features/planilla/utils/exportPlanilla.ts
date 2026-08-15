@@ -88,32 +88,6 @@ function applyHeaderStyle(headerRow: ExcelJS.Row, firstSummaryCol: number): void
   });
 }
 
-// Issue #66: "VentaReal/Extrapolación" no esta persistido por separado en #62
-// (solo valor_ajustado y criterio_frecuencia) -- se reconstruye con datos ya
-// expuestos, replicando la formula de run_calc_planilla.py.
-//
-// Issue #122: sin_stock (0 días con stock ese mes) no da rotacionDiariaReal
-// null como asumía el comentario original -- el backend lo manda en 0, así
-// que `!= null` dejaba pasar `0 * diasNaturalesMes = 0` en vez de la celda
-// vacía que la hoja "Criterios" promete ("Vacía si el mes no tuvo stock").
-// Se chequea estadoMes directo, no la nulabilidad de rotacionDiariaReal.
-//
-// Issue #129: la extrapolación ahora pondera por cuánto del mes se pudo
-// observar -- `ventas * (2 - díasConStock / díasDelMes)` -- en vez de proyectar
-// el ritmo de los días con stock al mes entero. Tiene que seguir a
-// extrapolacion_mes() de run_calc_planilla.py: si divergen, esta columna
-// contradice al valor ajustado que aparece a su lado en la misma hoja.
-function ventaRealOExtrapolacion(mes: PlanillaMesDto): number | null {
-  if (mes.estadoMes === 'normal') return mes.ventasCantidad ?? 0;
-  if (mes.estadoMes === 'sin_stock' || mes.estadoMes === 'sin_datos') return null;
-
-  const ventas = mes.ventasCantidad ?? 0;
-  const ds = mes.diasConStock ?? 0;
-  if (ds <= 0 || mes.diasNaturalesMes <= 0) return null;
-  if (ventas <= 0) return ventas;
-  return ventas * (2 - ds / mes.diasNaturalesMes);
-}
-
 // Issue #66: etiqueta legible del criterio (mismo criterio que #65 en
 // PlanillaTable.tsx) -- el Excel lo lee el cliente directo, no un programador.
 function criterioFrecuenciaLabel(criterio: string | null | undefined, estadoMes: string): string {
@@ -315,7 +289,10 @@ function buildHojaDetalle(wb: ExcelJS.Workbook, items: PlanillaVentasDto[]): voi
       ),
       ...item.meses.map(m => m.ticketsMes),
       ...item.meses.map(m => m.valorHistorico ?? null),
-      ...item.meses.map(m => ventaRealOExtrapolacion(m)),
+      // Issue #137: persistido por el ETL -- ya no se reconstruye replicando
+      // la formula, elimina la clase de bug donde este valor podia
+      // contradecir a VAj por desincronizacion de deploy (ver #129).
+      ...item.meses.map(m => m.ventaOExtrapolacion),
       ...item.meses.map(m => criterioFrecuenciaLabel(m.criterioFrecuencia, m.estadoMes)),
       ...item.meses.map(m => m.valorAjustado ?? null),
     ]);

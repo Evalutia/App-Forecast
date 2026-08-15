@@ -44,6 +44,7 @@ namespace WebApi.Controllers.Planilla.DTOs
     public decimal? ValorHistorico { get; init; }
     public decimal? ValorAjustado { get; init; }
     public string? CriterioFrecuencia { get; init; }
+    public decimal? VentaOExtrapolacion { get; init; }
 
     public PlanillaMesOutDto(PlanillaMesDto dto)
     {
@@ -62,6 +63,7 @@ namespace WebApi.Controllers.Planilla.DTOs
       ValorHistorico                 = dto.ValorHistorico;
       ValorAjustado                  = dto.ValorAjustado;
       CriterioFrecuencia             = dto.CriterioFrecuencia;
+      VentaOExtrapolacion            = dto.VentaOExtrapolacion;
     }
   }
 

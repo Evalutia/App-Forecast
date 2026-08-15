@@ -18,5 +18,10 @@ namespace WebApi.Models
     public decimal? ValorHistorico { get; set; }
     public decimal? ValorAjustado { get; set; }
     public string? CriterioFrecuencia { get; set; }
+    // Issue #137: "V/E" -- venta real del mes, o su extrapolacion si hubo
+    // quiebre. Antes se recalculaba en el frontend (TypeScript, 3 copias de
+    // la formula); ahora se persiste en la misma corrida que ValorAjustado
+    // para que las dos columnas no puedan desincronizarse.
+    public decimal? VentaOExtrapolacion { get; set; }
   }
 }

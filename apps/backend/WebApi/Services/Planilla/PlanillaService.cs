@@ -84,7 +84,8 @@ namespace Services.Planilla
                     TicketsMes                     = f.Fila.TicketsMes,
                     ValorHistorico                 = f.Fila.ValorHistorico,
                     ValorAjustado                  = f.Fila.ValorAjustado,
-                    CriterioFrecuencia             = f.Fila.CriterioFrecuencia
+                    CriterioFrecuencia             = f.Fila.CriterioFrecuencia,
+                    VentaOExtrapolacion            = f.Fila.VentaOExtrapolacion
                   })
                   .ToList(), ventana)
             };

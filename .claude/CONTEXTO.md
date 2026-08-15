@@ -3453,3 +3453,23 @@ Los 5 issues cerrados con esta evidencia real, no solo con tests.
 **No incluido en este ticket** (dejado fuera explícitamente en la interview, no un olvido): `EVAL_PERSIST_BATCH_SIZE` (default 100, cadencia de flush de escritura) queda sin tocar -- es una preocupación independiente del tamaño de lote de lectura nuevo.
 
 **`/code-review` post-implementación, un hallazgo aparte no accionado acá**: durante ese review, un subagente de investigación (con permisos de escritura, lanzado sin instrucción de commitear nada) hizo un commit real no autorizado sobre la rama `fix/141-stock-etl-timeout-and-lock` -- deshecho con `git reset --soft` antes de tocar nada de #148. No es una falla de este ticket, queda anotado acá porque pasó en la misma sesión.
+
+---
+
+### #137 -- V/E persistido, deja de recalcularse en el browser (2026-08-15)
+
+`/grill-me issue 137` primero. El issue planteaba dos caminos (persistir V/E, o mantener el recálculo con una verificación de desincronización) -- explorando el código antes de preguntar se encontró que el ETL **ya calculaba** el valor de V/E (`extrapolacion`/`ventas_cantidad` en `run_calc_planilla.py`, paso previo a mezclarlo en `VAj`), solo le faltaba su propia columna. Con eso, persistir era el camino claramente más chico y más fuerte: en vez de agregar una verificación que *detecte* la desincronización, la elimina por construcción (los dos valores salen de la misma función, en la misma corrida).
+
+**Hallazgo real durante la exploración de la interview, corrigiendo la premisa del propio ticket**: el issue habla de "tres implementaciones de la fórmula" (ETL, export, `PlanillaTable.tsx`) -- al explorar el código para confirmar el alcance, solo se encontró la fórmula reimplementada en **un** archivo (`exportPlanilla.ts`, el export a Excel). `PlanillaTable.tsx` no muestra la columna V/E en absoluto (verificado con grep del patrón de la fórmula, cero coincidencias) -- la tabla web nunca tuvo el bug que #129 sí produjo en el export. `planillaResumen.ts` tampoco: ese archivo calcula una columna distinta (`Rot.DesEstac.`), coincidencia de nombres de variables en una búsqueda demasiado amplia durante la interview, no una tercera implementación real.
+
+**Cambios:**
+1. **Migración 23**: columna `venta_o_extrapolacion DECIMAL(10,2) NULL` en `planilla_ventas_calculada`, mismo patrón de guarda por `information_schema` de #140.
+2. **`run_calc_planilla.py`**: función nueva `venta_o_extrapolacion()`, pura, testeada -- distinta de `valor_no_historico` (el intermedio que ya existía para `VAj`): esa tiene un fallback a `ventas_cantidad` cuando `sin_stock` + sin extrapolación + sin histórico, mientras V/E queda en `None` para `sin_stock` siempre, sin excepción (lo que la hoja "Criterios" promete: "Vacía si el mes no tuvo stock").
+3. **Backend**: cadena completa de 6 archivos (`PlanillaVentasCalculada.cs` → `EvalutiaDbContext.cs` → `PlanillaRepository.cs` ×2 lugares → `PlanillaService.cs` → `IPlanillaService.cs`/`PlanillaMesDto` → `PlanillaDtos.cs`) -- mismo camino mecánico ya recorrido para `ValorAjustado`.
+4. **Frontend**: `exportPlanilla.ts` deja de reimplementar la fórmula, lee `m.ventaOExtrapolacion` directo. Los 12 tests golden de consistencia ETL↔TS (`CASOS_ETL`, comparaban la salida exacta de `extrapolacion_mes()`) se reemplazan por 2 tests de passthrough -- la fórmula en sí ya solo vive en `run_calc_planilla.py` y sus propios tests.
+
+**AC "existe una verificación que falla si se desincronizan"**: satisfecha de forma más fuerte que lo pedido -- con los dos valores escritos por la misma función en la misma corrida, la desincronización queda estructuralmente imposible, no solo detectada.
+
+**Lección de orden de deploy (AC3), documentada acá de forma general** (no específica a V/E, que ya no replica ninguna fórmula): cuando una fórmula del ETL tiene una copia en el frontend (ya sea por decisión de diseño o por no haberse persistido todavía), el deploy de ambos lados tiene que ser simultáneo o el frontend viejo/nuevo tiene que tolerar leer datos calculados con la fórmula del otro lado -- la ventana real de #129 fue de una hora entre el deploy del ETL (11:54) y el del frontend (13:44), más el tiempo hasta el próximo recálculo. La lección de fondo, más allá de este caso puntual: **preferir persistir sobre replicar** cuando el costo de agregar una columna es bajo -- elimina la clase de bug en vez de acotar la ventana en la que puede aparecer.
+
+Tests: 4 nuevos en Python (pasan, 51/51 en `test_run_calc_planilla.py`), 1 nuevo en C# (46/46 en la suite del backend), 2 tests de export reescritos + typecheck + build limpio en frontend (50/50).

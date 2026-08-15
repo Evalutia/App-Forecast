@@ -68,5 +68,6 @@ namespace Services.Planilla
     public decimal? ValorHistorico { get; init; }
     public decimal? ValorAjustado { get; init; }
     public string? CriterioFrecuencia { get; init; }
+    public decimal? VentaOExtrapolacion { get; init; }
   }
 }

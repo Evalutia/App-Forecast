@@ -24,6 +24,7 @@ function mes(overrides: Partial<PlanillaMesDto>): PlanillaMesDto {
     valorHistorico: null,
     valorAjustado: null,
     criterioFrecuencia: null,
+    ventaOExtrapolacion: null,
     ...overrides,
   };
 }

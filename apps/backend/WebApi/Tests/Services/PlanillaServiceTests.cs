@@ -150,7 +150,26 @@ namespace Tests.Services
       marzo.RotacionDiariaDesestacionalizada.Should().BeNull();
       marzo.ValorAjustado.Should().BeNull();
       marzo.CriterioFrecuencia.Should().BeNull();
+      marzo.VentaOExtrapolacion.Should().BeNull();
       marzo.DiasNaturalesMes.Should().Be(31); // marzo real, no un 0 inventado
+    }
+
+    [Fact]
+    public void GetVentas_VentaOExtrapolacion_LlegaTalCualDesdeLaFilaPersistida()
+    {
+      // Issue #137: pasa por toda la cadena real (repositorio -> servicio ->
+      // DTO), no solo por el modelo EF -- es justamente donde #137 encontro
+      // que faltaba mapear (3 capas intermedias entre la columna y el DTO
+      // que expone el controller).
+      var service = CreateService(out var db);
+      var fila = Fila("SKU-VE", 2026, 5);
+      fila.VentaOExtrapolacion = 75.50m;
+      db.PlanillasVentasCalculadas.Add(fila);
+      db.SaveChanges();
+
+      var (items, _) = service.GetVentas(page: 1, pageSize: 50);
+
+      items.Single().Meses.Single().VentaOExtrapolacion.Should().Be(75.50m);
     }
 
     [Fact]

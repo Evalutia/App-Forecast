@@ -24,6 +24,7 @@ function mes(overrides: Partial<PlanillaMesDto>): PlanillaMesDto {
     valorHistorico: null,
     valorAjustado: null,
     criterioFrecuencia: null,
+    ventaOExtrapolacion: null,
     ...overrides,
   };
 }
@@ -185,77 +186,26 @@ describe('buildPlanillaWorkbook (#107)', () => {
     expect(fillColor(filaB.getCell(18))).toBe('FFF1F5F9'); // gris sin_datos, no color de criterio
   });
 
-  it('hoja 2: mes sin_stock exporta V/E vacío, no 0,00 (#122)', () => {
-    // Mismo bug que en hoja 1: rotacionDiariaReal=0 (no null) para
-    // sin_stock hacía que `!= null` calculara 0*dias=0 en vez de dejar
-    // la celda vacía como promete "Criterios" para esta columna.
-    const filaB = hoja2.getRow(5); // SKU-B
-    expect(filaB.getCell(14).value).toBeNull(); // V/E.Jul (índice 2, sin_stock)
-  });
+  // Issue #137: V/E ahora se persiste (el ETL ya calculaba este valor antes
+  // de mezclarlo en VAj) -- el export ya no reimplementa extrapolacion_mes(),
+  // solo muestra lo que llega en ventaOExtrapolacion. Los tests de la fórmula
+  // en sí (ponderar por días con stock, tope en el doble, sin_stock vacío)
+  // viven en services/etl/tests/test_run_calc_planilla.py, la única
+  // implementación que queda. Acá solo se verifica que el export es un
+  // passthrough fiel, sin reintroducir ningún cálculo propio.
 
-  it('hoja 2: V/E de un mes con quiebre pondera por los días con stock (#129)', () => {
-    // 50 unidades vendidas en 15 de 30 días. Antes se proyectaba
-    // (50/15)*30 = 100 — el doble de lo vendido, por haber tenido stock la
-    // mitad del mes. Ahora: 50 * (2 - 15/30) = 75.
-    const mitad = mes({
-      month: 6, estadoMes: 'quiebre_parcial', ventasCantidad: 50,
-      diasConStock: 15, diasNaturalesMes: 30, rotacionDiariaReal: 50 / 15,
-    });
-    const sku: PlanillaVentasDto = { ...skuA, sku: 'SKU-MITAD', meses: [skuA.meses[0], mitad, skuA.meses[2]] };
+  it('hoja 2: V/E muestra el valor persistido tal cual (#137)', () => {
+    // Passthrough puro (exportPlanilla.ts:295 ya no reimplementa la
+    // formula) -- ventaOExtrapolacion es el unico campo del que depende.
+    const conValor = mes({ month: 6, ventaOExtrapolacion: 75 });
+    const sku: PlanillaVentasDto = { ...skuA, sku: 'SKU-VE', meses: [skuA.meses[0], conValor, skuA.meses[2]] };
     const hoja = buildPlanillaWorkbook([sku], sugerencias).getWorksheet('Detalle de cálculo')!;
     expect(hoja.getRow(4).getCell(13).value).toBe(75); // V/E.Jun
   });
 
-  // ── Consistencia con el ETL (#129) ─────────────────────────────────────────
-  // Estos valores son la salida EXACTA de extrapolacion_mes() en
-  // services/etl/run_calc_planilla.py, que es la implementación de referencia.
-  // La fórmula vive en tres lugares (ETL, este export y qa_planilla_oracle.py);
-  // si alguna se toca sin las otras, el Excel muestra un V/E que contradice al
-  // VAj de la celda de al lado. Este test es lo que impide que eso pase en
-  // silencio: si falla, la implementación TS se desincronizó del ETL.
-  const CASOS_ETL = [
-    { ventas: 6, ds: 6, dn: 30, esperado: 10.8 },
-    { ventas: 29, ds: 29, dn: 30, esperado: 29.97 },
-    { ventas: 5, ds: 5, dn: 30, esperado: 9.17 },
-    { ventas: 30, ds: 30, dn: 30, esperado: 30.0 },
-    { ventas: 10, ds: 1, dn: 31, esperado: 19.68 },
-    { ventas: 0, ds: 5, dn: 30, esperado: 0.0 },
-    { ventas: -5, ds: 6, dn: 30, esperado: -5.0 },
-    { ventas: 562, ds: 13, dn: 31, esperado: 888.32 },
-    { ventas: 30, ds: 1, dn: 31, esperado: 59.03 },
-    { ventas: 100, ds: 15, dn: 30, esperado: 150.0 },
-    { ventas: 9, ds: 16, dn: 31, esperado: 13.35 },
-    { ventas: 1, ds: 26, dn: 31, esperado: 1.16 },
-  ];
-
-  it.each(CASOS_ETL)(
-    'V/E coincide con el ETL: $ventas uds en $ds de $dn días (#129)',
-    ({ ventas, ds, dn, esperado }) => {
-      const m = mes({
-        month: 6, estadoMes: 'quiebre_parcial',
-        ventasCantidad: ventas, diasConStock: ds, diasNaturalesMes: dn,
-        rotacionDiariaReal: ventas / ds,
-      });
-      const sku: PlanillaVentasDto = { ...skuA, sku: 'SKU-ETL', meses: [skuA.meses[0], m, skuA.meses[2]] };
-      const hoja = buildPlanillaWorkbook([sku], sugerencias).getWorksheet('Detalle de cálculo')!;
-      const ve = hoja.getRow(4).getCell(13).value as number;
-      // el ETL redondea a 2 decimales al persistir; el export no redondea
-      expect(Number(ve.toFixed(2))).toBe(esperado);
-    },
-  );
-
-  it('hoja 2: V/E nunca supera el doble de lo vendido (#129)', () => {
-    // El tope emerge de la fórmula: con muy pocos días de stock el
-    // multiplicador tiende a 2 pero no lo alcanza.
-    const casi = mes({
-      month: 6, estadoMes: 'quiebre_parcial', ventasCantidad: 40,
-      diasConStock: 1, diasNaturalesMes: 30, rotacionDiariaReal: 40,
-    });
-    const sku: PlanillaVentasDto = { ...skuA, sku: 'SKU-TOPE', meses: [skuA.meses[0], casi, skuA.meses[2]] };
-    const hoja = buildPlanillaWorkbook([sku], sugerencias).getWorksheet('Detalle de cálculo')!;
-    const ve = hoja.getRow(4).getCell(13).value as number;
-    expect(ve).toBeLessThan(80);      // 2 × 40
-    expect(ve).toBeGreaterThan(75);   // pero cerca del tope
+  it('hoja 2: mes sin_stock exporta V/E vacío, no 0,00 (#122)', () => {
+    const filaB = hoja2.getRow(5); // SKU-B
+    expect(filaB.getCell(14).value).toBeNull(); // V/E.Jul (índice 2, sin_stock)
   });
 });
 
