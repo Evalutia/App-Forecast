@@ -29,7 +29,9 @@ CREATE TABLE IF NOT EXISTS grupos (
 -- Seed desde el PDF de grupos del cliente. visible_planilla = false solo para
 -- 199 (sin valor para inventario) y 200 (exportacion web). aplica_modelo_econometrico
 -- = true solo para 201.
-INSERT INTO grupos (id, descripcion, visible_planilla, aplica_modelo_econometrico) VALUES
+-- Issue #140: INSERT IGNORE (antes INSERT simple) -- re-correr este archivo
+-- rompia con "Duplicate entry" contra la PRIMARY KEY de grupos.id.
+INSERT IGNORE INTO grupos (id, descripcion, visible_planilla, aplica_modelo_econometrico) VALUES
   (5,   'TINTA CPT SIN CABEZAL',          TRUE,  FALSE),
   (6,   'CINTA MATRICIAL CPT',            TRUE,  FALSE),
   (10,  'TINTA CPT CON CABEZAL',          TRUE,  FALSE),
@@ -101,14 +103,41 @@ INSERT INTO grupos (id, descripcion, visible_planilla, aplica_modelo_econometric
 -- existentes (hoy el 100% de los articulos en la base son del grupo 201, unico
 -- procesado hasta ahora por el ETL). El DROP DEFAULT siguiente evita que un insert
 -- futuro que se olvide de pasar grupo_id caiga silenciosamente en 201.
-ALTER TABLE articulos
-  ADD COLUMN grupo_id INT UNSIGNED NOT NULL DEFAULT 201 AFTER temporada_nombre,
-  ADD CONSTRAINT fk_articulos_grupo FOREIGN KEY (grupo_id)
-    REFERENCES grupos(id)
-    ON UPDATE CASCADE
-    ON DELETE RESTRICT;
+-- Issue #140: guardado via information_schema -- ADD COLUMN/ADD CONSTRAINT
+-- no son idempotentes. DROP DEFAULT de mas abajo si es naturalmente
+-- idempotente (verificado: no tira error aunque no haya default que borrar),
+-- no necesita guarda.
+SET @col := (
+  SELECT COUNT(1) FROM information_schema.columns
+  WHERE table_schema = DATABASE()
+    AND table_name = 'articulos'
+    AND column_name = 'grupo_id'
+);
+SET @sql := IF(@col = 0,
+  'ALTER TABLE articulos
+     ADD COLUMN grupo_id INT UNSIGNED NOT NULL DEFAULT 201 AFTER temporada_nombre,
+     ADD CONSTRAINT fk_articulos_grupo FOREIGN KEY (grupo_id)
+       REFERENCES grupos(id)
+       ON UPDATE CASCADE
+       ON DELETE RESTRICT;',
+  'SELECT 1;'
+);
+PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
 
 ALTER TABLE articulos
   ALTER COLUMN grupo_id DROP DEFAULT;
 
-CREATE INDEX idx_articulos_grupo_id ON articulos (grupo_id);
+SET @idx := (
+  SELECT COUNT(1) FROM information_schema.STATISTICS
+  WHERE table_schema = DATABASE()
+    AND table_name = 'articulos'
+    AND index_name = 'idx_articulos_grupo_id'
+);
+SET @sql2 := IF(@idx = 0,
+  'CREATE INDEX idx_articulos_grupo_id ON articulos (grupo_id);',
+  'SELECT 1;'
+);
+PREPARE stmt2 FROM @sql2; EXECUTE stmt2; DEALLOCATE PREPARE stmt2;
+
+-- Issue #140: auto-registro para services/etl/apply_migrations.sh / docker-entrypoint-initdb.d.
+INSERT IGNORE INTO schema_migrations (filename) VALUES ('10-grupos.sql');

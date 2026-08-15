@@ -39,3 +39,6 @@ SELECT a.sku, TRUE
 FROM articulos a
 JOIN grupos g ON g.id = a.grupo_id
 WHERE g.aplica_modelo_econometrico = TRUE;
+
+-- Issue #140: auto-registro para services/etl/apply_migrations.sh / docker-entrypoint-initdb.d.
+INSERT IGNORE INTO schema_migrations (filename) VALUES ('13-articulos-elegibilidad-econometrico.sql');

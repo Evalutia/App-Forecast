@@ -68,6 +68,27 @@ trap _registrar_abort_temprano EXIT
 : "${ID_EMPRESA:?missing}"
 : "${S_DEPOSITOS:?missing}"
 
+# Issue #140: infra/sql/*.sql no se aplica solo contra un volumen de MySQL
+# que ya existe -- migraciones de #86 y #102 quedaron meses sin aplicarse en
+# produccion, descubiertas recien cuando un job fallaba a mitad de camino
+# con "table doesn't exist". Se detecta ACA, mismo criterio que WS_URL de
+# arriba (fallar rapido con causa clara antes de tocar Pentaho), en vez de
+# dejar que un paso a mitad del .kjb reviente con un error criptico. Modo
+# --check-only: nunca aplica DDL sola, solo lee schema_migrations -- aplicar
+# una migracion pendiente sigue siendo, siempre, un paso manual
+# (services/etl/apply_migrations.sh sin argumentos).
+APPLY_MIGRATIONS_SH="${APPLY_MIGRATIONS_SH:-/app/services/etl/apply_migrations.sh}"
+MIGRACIONES_PENDIENTES="$(bash "${APPLY_MIGRATIONS_SH}" --check-only 2>&1)" || {
+  # Code review: no asumir que un exit != 0 es SIEMPRE "hay pendientes" -- el
+  # mismo chequeo tambien falla si MySQL esta caido, las credenciales estan
+  # mal, o el script no existe en esa ruta. Relaya la salida real (que ya
+  # distingue el caso) en vez de una causa inventada que mandaria a
+  # correr apply_migrations.sh a mano por un motivo que no es el real.
+  OFELIA_ABORT_MOTIVO="chequeo de migraciones de infra/sql/ (apply_migrations.sh --check-only) fallo: $(echo "${MIGRACIONES_PENDIENTES}" | tr '\n' ' ')"
+  echo "[OFELIA][ERROR] ${OFELIA_ABORT_MOTIVO}" >&2
+  exit 1
+}
+
 # Issue #136: MySQL en reposo ya usa ~55% de los 3.7GB de la maquina, y
 # Pentaho nunca tuvo su heap ajustado -- el default de fabrica de spoon.sh
 # (de donde kitchen.sh delega) es "-Xms1024m -Xmx2048m". El diario SOLO, sin

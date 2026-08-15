@@ -84,6 +84,18 @@ def entorno(tmp_path):
         exit ${{FAKE_EVAL_RC:-0}}
         """)
 
+    # Issue #140: por default "sin pendientes" -- el camino feliz de los demas
+    # tests no debe verse afectado por este chequeo nuevo. Los tests de #140
+    # (mas abajo) pisan FAKE_MIGRATIONS_RC/FAKE_MIGRATIONS_OUTPUT puntualmente.
+    apply_migrations_stub = _escribir(tmp_path / "apply_migrations_stub.sh", f"""
+        #!/usr/bin/env bash
+        echo "apply_migrations:$*" >> "{llamadas}"
+        if [[ -n "${{FAKE_MIGRATIONS_OUTPUT:-}}" ]]; then
+          echo "${{FAKE_MIGRATIONS_OUTPUT}}" >&2
+        fi
+        exit ${{FAKE_MIGRATIONS_RC:-0}}
+        """)
+
     # Issue #136: el mensual solo se dispara el dia 1 -- para testear ambas
     # ramas sin depender del reloj real, se intercepta "date +%d" (usado solo
     # para esa decision). El script tambien usa "date -d yesterday +FORMATO"
@@ -118,6 +130,7 @@ def entorno(tmp_path):
         "CRON_JOBS": str(cron_stub),
         "KITCHEN": str(kitchen_stub),
         "EVAL_MENSUAL_SH": str(eval_mensual_stub),
+        "APPLY_MIGRATIONS_SH": str(apply_migrations_stub),
         "BACKFILL_LOCK_FILE": str(tmp_path / "no-existe.lock"),
         # En produccion es /app/services/etl/lock_backfill.sh; aca se apunta al
         # del repo. Es ruta absoluta a proposito -- ver test_layout_de_produccion.
@@ -199,11 +212,21 @@ def test_ofelia_sostiene_el_lock_mientras_corre(tmp_path):
         sleep 1
         exit 0
         """)
+    # Issue #140: mismo motivo que LOCK_BACKFILL_SH/WS_URL de mas abajo -- sin
+    # esto el script default a /app/services/etl/apply_migrations.sh real, que
+    # en este entorno de test intentaria conectarse de verdad a MySQL y
+    # abortaria ANTES de tomar el lock, exactamente la misma clase de gap que
+    # ya mordio a este test (arma su env a mano, no via el fixture `entorno`).
+    apply_migrations_stub = _escribir(tmp_path / "apply_migrations_stub.sh", """
+        #!/usr/bin/env bash
+        exit 0
+        """)
 
     env = {
         **os.environ,
         "CRON_JOBS": str(cron_stub),
         "KITCHEN": str(kitchen_stub),
+        "APPLY_MIGRATIONS_SH": str(apply_migrations_stub),
         "BACKFILL_LOCK_FILE": str(lock),
         # Issue #136: esta era la causa real del fallo sostenido en CI desde
         # el 2026-08-11 (el fix de #119) -- no es un problema de timing. Este
@@ -602,3 +625,69 @@ def test_falta_una_variable_de_config_registra_abort_temprano(entorno, falta):
     assert proc.returncode != 0
     abort_lineas = [ln for ln in registro if ln.startswith("cron:abort")]
     assert abort_lineas, f"falta de {falta} debe quedar registrada via abort"
+
+
+# ── Issue #140: migraciones pendientes de infra/sql/ se detectan antes de
+# arrancar, en vez de dejar que un paso a mitad del .kjb reviente con
+# "table doesn't exist" (ya paso con #86 y #102, meses sin aplicarse en
+# produccion sin que nada lo señalara) ─────────────────────────────────────
+
+def test_sin_migraciones_pendientes_corre_normal(entorno):
+    """Camino feliz: --check-only sale 0, el chequeo es transparente."""
+    proc, registro = _correr(entorno, FAKE_ETL_RC="0")
+
+    assert proc.returncode == 0
+    args_line = next(ln for ln in registro if ln.startswith("apply_migrations:"))
+    assert "--check-only" in args_line
+    assert "kitchen" in registro
+
+
+def test_migraciones_pendientes_aborta_con_mensaje_claro_antes_de_pentaho(entorno):
+    """
+    El AC central de #140: una migracion pendiente tiene que frenar la
+    corrida ANTES de tocar Pentaho, con un mensaje que diga cual falta --
+    no dejar que un paso a mitad del .kjb reviente con un error criptico de
+    MySQL mucho mas adelante.
+    """
+    proc, registro = _correr(
+        entorno,
+        FAKE_MIGRATIONS_RC="1",
+        FAKE_MIGRATIONS_OUTPUT="  - 23-nueva-migracion.sql",
+    )
+
+    assert proc.returncode != 0
+    assert "23-nueva-migracion.sql" in proc.stderr
+    assert "kitchen" not in registro, "no debe llegar a invocar Pentaho con migraciones pendientes"
+
+
+def test_migraciones_pendientes_registra_abort_temprano(entorno):
+    """
+    Mismo criterio que #132/#139: el trap de abort temprano ya esta
+    registrado antes de este chequeo (va despues de WS_URL/ID_EMPRESA/
+    S_DEPOSITOS, que a su vez van despues del trap), asi que una migracion
+    pendiente queda registrada en jobs_historial via `abort`, no se pierde
+    en el log efimero de Docker.
+    """
+    proc, registro = _correr(
+        entorno,
+        FAKE_MIGRATIONS_RC="1",
+        FAKE_MIGRATIONS_OUTPUT="  - 23-nueva-migracion.sql",
+    )
+
+    assert proc.returncode != 0
+    abort_lineas = [ln for ln in registro if ln.startswith("cron:abort")]
+    assert abort_lineas, "migracion pendiente debe quedar registrada via abort"
+    assert "23-nueva-migracion.sql" in abort_lineas[0]
+
+
+def test_check_only_nunca_recibe_argumentos_de_aplicacion(entorno):
+    """
+    Guardrail: el chequeo pre-flight tiene que invocar SIEMPRE con
+    --check-only, nunca en modo aplicar -- este script nunca debe poder
+    correr DDL sola contra produccion sin supervision humana.
+    """
+    proc, registro = _correr(entorno, FAKE_ETL_RC="0")
+
+    assert proc.returncode == 0
+    args_line = next(ln for ln in registro if ln.startswith("apply_migrations:"))
+    assert args_line.strip() == "apply_migrations:--check-only"

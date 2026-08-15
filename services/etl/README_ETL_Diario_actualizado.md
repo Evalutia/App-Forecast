@@ -165,6 +165,72 @@ código ni reconstruir nada.
 
 ---
 
+### Migraciones de `infra/sql/` — Issue #140
+
+`infra/sql/*.sql` **no se aplica solo** contra un volumen de MySQL que ya
+existe — `docker-entrypoint-initdb.d` (donde `docker-compose.yml` monta
+`infra/sql/`) solo corre en un volumen **recién creado y vacío**. En
+producción, donde el volumen existe desde hace meses, un archivo `.sql`
+nuevo se queda ahí sentado hasta que alguien se acuerde de correrlo a mano.
+Ya pasó dos veces (migraciones de los issues #86 y #102, meses sin
+aplicarse, descubiertas recién cuando un job fallaba a mitad de camino con
+`"table doesn't exist"`).
+
+**Registro:** la tabla `schema_migrations(filename, applied_at)` guarda qué
+archivo se aplicó y cuándo. Se puede consultar directo:
+
+```sql
+SELECT filename, applied_at FROM schema_migrations ORDER BY applied_at;
+```
+
+**Agregar una migración nueva:**
+
+1. Crear `infra/sql/NN-descripcion.sql` (el número siguiente al más alto que
+   exista — hay números repetidos históricos, ej. dos archivos `08-*`, así
+   que el número no es una clave única, solo una convención de orden).
+2. Que las sentencias sean **idempotentes** (correr el archivo dos veces no
+   debe romper) — `CREATE TABLE IF NOT EXISTS`, `INSERT IGNORE`/`ON DUPLICATE
+   KEY UPDATE`, `MODIFY COLUMN` (naturalmente idempotente) son seguros
+   directo. `CREATE INDEX` y `ALTER TABLE ... ADD COLUMN`/`ADD CONSTRAINT`
+   **no lo son** en MySQL (a diferencia de Postgres/MariaDB, no existe un
+   `IF NOT EXISTS` para eso) — hay que guardarlos con un chequeo previo
+   contra `information_schema` (ver cualquier archivo de `infra/sql/` como
+   plantilla, ej. `07-articulos-factor-estacional-estado.sql` o
+   `15-planilla-frecuencia-tickets.sql`).
+3. Terminar el archivo con la línea de auto-registro (se usa tanto en un
+   volumen nuevo como en uno existente):
+   ```sql
+   INSERT IGNORE INTO schema_migrations (filename) VALUES ('NN-descripcion.sql');
+   ```
+
+**Aplicarla en un entorno existente** (local o producción, cada uno por
+separado — no hay sync automático entre ellos):
+
+```bash
+docker compose exec etl bash /app/services/etl/apply_migrations.sh
+```
+
+Aplica **todas** las pendientes, en orden, y corta en la primera que falle
+(no sigue con las siguientes). Detectar sin aplicar (lo que corre
+`run_ofelia.sh` como pre-flight antes de cada corrida nocturna, y aborta con
+un mensaje claro si hay algo pendiente en vez de dejar que un paso a mitad
+del `.kjb` reviente más adelante):
+
+```bash
+docker compose exec etl bash /app/services/etl/apply_migrations.sh --check-only
+```
+
+Nunca aplica DDL sola — `--check-only` es de solo lectura, y el cron nunca
+invoca el modo de aplicar. Correr la migración pendiente sigue siendo,
+siempre, un paso manual.
+
+Un volumen **recién creado** (dev nuevo, CI, una VM nueva) no necesita nada
+de esto: `docker-entrypoint-initdb.d` ya corrió los archivos completos, y
+cada uno se auto-registró al final — `schema_migrations` queda poblada
+igual, sin pasar por `apply_migrations.sh`.
+
+---
+
 ## Docker Compose (servicio `etl` resumido)
 
 ```yaml

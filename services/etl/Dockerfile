@@ -12,7 +12,7 @@ RUN printf '%s\n' 'Acquire::ForceIPv4 "true";' 'Acquire::Retries "5";' > /etc/ap
 RUN apt-get update -o Acquire::Retries=5 && \
     apt-get install -y --no-install-recommends \
       openjdk-11-jre-headless curl unzip ca-certificates tzdata locales \
-      python3 python3-pip \
+      python3 python3-pip default-mysql-client \
  && locale-gen C.UTF-8 \
  && rm -rf /var/lib/apt/lists/*
 

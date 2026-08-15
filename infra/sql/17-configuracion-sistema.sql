@@ -33,3 +33,6 @@ CREATE TABLE IF NOT EXISTS configuracion_sistema (
 INSERT IGNORE INTO configuracion_sistema (clave, valor, descripcion, actualizado_por) VALUES
   ('tickets_bajo_max', '2', 'Umbral de tickets (dias con venta en el mes) bajo -- <= este valor usa Historico en el blending de frecuencia de venta', NULL),
   ('tickets_alto_min', '5', 'Umbral de tickets (dias con venta en el mes) alto -- >= este valor usa Venta Real/Extrapolacion en el blending de frecuencia de venta', NULL);
+
+-- Issue #140: auto-registro para services/etl/apply_migrations.sh / docker-entrypoint-initdb.d.
+INSERT IGNORE INTO schema_migrations (filename) VALUES ('17-configuracion-sistema.sql');

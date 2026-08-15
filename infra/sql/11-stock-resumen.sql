@@ -32,3 +32,6 @@ CREATE TABLE IF NOT EXISTS stock_resumen_365 (
     ON UPDATE CASCADE
     ON DELETE RESTRICT
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+
+-- Issue #140: auto-registro para services/etl/apply_migrations.sh / docker-entrypoint-initdb.d.
+INSERT IGNORE INTO schema_migrations (filename) VALUES ('11-stock-resumen.sql');

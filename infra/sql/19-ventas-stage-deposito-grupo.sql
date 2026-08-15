@@ -59,3 +59,6 @@ SET @sql3 := IF(@idx_dep = 0,
   'SELECT 1;'
 );
 PREPARE stmt3 FROM @sql3; EXECUTE stmt3; DEALLOCATE PREPARE stmt3;
+
+-- Issue #140: auto-registro para services/etl/apply_migrations.sh / docker-entrypoint-initdb.d.
+INSERT IGNORE INTO schema_migrations (filename) VALUES ('19-ventas-stage-deposito-grupo.sql');

@@ -13,3 +13,6 @@ UPDATE grupos SET descripcion = 'KIT SISTEMA CONTÍNUO' WHERE id = 28;
 UPDATE grupos SET descripcion = 'PERIFÉRICOS' WHERE id = 50;
 UPDATE grupos SET descripcion = 'AURICULAR INALÁMBRICO' WHERE id = 67;
 UPDATE grupos SET descripcion = 'Modelo Econométrico' WHERE id = 201;
+
+-- Issue #140: auto-registro para services/etl/apply_migrations.sh / docker-entrypoint-initdb.d.
+INSERT IGNORE INTO schema_migrations (filename) VALUES ('12-fix-grupos-encoding.sql');

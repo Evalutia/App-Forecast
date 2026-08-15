@@ -11,8 +11,34 @@ USE evalutia;
 -- si reaparece -> activo. Es puramente informativo: no debe usarse para ocultar
 -- articulos por default en ninguna vista (planilla, predicciones, listados).
 
-ALTER TABLE articulos
-  ADD COLUMN factor_estacional DECIMAL(5,3) NULL AFTER stock_minimo,
-  ADD COLUMN estado ENUM('activo','inactivo') NOT NULL DEFAULT 'activo' AFTER factor_estacional;
+-- Issue #140: ALTER TABLE ADD COLUMN / CREATE INDEX no son idempotentes
+-- (fallan si la columna/indice ya existen) -- mismo patron de chequeo previo
+-- via information_schema ya usado en 04-etl-staging.sql/15-planilla-frecuencia-tickets.sql.
+SET @col := (
+  SELECT COUNT(1) FROM information_schema.columns
+  WHERE table_schema = DATABASE()
+    AND table_name = 'articulos'
+    AND column_name = 'factor_estacional'
+);
+SET @sql := IF(@col = 0,
+  "ALTER TABLE articulos
+     ADD COLUMN factor_estacional DECIMAL(5,3) NULL AFTER stock_minimo,
+     ADD COLUMN estado ENUM('activo','inactivo') NOT NULL DEFAULT 'activo' AFTER factor_estacional;",
+  'SELECT 1;'
+);
+PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
 
-CREATE INDEX idx_articulos_estado ON articulos (estado);
+SET @idx := (
+  SELECT COUNT(1) FROM information_schema.STATISTICS
+  WHERE table_schema = DATABASE()
+    AND table_name = 'articulos'
+    AND index_name = 'idx_articulos_estado'
+);
+SET @sql2 := IF(@idx = 0,
+  'CREATE INDEX idx_articulos_estado ON articulos (estado);',
+  'SELECT 1;'
+);
+PREPARE stmt2 FROM @sql2; EXECUTE stmt2; DEALLOCATE PREPARE stmt2;
+
+-- Issue #140: auto-registro para services/etl/apply_migrations.sh / docker-entrypoint-initdb.d.
+INSERT IGNORE INTO schema_migrations (filename) VALUES ('07-articulos-factor-estacional-estado.sql');

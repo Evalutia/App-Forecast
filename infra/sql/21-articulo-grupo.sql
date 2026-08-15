@@ -29,7 +29,18 @@ CREATE TABLE IF NOT EXISTS articulo_grupo (
     ON DELETE RESTRICT
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
-CREATE INDEX idx_articulo_grupo_grupo_id ON articulo_grupo (grupo_id);
+-- Issue #140: guardado via information_schema -- CREATE INDEX no es idempotente.
+SET @idx := (
+  SELECT COUNT(1) FROM information_schema.STATISTICS
+  WHERE table_schema = DATABASE()
+    AND table_name = 'articulo_grupo'
+    AND index_name = 'idx_articulo_grupo_grupo_id'
+);
+SET @sql := IF(@idx = 0,
+  'CREATE INDEX idx_articulo_grupo_grupo_id ON articulo_grupo (grupo_id);',
+  'SELECT 1;'
+);
+PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
 
 -- Staging del crawl en curso (mismo patron que ventas_historicas_stage,
 -- issue #42/#114): cada grupo del loop de run_extract_articulos.sh vuelca
@@ -65,3 +76,6 @@ CREATE TABLE IF NOT EXISTS articulo_grupo_stage (
 -- multiple real se descubra -- no pasa sola.
 INSERT IGNORE INTO articulo_grupo (sku, grupo_id)
   SELECT sku, grupo_id FROM articulos;
+
+-- Issue #140: auto-registro para services/etl/apply_migrations.sh / docker-entrypoint-initdb.d.
+INSERT IGNORE INTO schema_migrations (filename) VALUES ('21-articulo-grupo.sql');

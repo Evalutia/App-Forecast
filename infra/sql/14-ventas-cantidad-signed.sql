@@ -36,3 +36,6 @@ ALTER TABLE ventas_historicas_stage   MODIFY COLUMN cantidad INT NOT NULL;
 ALTER TABLE ventas_mensuales          MODIFY COLUMN ventas_cantidad BIGINT NOT NULL DEFAULT 0;
 ALTER TABLE planilla_ventas_calculada MODIFY COLUMN ventas_cantidad BIGINT NOT NULL DEFAULT 0;
 ALTER TABLE stock_resumen_365         MODIFY COLUMN ventas_365 BIGINT NOT NULL DEFAULT 0;
+
+-- Issue #140: auto-registro para services/etl/apply_migrations.sh / docker-entrypoint-initdb.d.
+INSERT IGNORE INTO schema_migrations (filename) VALUES ('14-ventas-cantidad-signed.sql');

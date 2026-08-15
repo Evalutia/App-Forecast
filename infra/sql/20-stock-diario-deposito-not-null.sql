@@ -62,3 +62,6 @@ SET @sql1 := IF(@col_type = 'YES' AND @dup_groups = 0,
   'SELECT 1;'
 );
 PREPARE stmt1 FROM @sql1; EXECUTE stmt1; DEALLOCATE PREPARE stmt1;
+
+-- Issue #140: auto-registro para services/etl/apply_migrations.sh / docker-entrypoint-initdb.d.
+INSERT IGNORE INTO schema_migrations (filename) VALUES ('20-stock-diario-deposito-not-null.sql');

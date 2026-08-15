@@ -139,3 +139,6 @@ CREATE TABLE IF NOT EXISTS stock_diario_stage (
   UNIQUE KEY uq_stock_stage_sku_fecha_deposito (sku, fecha, deposito_id),
   INDEX idx_sds_sku_fecha (sku, fecha)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+
+-- Issue #140: auto-registro para services/etl/apply_migrations.sh / docker-entrypoint-initdb.d.
+INSERT IGNORE INTO schema_migrations (filename) VALUES ('02-tablas.sql');

@@ -24,3 +24,6 @@ SET @sql := IF(@tipo_actual NOT LIKE '%eval_elegibilidad%',
   'SELECT 1;'
 );
 PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
+
+-- Issue #140: auto-registro para services/etl/apply_migrations.sh / docker-entrypoint-initdb.d.
+INSERT IGNORE INTO schema_migrations (filename) VALUES ('18-jobs-historial-eval-elegibilidad.sql');

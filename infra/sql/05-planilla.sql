@@ -36,4 +36,18 @@ CREATE TABLE IF NOT EXISTS planilla_ventas_calculada (
 
 -- La PK compuesta (sku, year, month) cubre la query principal del backend.
 -- Índice secundario para consultas por período (ej: todos los SKUs de un mes dado).
-CREATE INDEX idx_planilla_ym ON planilla_ventas_calculada (year, month);
+-- Issue #140: guardado via information_schema -- CREATE INDEX no es idempotente.
+SET @idx := (
+  SELECT COUNT(1) FROM information_schema.STATISTICS
+  WHERE table_schema = DATABASE()
+    AND table_name = 'planilla_ventas_calculada'
+    AND index_name = 'idx_planilla_ym'
+);
+SET @sql := IF(@idx = 0,
+  'CREATE INDEX idx_planilla_ym ON planilla_ventas_calculada (year, month);',
+  'SELECT 1;'
+);
+PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
+
+-- Issue #140: auto-registro para services/etl/apply_migrations.sh / docker-entrypoint-initdb.d.
+INSERT IGNORE INTO schema_migrations (filename) VALUES ('05-planilla.sql');
