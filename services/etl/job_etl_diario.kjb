@@ -106,10 +106,10 @@
 
     <!-- Issue #133: ventana propia para RUN EXTRACT VENTAS, desacoplada de
          FORCE_START/FORCE_END (que siguen siendo de un solo dia, para
-         RUN EXTRACT STOCKXML -- ConsStockXml devuelve siempre la foto de
+         RUN EXTRACT STOCKXML: ConsStockXml devuelve siempre la foto de
          HOY sin importar el rango pedido, un rango multi-dia ahi pisaria
          stock_diario real bajo fechas equivocadas). Ventas si es recuperable
-         (el WS acepta rangos historicos) -- run_ofelia.sh calcula estos dos
+         (el WS acepta rangos historicos): run_ofelia.sh calcula estos dos
          como una ventana de 7 dias terminando ayer, para que una noche
          perdida se reponga sola en la corrida siguiente. -->
     <parameter><name>SALES_FORCE_START</name><default_value></default_value></parameter>
