@@ -20,6 +20,7 @@ from ml.run_eval_elegibilidad_dry_run import (
     chunk_skus,
     build_detalle_exitoso,
     build_detalle_fallido,
+    decide_estado_final,
     TIPO_JOB,
 )
 
@@ -119,6 +120,25 @@ def test_build_detalle_fallido_incluye_error_y_version():
     assert detalle["eval_version"] == "eval-mensual-2026-07"
 
 
+# -------------------------------------------------------------------------
+# decide_estado_final -- issue #148: antes jobs_historial cerraba SIEMPRE
+# "exitoso" aunque un lote hubiera fallado (worst_returncode se trackeaba
+# pero nunca se usaba para decidir el estado persistido)
+# -------------------------------------------------------------------------
+
+def test_decide_estado_final_exitoso_cuando_todos_los_lotes_ok():
+    assert decide_estado_final(worst_returncode=0) == "exitoso"
+
+
+def test_decide_estado_final_fallido_cuando_algun_lote_fallo():
+    assert decide_estado_final(worst_returncode=1) == "fallido"
+
+
+def test_decide_estado_final_fallido_con_returncode_negativo():
+    # subprocess.returncode negativo == terminado por señal (ej. OOM killer)
+    assert decide_estado_final(worst_returncode=-9) == "fallido"
+
+
 def test_tipo_job_es_eval_elegibilidad():
     # Confirma el valor exacto que la migracion de #102 agrega al ENUM de
     # jobs_historial.tipo_job -- si este string no matchea, insert_job_start
@@ -135,5 +155,8 @@ if __name__ == "__main__":
     test_build_env_sin_eval_only_skus_no_falla()
     test_build_detalle_exitoso_incluye_resumen_y_metadata()
     test_build_detalle_fallido_incluye_error_y_version()
+    test_decide_estado_final_exitoso_cuando_todos_los_lotes_ok()
+    test_decide_estado_final_fallido_cuando_algun_lote_fallo()
+    test_decide_estado_final_fallido_con_returncode_negativo()
     test_tipo_job_es_eval_elegibilidad()
     print("OK - test_run_eval_elegibilidad_dry_run.py")

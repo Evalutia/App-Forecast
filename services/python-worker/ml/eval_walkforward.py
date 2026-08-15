@@ -2,6 +2,7 @@ import json
 import os
 import numpy as np
 import pandas as pd
+from sqlalchemy import text
 
 from ml.models import (
     fit_rf_with_walkforward,
@@ -12,7 +13,7 @@ from ml.models import (
     _mae,
 )
 from ioworker.db import DBConfig, get_engine, upsert_elegibilidad_metrics, insert_catalogo_modelos
-from ioworker.data import load_series_by_sku_mysql
+from ioworker.data import load_series_by_sku_mysql, build_only_skus_where
 from utils.versioning import resolve_version
 
 
@@ -59,16 +60,25 @@ def _load_meses_historia(engine, only_skus) -> dict:
     resampleada de load_series_by_sku_mysql, que trunca desde la primera
     venta con cantidad > 0 y por lo tanto subestimaria la historia real de
     un SKU cuyas filas iniciales fueran solo notas de credito (ver #81).
+
+    Issue #148: filtra por SKU en el propio SQL cuando se pasan only_skus
+    (mismo helper que load_series_by_sku_mysql desde #105), en vez de traer
+    el catalogo completo agrupado y filtrar despues en pandas. Nota (code
+    review post-implementacion): esta funcion solo se invoca si
+    EVAL_PERSIST=1 (ver `if PERSIST else {}` en main()), y ese flag no se
+    setea en ningun lugar del repo hoy -- el fix es correcto y protege
+    contra el dia que se active, pero no es el que resuelve el incidente de
+    #148 (eso lo resuelve unicamente activar EVAL_BATCH_SIZE).
     """
-    q = """
+    where_clause, params = build_only_skus_where(only_skus)
+
+    q = f"""
         SELECT sku, TIMESTAMPDIFF(MONTH, MIN(fecha), MAX(fecha)) + 1 AS meses_historia
         FROM ventas_historicas
+        {where_clause}
         GROUP BY sku
     """
-    df = pd.read_sql_query(q, con=engine)
-    if only_skus:
-        only = set(s.strip() for s in only_skus if s and s.strip())
-        df = df[df["sku"].isin(only)]
+    df = pd.read_sql_query(text(q), con=engine, params=params)
     return dict(zip(df["sku"], df["meses_historia"].astype(int)))
 
 

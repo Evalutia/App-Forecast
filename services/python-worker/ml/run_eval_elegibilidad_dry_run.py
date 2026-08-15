@@ -179,6 +179,19 @@ def build_detalle_fallido(error: Exception, version: str) -> Dict:
     return {"error": str(error), "eval_version": version}
 
 
+def decide_estado_final(worst_returncode: int) -> str:
+    """
+    Issue #148: antes, jobs_historial cerraba SIEMPRE con estado="exitoso"
+    aunque un lote de eval_walkforward.py hubiera terminado con returncode
+    distinto de 0 (worst_returncode ya se trackeaba e imprimia un WARN, pero
+    nunca cambiaba el estado persistido) -- mismo patron de bug que #131/#132
+    ya corrigieron para el ETL diario, acá en el job mensual. Mismo criterio
+    binario que esos tickets: cualquier lote fallido marca la corrida entera
+    como "fallido", sin agregar un estado "parcial" nuevo al ENUM.
+    """
+    return "fallido" if worst_returncode != 0 else "exitoso"
+
+
 # -------------------------------------------------------------------------
 # main
 # -------------------------------------------------------------------------
@@ -208,8 +221,13 @@ def main() -> None:
                 env = build_env_for_batch(os.environ.copy(), version, batch)
                 proc = run_eval_walkforward(env, cwd=os.getcwd())
                 if proc.returncode != 0:
-                    worst_returncode = proc.returncode
                     print(f"[WARN] lote {i}/{len(batches)} termino con returncode={proc.returncode}")
+                    # Issue #148 (code review): se queda con el PRIMER lote
+                    # fallido, no el ultimo -- sobreescribir aca perdia una
+                    # falla severa temprana (ej. OOM kill, rc=-9) detras de un
+                    # fallo benigno posterior (rc=1) en un lote mas adelante.
+                    if worst_returncode == 0:
+                        worst_returncode = proc.returncode
         else:
             env = build_env(os.environ.copy(), version)
             print("[run_eval_elegibilidad_dry_run] corriendo eval_walkforward.py (esto puede tardar bastante, es un job mensual)...")
@@ -222,8 +240,9 @@ def main() -> None:
         summary = get_elegibilidad_summary(engine, version)
         detalle = build_detalle_exitoso(summary, version=version, eval_returncode=worst_returncode)
 
-        update_job_end(engine, job_id, estado="exitoso", detalle=detalle)
-        print(f"[run_eval_elegibilidad_dry_run] jobs_historial id={job_id} estado=exitoso")
+        estado_final = decide_estado_final(worst_returncode)
+        update_job_end(engine, job_id, estado=estado_final, detalle=detalle)
+        print(f"[run_eval_elegibilidad_dry_run] jobs_historial id={job_id} estado={estado_final}")
         print(json.dumps(detalle, ensure_ascii=False, indent=2))
     except Exception as e:
         try:

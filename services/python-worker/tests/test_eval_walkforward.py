@@ -6,11 +6,15 @@ modulo, no como script suelto -- si no, 'ml' no queda en sys.path:
 """
 from __future__ import annotations
 
+import datetime as dt
+import os
+
 import numpy as np
 import pandas as pd
+import pytest
 
 from ml.models import _aggregate_walkforward
-from ml.eval_walkforward import _json_safe, _build_catalog_row
+from ml.eval_walkforward import _json_safe, _build_catalog_row, _load_meses_historia
 import json
 import math
 
@@ -282,6 +286,110 @@ def test_filtro_de_n_train_rows_no_aplica_a_sarima():
 
     assert result is not None, "SARIMA no deberia quedar excluido por el piso de n_train_rows -- no le aplica"
     assert result.n_folds == 1
+
+
+# ── _load_meses_historia(only_skus=...) -- filtro empujado al SQL (#148) ───
+# Antes agrupaba ventas_historicas ENTERA y filtraba despues en pandas --
+# con una corrida por lotes (EVAL_BATCH_SIZE) esto significaba re-escanear
+# la tabla completa en cada uno de los ~28 lotes de una corrida mensual,
+# mismo patron de bug que #105 ya habia corregido en load_series_by_sku_mysql.
+
+def _try_connect():
+    """Mismo patron que tests/test_data.py -- se salta si no hay DB."""
+    import pymysql
+
+    try:
+        port = int(os.environ.get("MYSQL_PORT", "3307"))
+    except ValueError as e:
+        pytest.fail(f"MYSQL_PORT invalido: {e}")
+
+    try:
+        return pymysql.connect(
+            host=os.environ.get("MYSQL_HOST", "localhost"),
+            port=port,
+            user=os.environ.get("MYSQL_USER", "evalutia"),
+            password=os.environ.get("MYSQL_PASSWORD", "evalutia"),
+            database=os.environ.get("MYSQL_DB", "evalutia"),
+            autocommit=False,
+            charset="utf8mb4",
+        )
+    except pymysql.err.OperationalError:
+        pytest.skip("Sin conexion a MySQL disponible -- test de integracion se salta.")
+
+
+def _get_engine():
+    from sqlalchemy import create_engine
+
+    port = os.environ.get("MYSQL_PORT", "3307")
+    user = os.environ.get("MYSQL_USER", "evalutia")
+    password = os.environ.get("MYSQL_PASSWORD", "evalutia")
+    host = os.environ.get("MYSQL_HOST", "localhost")
+    db = os.environ.get("MYSQL_DB", "evalutia")
+    return create_engine(f"mysql+pymysql://{user}:{password}@{host}:{port}/{db}", future=True)
+
+
+def test_load_meses_historia_only_skus_devuelve_unicamente_los_pedidos():
+    conn = _try_connect()
+    sku_incluido = "TESTDATA04"
+    sku_excluido = "TESTDATA05"
+    try:
+        with conn.cursor() as cur:
+            for sku in (sku_incluido, sku_excluido):
+                cur.execute("DELETE FROM ventas_historicas WHERE sku = %s", (sku,))
+                cur.execute("DELETE FROM articulos WHERE sku = %s", (sku,))
+                cur.execute(
+                    "INSERT INTO articulos (sku, descripcion, grupo_id) VALUES (%s, %s, %s)",
+                    (sku, "SKU de prueba -- test_eval_walkforward.py", 201),
+                )
+                rows = [(sku, dt.date(2026, m, 1), 3, "test") for m in range(1, 4)]
+                cur.executemany(
+                    "INSERT INTO ventas_historicas (sku, fecha, cantidad, fuente) VALUES (%s, %s, %s, %s)",
+                    rows,
+                )
+        conn.commit()
+
+        engine = _get_engine()
+        meses = _load_meses_historia(engine, only_skus=[sku_incluido])
+
+        assert sku_incluido in meses
+        assert sku_excluido not in meses
+        assert meses[sku_incluido] == 3  # enero a marzo inclusive
+    finally:
+        with conn.cursor() as cur:
+            for sku in (sku_incluido, sku_excluido):
+                cur.execute("DELETE FROM ventas_historicas WHERE sku = %s", (sku,))
+                cur.execute("DELETE FROM articulos WHERE sku = %s", (sku,))
+        conn.commit()
+        conn.close()
+
+
+def test_load_meses_historia_sin_only_skus_no_filtra():
+    conn = _try_connect()
+    sku = "TESTDATA06"
+    try:
+        with conn.cursor() as cur:
+            cur.execute("DELETE FROM ventas_historicas WHERE sku = %s", (sku,))
+            cur.execute("DELETE FROM articulos WHERE sku = %s", (sku,))
+            cur.execute(
+                "INSERT INTO articulos (sku, descripcion, grupo_id) VALUES (%s, %s, %s)",
+                (sku, "SKU de prueba -- test_eval_walkforward.py", 201),
+            )
+            cur.execute(
+                "INSERT INTO ventas_historicas (sku, fecha, cantidad, fuente) VALUES (%s, %s, %s, %s)",
+                (sku, dt.date(2026, 1, 1), 1, "test"),
+            )
+        conn.commit()
+
+        engine = _get_engine()
+        meses = _load_meses_historia(engine, only_skus=None)
+
+        assert sku in meses
+    finally:
+        with conn.cursor() as cur:
+            cur.execute("DELETE FROM ventas_historicas WHERE sku = %s", (sku,))
+            cur.execute("DELETE FROM articulos WHERE sku = %s", (sku,))
+        conn.commit()
+        conn.close()
 
 
 def test_json_safe_replaces_nan_with_none():

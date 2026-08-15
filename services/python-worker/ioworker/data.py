@@ -1,8 +1,28 @@
 from __future__ import annotations
-from typing import Dict, Iterable, Optional
+from typing import Dict, Iterable, Optional, Tuple
 
 import pandas as pd
 from sqlalchemy import text
+
+
+def build_only_skus_where(only_skus: Optional[Iterable[str]]) -> Tuple[str, Dict[str, str]]:
+    """
+    Arma un `WHERE sku IN (:sku0, :sku1, ...)` parametrizado a partir de
+    only_skus, o ("", {}) si no hay filtro -- helper compartido para no
+    duplicar esta logica en cada query que necesita empujar el filtro de
+    SKUs al SQL (issue #148, code review: encontrado duplicado entre esta
+    funcion y ml/eval_walkforward.py._load_meses_historia).
+    """
+    if not only_skus:
+        return "", {}
+    only = {s.strip() for s in only_skus if s and s.strip()}
+    if not only:
+        return "", {}
+    placeholders = ", ".join(f":sku{i}" for i in range(len(only)))
+    where_clause = f"WHERE sku IN ({placeholders})"
+    params = {f"sku{i}": s for i, s in enumerate(sorted(only))}
+    return where_clause, params
+
 
 def _prepare_series(df: pd.DataFrame, freq: str) -> pd.Series:
     """
@@ -104,15 +124,7 @@ def load_series_by_sku_mysql(
     # puñado de SKUs (EVAL_ONLY_SKUS) cargara la tabla entera en memoria
     # igual. Confirmado en produccion: esto colgo la VM (t3.medium, 3.7GB)
     # corriendo el dry-run de #105 sobre el catalogo completo.
-    only: set[str] = set()
-    params: dict = {}
-    where_clause = ""
-    if only_skus:
-        only = {s.strip() for s in only_skus if s and s.strip()}
-        if only:
-            placeholders = ", ".join(f":sku{i}" for i in range(len(only)))
-            where_clause = f"WHERE sku IN ({placeholders})"
-            params = {f"sku{i}": s for i, s in enumerate(sorted(only))}
+    where_clause, params = build_only_skus_where(only_skus)
 
     q = f"""
         SELECT

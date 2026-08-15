@@ -3,7 +3,35 @@ import os
 
 import pytest
 
-from ioworker.data import load_series_by_sku_mysql
+from ioworker.data import build_only_skus_where, load_series_by_sku_mysql
+
+
+# ── build_only_skus_where() -- helper puro compartido (issue #148) ─────────
+# Extraido de load_series_by_sku_mysql para no duplicar esta logica en
+# ml/eval_walkforward.py._load_meses_historia (encontrado por /code-review).
+
+def test_build_only_skus_where_sin_skus_no_filtra():
+    where_clause, params = build_only_skus_where(None)
+    assert where_clause == ""
+    assert params == {}
+
+
+def test_build_only_skus_where_lista_vacia_no_filtra():
+    where_clause, params = build_only_skus_where([])
+    assert where_clause == ""
+    assert params == {}
+
+
+def test_build_only_skus_where_arma_placeholders_parametrizados():
+    where_clause, params = build_only_skus_where(["B00002", "A00001"])
+    assert where_clause == "WHERE sku IN (:sku0, :sku1)"
+    assert set(params.values()) == {"A00001", "B00002"}
+
+
+def test_build_only_skus_where_descarta_vacios_y_recorta_espacios():
+    where_clause, params = build_only_skus_where([" A00001 ", "", None, "  "])
+    assert where_clause == "WHERE sku IN (:sku0)"
+    assert list(params.values()) == ["A00001"]
 
 
 def _try_connect():

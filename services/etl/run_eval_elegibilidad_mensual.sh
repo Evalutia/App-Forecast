@@ -32,5 +32,14 @@ set -euo pipefail
 # del contenedor etl solo expone MYSQL_PASSWORD, asi que se deriva aca.
 export MYSQL_PASS="${MYSQL_PASS:-$MYSQL_PASSWORD}"
 
+# Issue #148: una corrida manual contra produccion (sin este flag, catalogo
+# completo de una sola vez) colgo la VM ~30-40 min -- swap lleno, SSH sin
+# responder, se corto con "Lost connection to MySQL server during query".
+# El mecanismo de batching ya existia desde #105 (EVAL_BATCH_SIZE, ver
+# ml/run_eval_elegibilidad_dry_run.py) pero nunca se activaba aca. 200 deja
+# margen amplio bajo el volumen mas grande ya probado sin problema (un grupo
+# de 554 SKUs corrio su full pull en ~13 min).
+export EVAL_BATCH_SIZE="${EVAL_BATCH_SIZE:-200}"
+
 cd /app/services/python-worker
 exec python3 -m ml.run_eval_elegibilidad_dry_run
