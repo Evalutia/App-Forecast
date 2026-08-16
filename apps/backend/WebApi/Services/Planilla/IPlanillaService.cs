@@ -69,5 +69,6 @@ namespace Services.Planilla
     public decimal? ValorAjustado { get; init; }
     public string? CriterioFrecuencia { get; init; }
     public decimal? VentaOExtrapolacion { get; init; }
+    public bool IngresoDuranteQuiebre { get; init; }
   }
 }

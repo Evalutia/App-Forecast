@@ -7,11 +7,14 @@ from run_calc_planilla import (
     TICKETS_ALTO_MIN,
     TICKETS_BAJO_MAX,
     _SQL_STOCK,
+    _SQL_STOCK_DIARIO,
     cargar_configuracion,
+    cargar_ingreso_durante_quiebre,
     cargar_tickets,
     calcular_historico,
     clasificar_estado,
     clasificar_estado_mes,
+    detectar_ingreso_durante_mes,
     extrapolacion_mes,
     meses_disponibles_historico,
     valor_ajustado_y_criterio,
@@ -546,4 +549,104 @@ def test_sql_stock_respeta_stock_minimo_como_umbral_estricto():
             cur.execute("DELETE FROM articulo_grupo WHERE sku = %s", (sku,))
             cur.execute("DELETE FROM articulos WHERE sku = %s", (sku,))
         conn.commit()
+        conn.close()
+
+
+# ── detectar_ingreso_durante_mes() -- issue #145 ─────────────────────────────
+
+def test_ingreso_stock_llega_a_mitad_de_mes():
+    assert detectar_ingreso_durante_mes([0, 0, 0, 5, 5, 5]) is True
+
+
+def test_quiebre_comun_se_agota_y_no_repone():
+    assert detectar_ingreso_durante_mes([5, 5, 5, 0, 0, 0]) is False
+
+
+def test_sin_stock_en_absoluto_no_es_ingreso():
+    assert detectar_ingreso_durante_mes([0, 0, 0]) is False
+
+
+def test_stock_completo_todo_el_mes_no_es_ingreso():
+    assert detectar_ingreso_durante_mes([5, 5, 5]) is False
+
+
+def test_un_solo_dia_de_dato_nunca_es_ingreso():
+    assert detectar_ingreso_durante_mes([5]) is False
+    assert detectar_ingreso_durante_mes([0]) is False
+
+
+def test_sin_dias_de_dato_no_es_ingreso():
+    assert detectar_ingreso_durante_mes([]) is False
+
+
+def test_ingreso_seguido_de_otro_quiebre_sigue_contando_como_ingreso():
+    """Entró y volvió a agotarse en el mismo mes -- igual hubo una importación
+    real que el cliente quiere ver marcada, no hace falta que dure hasta fin de mes."""
+    assert detectar_ingreso_durante_mes([0, 5, 0, 5]) is True
+
+
+def test_stock_negativo_por_devolucion_cuenta_como_cero_no_como_positivo():
+    """cantidad puede dar neto negativo por una devolucion grande (#80) --
+    no debe interpretarse como \"tenia stock\"."""
+    assert detectar_ingreso_durante_mes([-3, -3, 5]) is True
+    assert detectar_ingreso_durante_mes([5, 5, -3]) is False
+
+
+# ── cargar_ingreso_durante_quiebre() -- integracion, issue #145 ─────────────
+
+def test_cargar_ingreso_durante_quiebre_detecta_transicion_real():
+    conn = _try_connect()
+    sku = "TESTINGRESO01"
+    try:
+        with conn.cursor() as cur:
+            cur.execute("DELETE FROM stock_diario WHERE sku = %s", (sku,))
+            cur.execute("DELETE FROM articulo_grupo WHERE sku = %s", (sku,))
+            cur.execute("DELETE FROM articulos WHERE sku = %s", (sku,))
+            cur.execute(
+                "INSERT INTO articulos (sku, descripcion, grupo_id, stock_minimo) "
+                "VALUES (%s, %s, %s, %s)",
+                (sku, "SKU de prueba -- ingreso durante quiebre #145", 201, 0),
+            )
+            cur.executemany(
+                "INSERT INTO stock_diario (sku, fecha, cantidad, deposito_id) VALUES (%s, %s, %s, %s)",
+                [
+                    (sku, dt.date(2026, 2, 1), 0, "TEST"),
+                    (sku, dt.date(2026, 2, 2), 0, "TEST"),
+                    (sku, dt.date(2026, 2, 15), 8, "TEST"),  # llegó la importación acá
+                    (sku, dt.date(2026, 2, 20), 6, "TEST"),
+                ],
+            )
+        conn.commit()
+
+        resultado = cargar_ingreso_durante_quiebre(
+            conn, dt.date(2026, 2, 1), dt.date(2026, 2, 28), {(2026, 2)}
+        )
+
+        assert resultado.get((sku, 2026, 2)) is True
+    finally:
+        with conn.cursor() as cur:
+            cur.execute("DELETE FROM stock_diario WHERE sku = %s", (sku,))
+            cur.execute("DELETE FROM articulo_grupo WHERE sku = %s", (sku,))
+            cur.execute("DELETE FROM articulos WHERE sku = %s", (sku,))
+        conn.commit()
+        conn.close()
+
+
+def test_sql_stock_diario_usa_force_index_idx_stock_fecha():
+    """Mismo guardrail que _SQL_STOCK/_SQL_RESUMEN_STOCK (#153): sin el hint,
+    MySQL puede volver a elegir idx_stock_sku_fecha (el plan lento de #149)."""
+    assert "FORCE INDEX" in _SQL_STOCK_DIARIO
+    assert "idx_stock_fecha" in _SQL_STOCK_DIARIO
+
+    conn = _try_connect()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("EXPLAIN " + _SQL_STOCK_DIARIO, (dt.date(2026, 1, 1), dt.date(2026, 1, 31)))
+            filas = cur.fetchall()
+            columnas = [d[0] for d in cur.description]
+
+        idx_key = columnas.index("key")
+        # Consulta simple sin subquery derivada -- una sola fila de plan.
+        assert filas[0][idx_key] == "idx_stock_fecha"
+    finally:
         conn.close()

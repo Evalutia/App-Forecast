@@ -438,6 +438,67 @@ _SQL_STOCK = """
     GROUP BY agg.sku, YEAR(agg.fecha), MONTH(agg.fecha)
 """
 
+# Issue #145: detectar si entró stock (importación) a mitad de un mes con
+# quiebre -- consulta separada de _SQL_STOCK a propósito, en vez de
+# reutilizar su subquery interna: esta necesita el detalle día a día, no el
+# agregado mensual, y tocar _SQL_STOCK (ya verificado con datos reales en
+# #153) para exponer ese detalle arriesgaba la lógica de dias_con_stock que
+# ya está en producción. El costo es otro scan de stock_diario por corrida
+# (mismo FORCE INDEX de #153, ~6min más) -- aceptado a cambio de no tocar
+# código ya probado.
+_SQL_STOCK_DIARIO = """
+    SELECT sku, fecha, SUM(cantidad) AS stock_total
+    FROM stock_diario FORCE INDEX (idx_stock_fecha)
+    WHERE fecha BETWEEN %s AND %s
+    GROUP BY sku, fecha
+"""
+
+
+def detectar_ingreso_durante_mes(dias_ordenados: list[float]) -> bool:
+    """
+    Issue #145: True si el stock total del SKU pasa de 0 (o menos) a
+    positivo en algún punto de `dias_ordenados` -- ya ordenada
+    cronológicamente, un día por elemento, dentro de un mismo mes.
+
+    Distingue "el artículo se agotó y no repuso" (quiebre común) de "se
+    quedó sin stock y entró una importación a mitad de mes" (pedido de
+    Rodrigo): en el segundo caso la venta baja no significa que el artículo
+    no venda, significa que no había qué vender hasta que llegó el barco.
+
+    Solo usa los días con fila real en stock_diario ese mes -- no rellena
+    huecos de calendario sin dato, mismo criterio que ya usa dias_con_stock
+    (tampoco asume un valor para un día sin fila).
+    """
+    visto_cero = False
+    for stock in dias_ordenados:
+        if stock <= 0:
+            visto_cero = True
+        elif visto_cero:
+            return True
+    return False
+
+
+def cargar_ingreso_durante_quiebre(
+    conn: pymysql.Connection, fecha_desde: dt.date, fecha_hasta: dt.date, meses_set: set[tuple[int, int]]
+) -> dict[tuple, bool]:
+    """Por SKU×mes, si hubo un ingreso de stock a mitad del mes (issue #145)."""
+    with conn.cursor() as cur:
+        cur.execute(_SQL_STOCK_DIARIO, (fecha_desde, fecha_hasta))
+        rows = cur.fetchall()
+
+    por_sku_mes: dict[tuple, list[tuple[dt.date, float]]] = {}
+    for sku, fecha, stock_total in rows:
+        yr, mo = fecha.year, fecha.month
+        if (yr, mo) not in meses_set:
+            continue
+        por_sku_mes.setdefault((sku, yr, mo), []).append((fecha, float(stock_total)))
+
+    resultado: dict[tuple, bool] = {}
+    for key, dias in por_sku_mes.items():
+        dias_ordenados = [stock for _, stock in sorted(dias)]
+        resultado[key] = detectar_ingreso_durante_mes(dias_ordenados)
+    return resultado
+
 
 def calcular_filas(conn: pymysql.Connection) -> tuple[list[dict], int, int, int]:
     """
@@ -497,6 +558,9 @@ def calcular_filas(conn: pymysql.Connection) -> tuple[list[dict], int, int, int]
         if (yr, mo) in meses_set:
             dias_stock[(sku, yr, mo)] = int(dias)
 
+    # ── Ingreso de stock a mitad de un mes con quiebre (Issue #145) ───────────
+    ingreso_quiebre = cargar_ingreso_durante_quiebre(conn, fecha_desde, fecha_hasta, meses_set)
+
     # ── SKUs omitidos (ventas sin articulo) ────────────────────────────────────
     sql_huerfanos = """
         SELECT COUNT(DISTINCT vh.sku)
@@ -526,6 +590,7 @@ def calcular_filas(conn: pymysql.Connection) -> tuple[list[dict], int, int, int]
 
         factor = (factors.get(sku) or {}).get(mo)
         rot_desest = round(rot_real / factor, 4) if rot_real is not None and factor else None
+        estado_mes = clasificar_estado_mes(ds, dn, (yr, mo) == ultimo_mes)
 
         filas.append({
             "sku":                               sku,
@@ -537,7 +602,7 @@ def calcular_filas(conn: pymysql.Connection) -> tuple[list[dict], int, int, int]
             "rotacion_diaria_real":              rot_real,
             "rotacion_diaria_bruta":             rot_bruta,
             "rotacion_diaria_desestacionalizada": rot_desest,
-            "estado_mes":                        clasificar_estado_mes(ds, dn, (yr, mo) == ultimo_mes),
+            "estado_mes":                        estado_mes,
             "frecuencia_nivel":                  None,  # se rellena en paso 2
             "rotacion_ajustada":                 None,  # se rellena en paso 2
             "tickets_mes":                       tickets.get((sku, yr, mo), 0),
@@ -545,6 +610,13 @@ def calcular_filas(conn: pymysql.Connection) -> tuple[list[dict], int, int, int]
             "valor_ajustado":                    None,  # se rellena en paso 2
             "criterio_frecuencia":               None,  # se rellena en paso 2
             "venta_o_extrapolacion":              None,  # se rellena en paso 2
+            # Issue #145: solo tiene sentido marcarlo en un mes de quiebre --
+            # un "ingreso durante quiebre" en un mes normal o sin_stock no es
+            # lo que el cliente pidió distinguir.
+            "ingreso_durante_quiebre":           (
+                estado_mes == "quiebre_parcial"
+                and ingreso_quiebre.get((sku, yr, mo), False)
+            ),
         })
 
     # ── Paso 2: frecuencia de quiebre por SKU ─────────────────────────────────
@@ -641,7 +713,7 @@ _SQL_INSERT = """
          rotacion_diaria_real, rotacion_diaria_bruta, rotacion_diaria_desestacionalizada,
          estado_mes, frecuencia_nivel, rotacion_ajustada,
          tickets_mes, valor_historico, valor_ajustado, criterio_frecuencia,
-         venta_o_extrapolacion, ts_carga)
+         venta_o_extrapolacion, ingreso_durante_quiebre, ts_carga)
     VALUES
         (%(sku)s, %(year)s, %(month)s,
          %(ventas_cantidad)s, %(dias_con_stock)s, %(dias_naturales_mes)s,
@@ -649,7 +721,7 @@ _SQL_INSERT = """
          %(rotacion_diaria_desestacionalizada)s,
          %(estado_mes)s, %(frecuencia_nivel)s, %(rotacion_ajustada)s,
          %(tickets_mes)s, %(valor_historico)s, %(valor_ajustado)s, %(criterio_frecuencia)s,
-         %(venta_o_extrapolacion)s, NOW(6))
+         %(venta_o_extrapolacion)s, %(ingreso_durante_quiebre)s, NOW(6))
 """
 
 def escribir_planilla(conn: pymysql.Connection, filas: list[dict]) -> None:

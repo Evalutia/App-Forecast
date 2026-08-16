@@ -85,7 +85,8 @@ namespace Services.Planilla
                     ValorHistorico                 = f.Fila.ValorHistorico,
                     ValorAjustado                  = f.Fila.ValorAjustado,
                     CriterioFrecuencia             = f.Fila.CriterioFrecuencia,
-                    VentaOExtrapolacion            = f.Fila.VentaOExtrapolacion
+                    VentaOExtrapolacion            = f.Fila.VentaOExtrapolacion,
+                    IngresoDuranteQuiebre          = f.Fila.IngresoDuranteQuiebre
                   })
                   .ToList(), ventana)
             };

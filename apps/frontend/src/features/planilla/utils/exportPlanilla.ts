@@ -13,6 +13,10 @@ const COLOR_QUIEBRE_BAJA  = 'EF9A9A'; // rose — baja frecuencia
 const COLOR_SINSTOCK      = '90A4AE'; // slate grey
 const COLOR_SINDATOS      = 'F1F5F9'; // light slate — mes sin fila calculada (#106)
 const COLOR_SINFACTOR     = 'E8E3F2'; // lila tenue — sin factor estacional (#130)
+// Issue #145: ingreso de stock (importación) a mitad de un mes con quiebre —
+// celeste, deliberadamente lejos de la paleta de quiebre (ámbar/naranja/rojo)
+// y de los tonos pastel de VAj (#107) para no confundirse con ninguno.
+const COLOR_INGRESO       = '4FC3F7';
 const COLOR_HEADER        = '0D5C2E'; // dark green for headers
 const COLOR_SUMMARY       = '1B4332'; // darker green for summary col headers
 const COLOR_SUMMARY_BG    = 'D1FAE5'; // light green for summary data cells
@@ -27,8 +31,13 @@ const CRITERIO_FILL: Record<string, { bg: string; fg: string }> = {
   real_extrapolado: { bg: '99F6E4', fg: '134E4A' }, // teal
 };
 
-function mesBgColor(estadoMes: string, frecuenciaNivel?: string | null): string | null {
+// Issue #145: `ingresoDuranteQuiebre` sólo importa en un mes de quiebre --
+// gana sobre el color por frecuencia (alta/media/baja) porque para el
+// cliente "entró una importación" es una lectura más específica que
+// "quiebre en un artículo de tal frecuencia" para ese mes puntual.
+function mesBgColor(estadoMes: string, frecuenciaNivel?: string | null, ingresoDuranteQuiebre?: boolean): string | null {
   if (estadoMes === 'quiebre_parcial') {
+    if (ingresoDuranteQuiebre) return COLOR_INGRESO;
     if (frecuenciaNivel === 'baja')  return COLOR_QUIEBRE_BAJA;
     if (frecuenciaNivel === 'media') return COLOR_QUIEBRE_MEDIA;
     return COLOR_QUIEBRE_ALTA;
@@ -42,8 +51,9 @@ function mesBgColor(estadoMes: string, frecuenciaNivel?: string | null): string 
   return null;
 }
 
-function mesFgColor(estadoMes: string, frecuenciaNivel?: string | null): string {
+function mesFgColor(estadoMes: string, frecuenciaNivel?: string | null, ingresoDuranteQuiebre?: boolean): string {
   if (estadoMes === 'quiebre_parcial') {
+    if (ingresoDuranteQuiebre) return 'FF01579B';
     return frecuenciaNivel === 'baja' ? 'FF7F1D1D' : 'FF7B4A00';
   }
   if (estadoMes === 'sin_stock') return 'FF374151';
@@ -57,10 +67,10 @@ function mesFgColor(estadoMes: string, frecuenciaNivel?: string | null): string 
 // factor estacional).
 function applyMesStyle(cell: Cell, mes: PlanillaMesDto, isRef: boolean, estado?: string): void {
   const est = estado ?? mes.estadoMes;
-  const bg = mesBgColor(est, mes.frecuenciaNivel);
+  const bg = mesBgColor(est, mes.frecuenciaNivel, mes.ingresoDuranteQuiebre);
   if (bg) {
     cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: `FF${bg}` } };
-    cell.font = { color: { argb: mesFgColor(est, mes.frecuenciaNivel) }, size: 10 };
+    cell.font = { color: { argb: mesFgColor(est, mes.frecuenciaNivel, mes.ingresoDuranteQuiebre) }, size: 10 };
   } else if (isRef) {
     cell.font = { color: { argb: 'FF6B7280' }, italic: true, size: 10 };
   } else {
@@ -392,6 +402,7 @@ const CRITERIOS_COLORES: { color: string | null; fg?: string; label: string; det
   { color: COLOR_QUIEBRE_ALTA, label: 'Amarillo', detalle: 'Mes con quiebre de stock en artículo de alta frecuencia (vendió en 9 o más de los 12 meses).' },
   { color: COLOR_QUIEBRE_MEDIA, label: 'Naranja', detalle: 'Mes con quiebre en artículo de frecuencia media (vendió en 4 a 8 meses).' },
   { color: COLOR_QUIEBRE_BAJA, label: 'Rojo', detalle: 'Mes con quiebre en artículo de baja frecuencia (vendió en 3 meses o menos).' },
+  { color: COLOR_INGRESO, label: 'Celeste', detalle: 'Mes con quiebre en el que entró stock (importación) en algún momento del mes -- gana sobre el color de frecuencia. La venta baja ese mes no significa que el artículo no venda: no había qué vender hasta que llegó el stock. Criterio: el stock diario total del artículo pasó de 0 a positivo en algún punto del mes (issue #145).' },
   { color: COLOR_SINSTOCK, label: 'Gris', detalle: 'Mes completo sin stock.' },
   { color: COLOR_SINDATOS, label: 'Gris claro', detalle: 'Sin datos: el artículo no existía o no hay información de ese mes. La celda queda vacía.' },
   { color: COLOR_SINFACTOR, label: 'Lila', detalle: 'Sólo en las columnas de rotación mensual: el mes tuvo stock y ventas, pero el artículo no tiene factor estacional cargado para ese mes, así que no hay rotación corregida que mostrar. La rotación sin corregir está en la hoja "Detalle de cálculo". Un mes con quiebre y venta 0 NO es lila: el factor sí está cargado y la celda muestra 0.' },

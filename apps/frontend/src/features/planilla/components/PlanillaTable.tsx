@@ -12,8 +12,12 @@ import { useAuthUser } from '../../auth/hooks/useAuthUser';
 const MESES = ['Ene','Feb','Mar','Abr','May','Jun','Jul','Ago','Sep','Oct','Nov','Dic'];
 const mesLabel = (year: number, month: number) => `${MESES[month - 1]}/${String(year).slice(2)}`;
 
-function estadoMesBg(estado: string, frecuenciaNivel?: string | null): string {
+// Issue #145: `ingresoDuranteQuiebre` gana sobre el color por frecuencia --
+// mismo criterio que exportPlanilla.ts (celeste, deliberadamente fuera de la
+// paleta ámbar/naranja/rojo de quiebre y de los tonos de #65).
+function estadoMesBg(estado: string, frecuenciaNivel?: string | null, ingresoDuranteQuiebre?: boolean): string {
   if (estado === 'quiebre_parcial') {
+    if (ingresoDuranteQuiebre) return 'rgba(41,182,246,0.24)';
     if (frecuenciaNivel === 'baja')  return 'rgba(220,38,38,0.18)';
     if (frecuenciaNivel === 'media') return 'rgba(234,88,12,0.18)';
     return 'rgba(234,179,8,0.18)';
@@ -178,6 +182,16 @@ const ESTADO_ENTRIES: LeyendaEntry[] = [
       'Hubo días sin stock en el mes. El artículo vende pocas veces al\n' +
       'año. La rotación ajustada usa ventas ÷ días naturales del mes\n' +
       '(más conservador, evita sobreestimar por los pocos días con stock).',
+  },
+  {
+    className: 'planilla-leyenda-ingreso',
+    label: 'Quiebre con ingreso de stock',
+    tip:
+      'Estado: Quiebre con ingreso de stock (importación)\n' +
+      'Hubo días sin stock en el mes, pero en algún momento entró stock\n' +
+      '(el stock diario total pasó de 0 a positivo). La venta baja ese mes\n' +
+      'no significa que el artículo no venda -- no había qué vender hasta\n' +
+      'que llegó la importación.',
   },
   {
     className: 'planilla-leyenda-sinstock',
@@ -541,13 +555,14 @@ export default function PlanillaTable({ params, onPageChange, sugerencias, suger
                         key={`vta-${mes.year}-${mes.month}`}
                         className="planilla-col-mes"
                         style={{
-                          backgroundColor: estadoMesBg(mes.estadoMes, mes.frecuenciaNivel),
+                          backgroundColor: estadoMesBg(mes.estadoMes, mes.frecuenciaNivel, mes.ingresoDuranteQuiebre),
                           borderLeft: criterioFrecuenciaBorder(mes.criterioFrecuencia),
                         }}
                         title={
                           mes.estadoMes === 'sin_datos'
                             ? `Vta.${mesLabel(mes.year, mes.month)} · Sin datos (mes sin fila calculada)`
-                            : `Vta.${mesLabel(mes.year, mes.month)} · ${mes.ventasCantidad ?? 0} uds. · Criterio: ${criterioFrecuenciaLabel(mes.criterioFrecuencia, mes.estadoMes)}`
+                            : `Vta.${mesLabel(mes.year, mes.month)} · ${mes.ventasCantidad ?? 0} uds. · Criterio: ${criterioFrecuenciaLabel(mes.criterioFrecuencia, mes.estadoMes)}` +
+                              (mes.ingresoDuranteQuiebre ? ' · Entró stock (importación) durante el mes' : '')
                         }
                       >
                         <span style={idx === lastMesIdx ? { opacity: 0.6, fontStyle: 'italic' } : undefined}>
@@ -567,13 +582,14 @@ export default function PlanillaTable({ params, onPageChange, sugerencias, suger
                         <td
                           key={`rot-${mes.year}-${mes.month}`}
                           className="planilla-col-mes"
-                          style={{ backgroundColor: estadoMesBg(celda.estado, mes.frecuenciaNivel) }}
+                          style={{ backgroundColor: estadoMesBg(celda.estado, mes.frecuenciaNivel, mes.ingresoDuranteQuiebre) }}
                           title={
                             celda.estado === 'sin_datos'
                               ? `${mesLabel(mes.year, mes.month)} · Sin datos (mes sin fila calculada)`
                               : celda.estado === 'sin_factor'
                                 ? `${mesLabel(mes.year, mes.month)} · Sin factor estacional cargado para este mes — la rotación sin corregir es ${(mes.rotacionDiariaReal ?? 0).toFixed(4)}`
-                                : `${mesLabel(mes.year, mes.month)} · ${mes.diasConStock ?? 0}/${mes.diasNaturalesMes} días con stock · ${mes.ventasCantidad ?? 0} uds. · sin corregir: ${(mes.rotacionDiariaReal ?? 0).toFixed(4)}`
+                                : `${mesLabel(mes.year, mes.month)} · ${mes.diasConStock ?? 0}/${mes.diasNaturalesMes} días con stock · ${mes.ventasCantidad ?? 0} uds. · sin corregir: ${(mes.rotacionDiariaReal ?? 0).toFixed(4)}` +
+                                  (mes.ingresoDuranteQuiebre ? ' · Entró stock (importación) durante el mes' : '')
                           }
                         >
                           <span style={idx === lastMesIdx ? { opacity: 0.6, fontStyle: 'italic' } : undefined}>

@@ -18,6 +18,10 @@ export interface PlanillaMesDto {
   // Issue #137: "V/E" persistido por el ETL -- antes se recalculaba aca
   // mismo reimplementando extrapolacion_mes() de run_calc_planilla.py.
   ventaOExtrapolacion: number | null;
+  // Issue #145: true si el stock diario paso de 0 a positivo en algun punto
+  // de un mes con quiebre (importacion a mitad de mes) -- siempre false
+  // fuera de estadoMes 'quiebre_parcial'.
+  ingresoDuranteQuiebre: boolean;
 }
 
 export interface PlanillaVentasDto {

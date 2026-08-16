@@ -149,7 +149,8 @@ def verificar_sku(cur, sku, ventana, cerrados, ref):
     cur.execute("SELECT year, month, ventas_cantidad, dias_con_stock, dias_naturales_mes, "
                 "rotacion_diaria_real, rotacion_diaria_desestacionalizada, estado_mes, "
                 "frecuencia_nivel, rotacion_ajustada, tickets_mes, valor_historico, "
-                "valor_ajustado, criterio_frecuencia, venta_o_extrapolacion "
+                "valor_ajustado, criterio_frecuencia, venta_o_extrapolacion, "
+                "ingreso_durante_quiebre "
                 "FROM planilla_ventas_calculada WHERE sku=%s ORDER BY year, month", (sku,))
     stored = {(r[0], r[1]): r for r in cur.fetchall()}
     faltantes = [ym for ym in ventana if ym not in stored]
@@ -172,6 +173,26 @@ def verificar_sku(cur, sku, ventana, cerrados, ref):
                 (sku, desde, hasta, stock_min or 0))
     raw_ds = {(y, m): int(c) for y, m, c in cur.fetchall()}
 
+    # Issue #145: detalle día a día (no el agregado de arriba) para poder
+    # detectar si el stock pasó de 0 a positivo en algún punto del mes --
+    # mismo criterio que detectar_ingreso_durante_mes() en run_calc_planilla.py.
+    cur.execute("SELECT fecha, SUM(cantidad) FROM stock_diario "
+                "WHERE sku=%s AND fecha BETWEEN %s AND %s GROUP BY fecha ORDER BY fecha",
+                (sku, desde, hasta))
+    dias_stock_diario = list(cur.fetchall())
+    raw_ingreso: dict[tuple, bool] = {}
+    for ym in ventana:
+        y, m = ym
+        serie = [float(t) for f, t in dias_stock_diario if (f.year, f.month) == ym]
+        visto_cero, ingreso = False, False
+        for stock in serie:
+            if stock <= 0:
+                visto_cero = True
+            elif visto_cero:
+                ingreso = True
+                break
+        raw_ingreso[ym] = ingreso
+
     # Histórico (promedio de meses cerrados disponibles según fec_alta)
     disponibles = [ym for ym in cerrados
                    if fec_alta is None or fec_alta <= dt.date(ym[0], ym[1], dias_mes(*ym))]
@@ -187,7 +208,7 @@ def verificar_sku(cur, sku, ventana, cerrados, ref):
     for ym in sorted(stored):
         y, m = ym
         (s_vta, s_ds, s_dn, s_rot, s_rde, s_est, s_niv, s_raj, s_tick, s_hist,
-         s_vaj, s_crit, s_ve) = stored[ym][2:]
+         s_vaj, s_crit, s_ve, s_ingreso) = stored[ym][2:]
         r_vta, r_tick = raw_v.get(ym, (0, 0))
         r_ds = raw_ds.get(ym, 0)
         dn = dias_mes(y, m)
@@ -254,13 +275,15 @@ def verificar_sku(cur, sku, ventana, cerrados, ref):
             ("vaj", s_vaj, r_vaj, feq(s_vaj, r_vaj)),
             ("criterio", s_crit, r_crit, s_crit == r_crit),
             ("venta_o_extrap", s_ve, r_ve, feq(s_ve, r_ve)),
+            ("ingreso_quiebre", bool(s_ingreso), r_est == "quiebre_parcial" and raw_ingreso.get(ym, False),
+             bool(s_ingreso) == (r_est == "quiebre_parcial" and raw_ingreso.get(ym, False))),
         ]
         malos = [c for c in checks if not c[3]]
         for nombre, sv, rv, _bien in malos:
             print(f"    {y}-{m:02d} {nombre}: almacenado={sv} recomputado={rv} -> MISMATCH")
         fallas += len(malos)
     if fallas == 0:
-        print(f"  Meses: {len(stored)} filas x 11 campos verificados contra tablas crudas -> OK")
+        print(f"  Meses: {len(stored)} filas x 12 campos verificados contra tablas crudas -> OK")
     niv_ref = stored.get(ref, [None] * 9)[8] if ref in stored else None
     if niv_ref is not None and niv_ref != nivel:
         print(f"    frecuencia_nivel: almacenado={niv_ref} recomputado={nivel} -> MISMATCH")

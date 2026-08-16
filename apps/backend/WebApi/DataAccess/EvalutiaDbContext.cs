@@ -390,6 +390,8 @@ public class EvalutiaDbContext : DbContext
       entity.Property(e => e.VentaOExtrapolacion)
           .HasPrecision(10, 2)
           .HasColumnName("venta_o_extrapolacion");
+      entity.Property(e => e.IngresoDuranteQuiebre)
+          .HasColumnName("ingreso_durante_quiebre");
     });
 
     modelBuilder.Entity<PlanillaSugerencias>(entity =>

@@ -102,6 +102,7 @@ namespace DataAccess.Repositories.PlanillaDataAccess
                      p.ValorAjustado,
                      p.CriterioFrecuencia,
                      p.VentaOExtrapolacion,
+                     p.IngresoDuranteQuiebre,
                      Descripcion = a != null ? a.Descripcion : null,
                      MarcaNombre = a != null ? a.MarcaNombre : null,
                      GeneroDescripcion = a != null ? a.GeneroDescripcion : null,
@@ -130,7 +131,8 @@ namespace DataAccess.Repositories.PlanillaDataAccess
             ValorHistorico = f.ValorHistorico,
             ValorAjustado = f.ValorAjustado,
             CriterioFrecuencia = f.CriterioFrecuencia,
-            VentaOExtrapolacion = f.VentaOExtrapolacion
+            VentaOExtrapolacion = f.VentaOExtrapolacion,
+            IngresoDuranteQuiebre = f.IngresoDuranteQuiebre
           },
           Descripcion: f.Descripcion,
           MarcaNombre: f.MarcaNombre,

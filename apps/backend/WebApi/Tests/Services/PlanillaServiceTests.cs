@@ -173,6 +173,23 @@ namespace Tests.Services
     }
 
     [Fact]
+    public void GetVentas_IngresoDuranteQuiebre_LlegaTalCualDesdeLaFilaPersistida()
+    {
+      // Issue #145: mismo motivo que el test de arriba para VentaOExtrapolacion
+      // (#137) -- pasa por toda la cadena real, no solo por el modelo EF.
+      var service = CreateService(out var db);
+      var fila = Fila("SKU-IDQ", 2026, 5);
+      fila.EstadoMes = "quiebre_parcial";
+      fila.IngresoDuranteQuiebre = true;
+      db.PlanillasVentasCalculadas.Add(fila);
+      db.SaveChanges();
+
+      var (items, _) = service.GetVentas(page: 1, pageSize: 50);
+
+      items.Single().Meses.Single().IngresoDuranteQuiebre.Should().BeTrue();
+    }
+
+    [Fact]
     public void GetVentas_VentanaAncladaAlMaximoGlobal_NoALaPagina()
     {
       // La página 1 (orden alfabético) contiene solo un SKU de 1 mes; la ventana

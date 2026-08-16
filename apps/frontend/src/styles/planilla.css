@@ -118,6 +118,16 @@ thead .planilla-sticky-col {
 }
 .planilla-leyenda-quiebre-baja::before { background: rgba(220,38,38,0.7); }
 
+/* Quiebre con ingreso de stock (#145): celeste -- gana sobre el color de
+   frecuencia (alta/media/baja), deliberadamente fuera de la escala
+   amarillo/naranja/rojo del quiebre común. */
+.planilla-leyenda-ingreso {
+  background: rgba(41,182,246,0.18);
+  border: 1px solid rgba(41,182,246,0.3);
+  color: #4fc3f7;
+}
+.planilla-leyenda-ingreso::before { background: rgba(41,182,246,0.75); }
+
 /* Sin stock: gris */
 .planilla-leyenda-sinstock {
   background: rgba(100,116,139,0.18);

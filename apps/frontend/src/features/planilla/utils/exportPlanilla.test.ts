@@ -25,6 +25,7 @@ function mes(overrides: Partial<PlanillaMesDto>): PlanillaMesDto {
     valorAjustado: null,
     criterioFrecuencia: null,
     ventaOExtrapolacion: null,
+    ingresoDuranteQuiebre: false,
     ...overrides,
   };
 }
@@ -133,6 +134,27 @@ describe('buildPlanillaWorkbook (#107)', () => {
     // tuvo ningún día con stock" para esta columna.
     const filaB = hoja1.getRow(3);
     expect(filaB.getCell(9).value).toBeNull(); // Rot.Jul/26
+  });
+
+  it('issue #145: un mes de quiebre con ingreso de stock se pinta celeste, distinto del quiebre común', () => {
+    const mesQuiebreConIngreso = mes({
+      month: 6, ventasCantidad: 50, estadoMes: 'quiebre_parcial', frecuenciaNivel: 'media',
+      rotacionDiariaReal: 2, rotacionDiariaDesestacionalizada: 1.8, rotacionAjustada: 2.2,
+      valorAjustado: 60, criterioFrecuencia: 'promedio', ingresoDuranteQuiebre: true,
+    });
+    const mesQuiebreSinIngreso = { ...mesQuiebreConIngreso, ingresoDuranteQuiebre: false };
+
+    const wbIngreso = buildPlanillaWorkbook([
+      { ...skuA, sku: 'SKU-D', meses: [skuA.meses[0], mesQuiebreConIngreso, skuA.meses[2]] },
+      { ...skuA, sku: 'SKU-E', meses: [skuA.meses[0], mesQuiebreSinIngreso, skuA.meses[2]] },
+    ], sugerencias);
+    const hojaIngreso = wbIngreso.getWorksheet('Planilla de Reposición')!;
+
+    // Vta.Jun/26 = columna 5, Jun/26 (rotación) = columna 8 -- mismo layout que el resto del describe.
+    expect(fillColor(hojaIngreso.getRow(2).getCell(5))).toBe('FF4FC3F7'); // SKU-D: con ingreso
+    expect(fillColor(hojaIngreso.getRow(2).getCell(8))).toBe('FF4FC3F7');
+    expect(fillColor(hojaIngreso.getRow(3).getCell(5))).toBe('FFFFB74D'); // SKU-E: mismo mes, sin ingreso -- naranja de siempre
+    expect(fillColor(hojaIngreso.getRow(3).getCell(8))).toBe('FFFFB74D');
   });
 
   it('hoja 1: color de quiebre en la celda mensual (media freq → naranja)', () => {
@@ -275,6 +297,16 @@ describe('hoja Criterios (#109)', () => {
       if (c.value === 'Amarillo' && fillColor(c) === 'FFFFCA28') amarillo = true;
     });
     expect(amarillo).toBe(true);
+  });
+
+  it('issue #145: la leyenda de colores incluye el celeste de "quiebre con ingreso"', () => {
+    let celeste = false;
+    criterios.eachRow(row => {
+      const c = row.getCell(1);
+      if (c.value === 'Celeste' && fillColor(c) === 'FF4FC3F7') celeste = true;
+    });
+    expect(celeste).toBe(true);
+    expect(textoCompleto).toContain('pasó de 0 a positivo');
   });
 
   it('lenguaje para el cliente: sin jerga interna ni nombres de tablas/enums', () => {
