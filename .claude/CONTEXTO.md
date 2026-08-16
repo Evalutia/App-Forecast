@@ -3491,3 +3491,31 @@ Tests: 4 nuevos en Python (pasan, 51/51 en `test_run_calc_planilla.py`), 1 nuevo
 **Verificado con corridas reales contra datos locales** (no solo tests): primera corrida, `225 huérfanos limpiados` (más amplio que los 7 del modelo viejo -- cualquier SKU sin ningún mes elegible este ciclo). Post-corrida: `weighted_avg_13m` desapareció por completo de la tabla, y las 275 filas con `rotacion_sugerida=0` pasaron de `fiabilidad=0` a `fiabilidad=100`. Segunda corrida inmediata (validando el fix del code-review): `0 huérfanos limpiados` -- ya estaban limpios, no se re-tocan -- y el job corrió 3.5x más rápido (1.44s vs 5.02s).
 
 Tests: 3 nuevos en `calcular_rotacion_y_fiabilidad` (todos-iguales-en-cero → 100%, cancelación → 0%, constante negativa → 100%) + 1 de integración contra MySQL real para el fix de huérfanos. 258/258 en toda la suite de `services/etl`.
+
+---
+
+### #149 -- Diagnóstico: la causa no era redundancia, era el índice (2026-08-16)
+
+`/implement issue 149` directo -- issue de diagnóstico puro, sin código para tocar todavía.
+
+**Por qué hacía falta producción, no la réplica local**: la réplica local (`docker exec evalutia-mysql`) tiene `stock_diario` en 26,6M filas y `ventas_historicas` en 4,4M -- ~22% del volumen real. No alcanza la barra de "volumen comparable" que pide el propio ticket. Se accedió a producción por SSH (`ubuntu@3.150.104.146`, clave `nueva_key_ec2.pem`, mismo mecanismo ya usado en sesiones anteriores) con autorización explícita del usuario para cada paso, dado que el clasificador de permisos bloquea por default las queries contra la DB de prod.
+
+**Volúmenes reales confirmados**: `stock_diario` = 121.216.146 filas (2016-10-03 → 2026-08-15), `ventas_historicas` = 20.086.770 filas, `articulos` = 5.639. Coincide con lo que ya documentaba el issue.
+
+**Hallazgo, con `EXPLAIN` (plan, sin ejecutar) primero**: las dos queries lentas (`sql_stock` de `run_calc_planilla.py`, `_SQL_RESUMEN_STOCK` de `run_calc_stock_resumen.py`) comparten el mismo patrón -- el subquery interno `SELECT sku, fecha, SUM(cantidad) FROM stock_diario WHERE fecha BETWEEN ? AND ? GROUP BY sku, fecha` elige el índice `idx_stock_sku_fecha` (`sku` primero, `fecha` segundo) y hace `type=index`: escanea **120,5M de las 121M filas de la tabla entera** (`filtered≈19-21%`), en vez de usar `idx_stock_fecha` (índice separado, ya existente, liderado por `fecha` solo) para un `range scan`. La razón: con `sku` como columna líder del índice elegido, MySQL no puede hacer seek por rango de fecha sola -- pero sí puede evitar el `filesort` del `GROUP BY sku, fecha` escaneando el índice completo en ese orden. El optimizador elige evitar el sort a costa de escanear 4,8x más filas de las necesarias.
+
+Contraste con `cargar_stock_actual()` de `run_calc_sugerencias.py` (issue #149 ya la señalaba como la rápida, corre en 1-8s todo el job): esa query filtra por `sku` primero (`MAX(fecha) GROUP BY sku`, después join por `sku`+`fecha` exacta) -- coincide con el orden del índice, así que MySQL puede hacer un scan ajustado en vez de leer la tabla entera. Mismo índice, pregunta distinta, plan completamente distinto.
+
+**`EXPLAIN ANALYZE` (ejecución real, con tiempos) contra producción, ventana de 13 meses (2025-08-01 → 2026-08-31)**:
+
+Plan actual (`idx_stock_sku_fecha`, el que MySQL elige solo): **61,2 minutos** (3.670.000 ms). De eso, 60,5 min (99%) son el índice completo leyendo 121M filas; el filtro de fecha y el agregado, una vez que las filas ya están leídas, casi no suman tiempo. Solo el 10,7% de lo leído (12,9M de 121M) termina siendo relevante para la ventana.
+
+Plan alternativo (`FORCE INDEX (idx_stock_fecha)`, sin crear nada nuevo): **6,4 minutos** (383.991 ms) -- range scan de 12,9M filas (3,86 min) + `Aggregate using temporary table` para el `GROUP BY` (2,53 min, la tabla temporal no necesitó volcarse a disco pese a que esta VM ya corre con swap en uso).
+
+**9,6x más rápido, con un solo hint de índice, sin migración, sin tabla nueva.** El resultado no puede cambiar: mismo `WHERE`/`GROUP BY`, el índice elegido no altera qué filas califican, solo cómo se llega a ellas.
+
+No se repitió la medición completa para `_SQL_RESUMEN_STOCK` (365 días) para no gastar otra hora de producción -- mismo subquery, ventana con 92,4% de solapamiento contra la de 13 meses (medido: `max(desde)`/`min(hasta)` de ambas ventanas dan 365 de 395 días en común). Se espera una mejora equivalente, a confirmar cuando se implemente el fix.
+
+**Decisión, que revierte el enfoque por default que traía el propio ticket**: el costo dominante no es la redundancia de calcular lo mismo dos veces por noche (como asumían #150/#151/#152) -- es el plan de query ineficiente, independiente en cada script. Arreglar el índice (`FORCE INDEX` o equivalente) da 9,6x en cada query, ~125-130 min/noche → ~13 min/noche combinado. Construir además la tabla de agregado compartida de #150 ahorraría solo ~6 min/noche adicionales sobre eso -- beneficio marginal chico a cambio de 3 tickets, una migración y un paso nuevo en el cron. **No se justifica.**
+
+**Consecuencia**: #150, #151, #152 se cierran como `not planned` (mismo criterio que #147 -- beneficio marginal no justifica la complejidad). Se abre **#153**, chico, para aplicar el `FORCE INDEX` a las dos queries con test de regresión.
