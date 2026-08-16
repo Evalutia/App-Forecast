@@ -6,6 +6,7 @@ import pytest
 from run_calc_sugerencias import (
     MAX_MESES,
     MIN_MESES_CON_DATOS,
+    MODELO,
     UMBRAL_DIAS_STOCK_VIEJO,
     calcular_dias_hasta_quiebre,
     calcular_rotacion_y_fiabilidad,
@@ -104,10 +105,38 @@ def test_fiabilidad_no_negativa_con_variabilidad_extrema():
     assert fiab >= 0.0
 
 
-def test_promedio_cero_da_fiabilidad_cero_sin_dividir_por_cero():
+def test_todos_los_meses_en_cero_da_fiabilidad_100_sin_dividir_por_cero():
+    """
+    Issue #142: la hoja "Criterios" promete "100% = rotación idéntica todos
+    los meses" -- un SKU que vendio 0 en TODOS sus meses elegibles cumple
+    eso exacto (desvio cero). Antes daba 0% porque el CV (std/mean) no se
+    puede calcular con mean=0 -- el caso real de 272 SKUs en produccion.
+    """
     rot, fiab = calcular_rotacion_y_fiabilidad([0.0, 0.0, 0.0])
     assert rot == 0.0
+    assert fiab == 100.0
+
+
+def test_mean_cero_por_cancelacion_no_es_estable_en_cero():
+    """
+    Distinto de "todos iguales": [-5, 5, 0] promedia a 0 pero es MUY
+    inestable (oscila entre valores bien distintos, std != 0) -- no
+    corresponde el 100%, que solo aplica cuando el desvio es realmente cero.
+    """
+    _, fiab = calcular_rotacion_y_fiabilidad([-5.0, 5.0, 0.0])
     assert fiab == 0.0
+
+
+def test_constante_negativa_da_fiabilidad_100_igual_que_constante_en_cero():
+    """
+    Hallazgo de /code-review: la primera version de este fix solo daba 100%
+    para "todos exactamente cero", dejando una rotacion constante en -10
+    (misma estabilidad, std=0) con 0% solo por el signo -- inconsistente
+    con la propia regla que el fix intenta cumplir ("100% = rotación
+    idéntica"). std==0 generaliza correcto sin importar el signo.
+    """
+    _, fiab = calcular_rotacion_y_fiabilidad([-10.0, -10.0, -10.0])
+    assert fiab == 100.0
 
 
 def test_hallazgo_code_review_rotacion_negativa_neta_se_recorta_a_cero():
@@ -215,7 +244,7 @@ def test_issue_116_mes_normal_en_cero_ya_no_se_descarta_del_calculo(conn):
                 _sembrar_mes(cur, sku, year, month, "normal", rot)
         conn.commit()
 
-        filas, _con, _sin, _quiebre = calcular_sugerencias(
+        filas, _con, _sin, _quiebre, _huerfanos = calcular_sugerencias(
             conn, stock_por_sku={}, mes_referencia=(2026, 6)
         )
         fila = next(f for f in filas if f["sku"] == sku)
@@ -234,6 +263,57 @@ def test_issue_116_mes_normal_en_cero_ya_no_se_descarta_del_calculo(conn):
         with conn.cursor() as cur:
             cur.execute("DELETE FROM planilla_ventas_calculada WHERE sku = %s", (sku,))
             # Issue #121: articulo_grupo tiene FK RESTRICT a articulos(sku).
+            cur.execute("DELETE FROM articulo_grupo WHERE sku = %s", (sku,))
+            cur.execute("DELETE FROM articulos WHERE sku = %s", (sku,))
+        conn.commit()
+
+
+def test_issue_142_sku_que_pierde_toda_elegibilidad_se_limpia_no_queda_huerfano(conn):
+    """
+    Regresion real de #142: un SKU con una fila vieja en planilla_sugerencias
+    (modelo retirado, valores no-nulos) que este ciclo no tiene NI UN mes
+    elegible en planilla_ventas_calculada -- nunca entra a por_sku, asi que
+    sin el fix su fila vieja jamas se toca. Con el fix, aparece como huerfano
+    y se limpia a NULL con el modelo actual (mismo caso real que los 7 SKUs
+    encontrados en produccion con weighted_avg_13m).
+    """
+    sku = "TEST-ISSUE-142-HUERFANO"
+    try:
+        with conn.cursor() as cur:
+            cur.execute("DELETE FROM planilla_ventas_calculada WHERE sku = %s", (sku,))
+            cur.execute("DELETE FROM planilla_sugerencias WHERE sku = %s", (sku,))
+            cur.execute("SELECT id FROM grupos LIMIT 1")
+            grupo_id = cur.fetchone()[0]
+            cur.execute(
+                "INSERT IGNORE INTO articulos (sku, descripcion, grupo_id) VALUES (%s, 'test issue 142', %s)",
+                (sku, grupo_id),
+            )
+            # Fila vieja simulando un modelo retirado -- sin ningun mes en
+            # planilla_ventas_calculada, este SKU no puede entrar a por_sku.
+            cur.execute(
+                """
+                INSERT INTO planilla_sugerencias
+                    (sku, rotacion_sugerida, fiabilidad_porcentaje, dias_hasta_quiebre, modelo, ts_generacion)
+                VALUES (%s, 12.3456, 80.00, 5.00, 'weighted_avg_13m', NOW(6))
+                """,
+                (sku,),
+            )
+        conn.commit()
+
+        filas, _con, _sin, _quiebre, huerfanos = calcular_sugerencias(
+            conn, stock_por_sku={}, mes_referencia=(2026, 6)
+        )
+
+        assert huerfanos >= 1
+        fila = next(f for f in filas if f["sku"] == sku)
+        assert fila["rotacion_sugerida"] is None
+        assert fila["fiabilidad_porcentaje"] is None
+        assert fila["dias_hasta_quiebre"] is None
+        assert fila["modelo"] == MODELO  # ya no queda con el modelo retirado
+    finally:
+        with conn.cursor() as cur:
+            cur.execute("DELETE FROM planilla_ventas_calculada WHERE sku = %s", (sku,))
+            cur.execute("DELETE FROM planilla_sugerencias WHERE sku = %s", (sku,))
             cur.execute("DELETE FROM articulo_grupo WHERE sku = %s", (sku,))
             cur.execute("DELETE FROM articulos WHERE sku = %s", (sku,))
         conn.commit()

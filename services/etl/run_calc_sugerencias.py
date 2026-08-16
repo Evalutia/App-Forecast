@@ -25,6 +25,14 @@ Algoritmo fiabilidad_porcentaje:
   - Al incluir los meses en cero (ver arriba), la intermitencia ya penaliza
     la fiabilidad correctamente: un SKU que vende 3 de 12 meses tiene alta
     variabilidad real, no solo 3 valores estables.
+  - Issue #142: un SKU con desvío cero (std=0 -- todos sus meses elegibles
+    con el MISMO valor, sea 0 o cualquier otro) da fiabilidad=100, exactamente
+    lo que promete la hoja "Criterios" ("100% = rotación idéntica todos los
+    meses"). Antes caía a 0% para el caso real de 272 SKUs en cero porque el
+    CV no se puede calcular con mean=0. Un mean<=0 con variabilidad real
+    (std!=0 -- cancelación de valores positivos/negativos por notas de
+    crédito, #80) mantiene el 0% previo -- sin datos reales para verificar
+    ese camino, ver nota en calcular_rotacion_y_fiabilidad.
 
 Algoritmo dias_hasta_quiebre (QBK):
   - stock_actual = SUM de todos los depósitos en MAX(fecha) por SKU desde stock_diario.
@@ -156,11 +164,26 @@ def calcular_rotacion_y_fiabilidad(valores: list[float]) -> tuple[float | None, 
 
     # CV sobre todos los valores (sin ponderar — mide variabilidad real del SKU)
     mean = sum(valores) / n
-    if mean > 0:
-        std = (sum((v - mean) ** 2 for v in valores) / n) ** 0.5
-        cv  = std / mean
+    std  = (sum((v - mean) ** 2 for v in valores) / n) ** 0.5
+    # Issue #142: la hoja "Criterios" promete "100% = rotación idéntica todos
+    # los meses" -- eso es, literalmente, desvío cero (std=0), sin importar
+    # el signo del valor constante. El CV (std/mean) no se puede calcular
+    # con mean=0 y antes caía directo al 0% del else -- el caso real de 272
+    # SKUs en cero. Usar std==0 en vez de "todos exactamente cero" (code
+    # review) generaliza bien: una rotación constante en -10 tiene la MISMA
+    # estabilidad que una constante en 0 y merece el mismo 100%, no un 0%
+    # solo por el signo. mean=0 por CANCELACION (ej. [-5, 5, 0], std != 0)
+    # sigue sin calificar -- eso es inestable de verdad, no "idéntica".
+    if std == 0:
+        fiabilidad = 100.0
+    elif mean > 0:
+        cv = std / mean
         fiabilidad = max(0.0, (1.0 - cv) * 100.0)
     else:
+        # mean <= 0 con variabilidad real (std != 0): devoluciones/notas de
+        # credito (#80) oscilando mes a mes. Sin datos reales para validar
+        # este camino (nota del propio issue #142) -- se preserva el
+        # comportamiento previo en vez de adivinar una formula nueva.
         fiabilidad = 0.0
 
     return round(rotacion_sugerida, 4), round(fiabilidad, 2)
@@ -192,12 +215,23 @@ def calcular_sugerencias(
     stock_por_sku: dict[str, tuple[float, dt.date]],
     mes_referencia: tuple[int, int] | None,
     fecha_referencia: dt.date | None = None,
-) -> tuple[list[dict], int, int, int]:
+) -> tuple[list[dict], int, int, int, int]:
     """
-    Retorna (filas, skus_con_sugerencia, skus_sin_datos, skus_con_quiebre).
+    Retorna (filas, skus_con_sugerencia, skus_sin_datos, skus_con_quiebre, skus_huerfanos).
 
-    skus_sin_datos: SKUs con < MIN_MESES_CON_DATOS meses utilizables — se insertan
-    con NULL para que el ON DUPLICATE KEY UPDATE limpie valores stale de ciclos anteriores.
+    skus_sin_datos: SKUs con < MIN_MESES_CON_DATOS meses utilizables (pero al menos
+    1) — se insertan con NULL para que el ON DUPLICATE KEY UPDATE limpie valores
+    stale de ciclos anteriores.
+
+    skus_huerfanos (Issue #142): SKUs que YA tienen una fila en planilla_sugerencias
+    de una corrida anterior pero este ciclo no aparecen ni siquiera en skus_sin_datos
+    -- perdieron TODOS sus meses elegibles (0, no "menos de MIN_MESES_CON_DATOS").
+    La garantía de "el upsert limpia valores stale" del docstring de arriba solo
+    cubre SKUs que siguen apareciendo en la consulta con al menos una fila; un SKU
+    que deja de tener NINGUNA fila elegible nunca entra al loop principal y su fila
+    vieja (rotación, modelo, todo) queda huérfana para siempre -- 7 casos reales
+    encontrados con el modelo retirado `weighted_avg_13m` (pre-#116), con valores
+    en NULL de pura casualidad, no por ningún mecanismo de limpieza.
 
     mes_referencia: (year, month) a excluir del cálculo. Desde Issue #34, el mes en
     curso puede llegar con estado_mes='normal' (antes solo pasaba en meses cerrados),
@@ -280,7 +314,37 @@ def calcular_sugerencias(
             "modelo":                MODELO,
         })
 
-    return filas, skus_con_sugerencia, skus_sin_datos, skus_con_quiebre
+    # Issue #142: SKUs con fila existente en planilla_sugerencias que este
+    # ciclo no tienen NI UN mes elegible (ni siquiera entraron a por_sku) --
+    # sin esto, su fila vieja (rotacion/modelo/fiabilidad) queda huerfana
+    # para siempre, invisible al loop de arriba.
+    #
+    # Code review: filtrar por "ya esta limpio" (rotacion_sugerida IS NULL
+    # Y modelo ya es el actual) en vez de traer TODOS los sku previos -- sin
+    # esto, un SKU discontinuado hace anios se re-selecciona y se re-upsertea
+    # (bump de ts_generacion/actualizado_en) en CADA corrida para siempre, y
+    # skus_huerfanos deja de distinguir "recien encontrado" de "ya limpio
+    # desde hace meses", tapando un pico real de huerfanos nuevos detras del
+    # ruido acumulado.
+    skus_huerfanos = 0
+    with conn.cursor() as cur:
+        cur.execute(
+            "SELECT sku FROM planilla_sugerencias "
+            "WHERE rotacion_sugerida IS NOT NULL OR modelo != %s",
+            (MODELO,),
+        )
+        skus_por_limpiar = {row[0] for row in cur.fetchall()}
+    for sku in skus_por_limpiar - por_sku.keys():
+        skus_huerfanos += 1
+        filas.append({
+            "sku":                   sku,
+            "rotacion_sugerida":     None,
+            "fiabilidad_porcentaje": None,
+            "dias_hasta_quiebre":    None,
+            "modelo":                MODELO,
+        })
+
+    return filas, skus_con_sugerencia, skus_sin_datos, skus_con_quiebre, skus_huerfanos
 
 # ── Escritura atómica ──────────────────────────────────────────────────────────
 
@@ -319,7 +383,7 @@ def main() -> None:
     try:
         stock_por_sku  = cargar_stock_actual(conn)
         mes_referencia = cargar_mes_referencia(conn)
-        filas, skus_con_sugerencia, skus_sin_datos, skus_con_quiebre = calcular_sugerencias(
+        filas, skus_con_sugerencia, skus_sin_datos, skus_con_quiebre, skus_huerfanos = calcular_sugerencias(
             conn, stock_por_sku, mes_referencia
         )
         escribir_sugerencias(conn, filas)
@@ -331,6 +395,7 @@ def main() -> None:
             "skus_con_sugerencia":  skus_con_sugerencia,
             "skus_con_quiebre":     skus_con_quiebre,
             "skus_sin_datos":       skus_sin_datos,
+            "skus_huerfanos":       skus_huerfanos,
             "filas_upserted":       len(filas),
             "duracion_seg":         duracion,
             "min_meses_con_datos":  MIN_MESES_CON_DATOS,
@@ -342,7 +407,8 @@ def main() -> None:
             f"[SUGERENCIAS] OK en {duracion}s — "
             f"{skus_con_sugerencia} SKUs con sugerencia, "
             f"{skus_con_quiebre} con días hasta quiebre, "
-            f"{skus_sin_datos} sin datos suficientes"
+            f"{skus_sin_datos} sin datos suficientes, "
+            f"{skus_huerfanos} huerfanos limpiados"
         )
 
     except Exception as exc:
