@@ -3519,3 +3519,21 @@ No se repitió la medición completa para `_SQL_RESUMEN_STOCK` (365 días) para 
 **Decisión, que revierte el enfoque por default que traía el propio ticket**: el costo dominante no es la redundancia de calcular lo mismo dos veces por noche (como asumían #150/#151/#152) -- es el plan de query ineficiente, independiente en cada script. Arreglar el índice (`FORCE INDEX` o equivalente) da 9,6x en cada query, ~125-130 min/noche → ~13 min/noche combinado. Construir además la tabla de agregado compartida de #150 ahorraría solo ~6 min/noche adicionales sobre eso -- beneficio marginal chico a cambio de 3 tickets, una migración y un paso nuevo en el cron. **No se justifica.**
 
 **Consecuencia**: #150, #151, #152 se cierran como `not planned` (mismo criterio que #147 -- beneficio marginal no justifica la complejidad). Se abre **#153**, chico, para aplicar el `FORCE INDEX` a las dos queries con test de regresión.
+
+---
+
+### #153 -- FORCE INDEX aplicado, 9,6x-17,4x medido contra producción (2026-08-16)
+
+`/implement issue 153` directo -- sin `/grill-me`, el enfoque ya venía decidido y medido en #149.
+
+**Cambio**: `FORCE INDEX (idx_stock_fecha)` agregado al subquery interno de agregación en `sql_stock` (`run_calc_planilla.py`, ahora `_SQL_STOCK`, promovida a constante de módulo para poder testearla igual que su hermana) y en `_SQL_RESUMEN_STOCK` (`run_calc_stock_resumen.py`). El resultado no puede cambiar -- mismo `WHERE`/`GROUP BY`, el índice solo cambia cómo se llega a las filas.
+
+**Tests de regresión** (2 por query, en `test_run_calc_planilla.py`/`test_run_calc_stock_resumen.py`): un chequeo de contenido de texto (`"FORCE INDEX" in _SQL_STOCK`) y uno de `EXPLAIN` contra MySQL real. El de texto es el guardrail real -- se descubrió corriendo el de `EXPLAIN` **sin** el hint contra la réplica local (26,6M filas, no 121M) que MySQL elige `idx_stock_fecha` **igual sin forzarlo**, por el volumen más chico. Sin el chequeo de texto, sacar el `FORCE INDEX` por error no hubiera hecho fallar ningún test local. Verificación funcional con datos reales (SKU de prueba, stock exactamente igual al mínimo -- confirma que sigue siendo `>`, no `>=`, criterio de #135).
+
+**Tiempo real medido contra producción, `FORCE INDEX` puesto**:
+- `_SQL_STOCK` (13 meses): **6,4 min** (ya medido en #149, antes 61,2 min -- 9,6x).
+- `_SQL_RESUMEN_STOCK` (365 días): **3,45 min** (207.073 ms) -- range scan de 12,4M filas en 83,7s + agregado con tabla temporal en 122,8s más. Más rápido que la de 13 meses porque la ventana es más chica y el buffer pool ya estaba tibio de la corrida anterior.
+
+**El "antes" de `_SQL_RESUMEN_STOCK` no se remidió** (hubiera costado otra hora de producción para reconfirmar un número ya establecido): el plan sin el hint escanea el índice completo sin importar el tamaño de la ventana (120,5M filas fijas, ver `EXPLAIN` de #149) -- el costo del "antes" no depende de si la ventana es de 365 días o de 13 meses, así que el ~61 min medido para la ventana de 13 meses aplica igual acá. Con eso, la mejora real ronda **17,4x** para esta query (61min → 3,45min), mejor que la de planilla porque el "después" escala con el tamaño de la ventana y el "antes" no.
+
+Suite completa de `services/etl` corrida: 59/59 en los dos archivos tocados, sin regresiones nuevas (los 33 fallos que quedan en el resto de la suite -- `test_run_ofelia.py` y afines -- son preexistentes en `develop`, del bug de bash 3.2 de macOS ya documentado en el cierre de #131-#139, no relacionados con este cambio).

@@ -6,6 +6,7 @@ import pytest
 from run_calc_planilla import (
     TICKETS_ALTO_MIN,
     TICKETS_BAJO_MAX,
+    _SQL_STOCK,
     cargar_configuracion,
     cargar_tickets,
     calcular_historico,
@@ -460,5 +461,89 @@ def test_cargar_configuracion_usa_default_si_falta_la_clave():
                 "actualizado_por = VALUES(actualizado_por)",
                 (valor_original, descripcion_original, actualizado_por_original),
             )
+        conn.commit()
+        conn.close()
+
+
+# ── _SQL_STOCK -- FORCE INDEX, issue #153 (diagnostico #149) ────────────────────
+# Sin el hint, MySQL elige idx_stock_sku_fecha (sku primero) y escanea la tabla
+# entera antes de filtrar por fecha -- 120,5M de 121M filas medido en produccion.
+# idx_stock_fecha (fecha primero) evita eso. Ver CONTEXTO.md para el detalle.
+
+def test_sql_stock_contiene_el_force_index():
+    """Guardrail principal: no depende de una DB real ni de cuanto elija MySQL
+    por su cuenta (con el volumen chico de la replica local, MySQL puede elegir
+    idx_stock_fecha igual SIN el hint -- ver test_sql_stock_usa_force_index_idx_stock_fecha
+    de abajo, que por eso solo no alcanza como regresion)."""
+    assert "FORCE INDEX" in _SQL_STOCK
+    assert "idx_stock_fecha" in _SQL_STOCK
+
+
+def test_sql_stock_usa_force_index_idx_stock_fecha():
+    """Falla si alguien saca el FORCE INDEX sin darse cuenta: sin el hint, MySQL
+    puede volver a elegir idx_stock_sku_fecha (el plan lento de #149)."""
+    conn = _try_connect()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                "EXPLAIN " + _SQL_STOCK,
+                (dt.date(2026, 1, 1), dt.date(2026, 1, 31)),
+            )
+            filas = cur.fetchall()
+            columnas = [d[0] for d in cur.description]
+
+        idx_select_type = columnas.index("select_type")
+        idx_key         = columnas.index("key")
+        # DERIVED = el subquery interno sobre stock_diario -- se busca por
+        # select_type en vez de por nombre de tabla porque el subquery usa
+        # alias ("sd"), y EXPLAIN muestra el alias, no "stock_diario".
+        fila_stock = next(f for f in filas if f[idx_select_type] == "DERIVED")
+
+        assert fila_stock[idx_key] == "idx_stock_fecha", (
+            f"esperaba idx_stock_fecha, MySQL eligio {fila_stock[idx_key]!r} -- "
+            "revisar que el FORCE INDEX siga en _SQL_STOCK"
+        )
+    finally:
+        conn.close()
+
+
+def test_sql_stock_respeta_stock_minimo_como_umbral_estricto():
+    """Verifica con datos reales que el FORCE INDEX no cambio el resultado:
+    un dia con stock exactamente igual al minimo NO cuenta como "con stock"
+    (la query usa `>`, no `>=` -- ver issue #135 sobre este criterio)."""
+    conn = _try_connect()
+    sku = "TESTFORCEIDX01"
+    try:
+        with conn.cursor() as cur:
+            cur.execute("DELETE FROM stock_diario WHERE sku = %s", (sku,))
+            cur.execute("DELETE FROM articulo_grupo WHERE sku = %s", (sku,))
+            cur.execute("DELETE FROM articulos WHERE sku = %s", (sku,))
+            cur.execute(
+                "INSERT INTO articulos (sku, descripcion, grupo_id, stock_minimo) "
+                "VALUES (%s, %s, %s, %s)",
+                (sku, "SKU de prueba -- regresion FORCE INDEX #153", 201, 5),
+            )
+            cur.executemany(
+                "INSERT INTO stock_diario (sku, fecha, cantidad, deposito_id) VALUES (%s, %s, %s, %s)",
+                [
+                    (sku, dt.date(2026, 1, 10), 10, "TEST"),  # 10 > 5 -> con stock
+                    (sku, dt.date(2026, 1, 11), 5,  "TEST"),  # 5 == 5 -> NO cuenta
+                    (sku, dt.date(2026, 1, 12), 3,  "TEST"),  # 3 < 5 -> NO cuenta
+                ],
+            )
+        conn.commit()
+
+        with conn.cursor() as cur:
+            cur.execute(_SQL_STOCK, (dt.date(2026, 1, 1), dt.date(2026, 1, 31)))
+            resultado = {(r[0], r[1], r[2]): r[3] for r in cur.fetchall()}
+
+        assert resultado.get((sku, 2026, 1)) == 1, (
+            f"esperaba 1 dia con stock (solo el de cantidad=10), dio {resultado.get((sku, 2026, 1))}"
+        )
+    finally:
+        with conn.cursor() as cur:
+            cur.execute("DELETE FROM stock_diario WHERE sku = %s", (sku,))
+            cur.execute("DELETE FROM articulo_grupo WHERE sku = %s", (sku,))
+            cur.execute("DELETE FROM articulos WHERE sku = %s", (sku,))
         conn.commit()
         conn.close()

@@ -75,6 +75,11 @@ def job_end(conn: pymysql.Connection, job_id: int, estado: str, detalle: dict) -
 
 # LEFT JOIN desde articulos: cubre todos los SKUs, no solo los que tienen filas
 # en stock_diario dentro de la ventana (quedan en total_dias=0, dias_con_stock=0).
+#
+# FORCE INDEX (issue #153, diagnóstico #149): sin el hint, MySQL elige
+# idx_stock_sku_fecha (sku primero) y no puede hacer seek por rango de fecha sola --
+# termina escaneando la tabla entera (120,5M de 121M filas medido en producción)
+# antes de filtrar. idx_stock_fecha (fecha primero) evita eso -- ver CONTEXTO.md.
 _SQL_RESUMEN_STOCK = """
     SELECT
         a.sku,
@@ -83,7 +88,7 @@ _SQL_RESUMEN_STOCK = """
     FROM articulos a
     LEFT JOIN (
         SELECT sku, fecha, SUM(cantidad) AS total
-        FROM stock_diario
+        FROM stock_diario FORCE INDEX (idx_stock_fecha)
         WHERE fecha BETWEEN %s AND %s
         GROUP BY sku, fecha
     ) agg ON agg.sku = a.sku

@@ -413,6 +413,32 @@ def cargar_tickets(
     return tickets
 
 
+# Días con stock por SKU×mes. FORCE INDEX (issue #153, diagnóstico #149): sin el hint,
+# MySQL elige idx_stock_sku_fecha (sku primero) y no puede hacer seek por rango de
+# fecha sola -- termina escaneando la tabla entera (120,5M de 121M filas medido en
+# producción) antes de filtrar. idx_stock_fecha (fecha primero) evita eso: medido
+# 61,2min -> 6,4min (9,6x) contra producción con datos reales, ver CONTEXTO.md.
+_SQL_STOCK = """
+    SELECT
+        agg.sku,
+        YEAR(agg.fecha)  AS yr,
+        MONTH(agg.fecha) AS mo,
+        COUNT(DISTINCT agg.fecha) AS dias_con_stock
+    FROM (
+        SELECT
+            sd.sku,
+            sd.fecha,
+            SUM(sd.cantidad) AS stock_total
+        FROM stock_diario sd FORCE INDEX (idx_stock_fecha)
+        WHERE sd.fecha BETWEEN %s AND %s
+        GROUP BY sd.sku, sd.fecha
+    ) agg
+    INNER JOIN articulos a ON a.sku = agg.sku
+    WHERE agg.stock_total > COALESCE(a.stock_minimo, 0)
+    GROUP BY agg.sku, YEAR(agg.fecha), MONTH(agg.fecha)
+"""
+
+
 def calcular_filas(conn: pymysql.Connection) -> tuple[list[dict], int, int, int]:
     """
     Retorna (filas_para_insert, skus_omitidos, mes_referencia_normal, mes_referencia_sin_stock).
@@ -462,27 +488,8 @@ def calcular_filas(conn: pymysql.Connection) -> tuple[list[dict], int, int, int]
 
     # ── Días con stock por SKU×mes ─────────────────────────────────────────────
     # Un día "tiene stock" cuando el total de todos los depósitos supera stock_minimo.
-    sql_stock = """
-        SELECT
-            agg.sku,
-            YEAR(agg.fecha)  AS yr,
-            MONTH(agg.fecha) AS mo,
-            COUNT(DISTINCT agg.fecha) AS dias_con_stock
-        FROM (
-            SELECT
-                sd.sku,
-                sd.fecha,
-                SUM(sd.cantidad) AS stock_total
-            FROM stock_diario sd
-            WHERE sd.fecha BETWEEN %s AND %s
-            GROUP BY sd.sku, sd.fecha
-        ) agg
-        INNER JOIN articulos a ON a.sku = agg.sku
-        WHERE agg.stock_total > COALESCE(a.stock_minimo, 0)
-        GROUP BY agg.sku, YEAR(agg.fecha), MONTH(agg.fecha)
-    """
     with conn.cursor() as cur:
-        cur.execute(sql_stock, (fecha_desde, fecha_hasta))
+        cur.execute(_SQL_STOCK, (fecha_desde, fecha_hasta))
         stock_raw = cur.fetchall()
 
     dias_stock: dict[tuple, int] = {}
