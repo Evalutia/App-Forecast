@@ -3,7 +3,7 @@ import { useRef, useState } from 'react';
 import type { PlanillaMesDto, PlanillaSugerenciaDto, PlanillaVentasDto, PlanillaVentasParams } from '../types/planilla';
 import { usePlanillaVentas } from '../hooks/usePlanilla';
 import { exportPlanillaExcel } from '../utils/exportPlanilla';
-import { DDSTK_MIN_DIAS_CON_STOCK, calcularDdstk, calcularRotDesEstac, celdaRotacionMes } from '../utils/planillaResumen';
+import { DDSTK_MIN_DIAS_CON_STOCK, calcularDdstk, calcularRotDesEstac, celdaRotacionMes, redondearDiasQuiebre } from '../utils/planillaResumen';
 import { useUmbralesTickets } from '../../configuracion/hooks/useConfiguracion';
 import { useAuthUser } from '../../auth/hooks/useAuthUser';
 
@@ -77,7 +77,7 @@ function EstadoCell({ estado }: { estado?: string }) {
 
 function QbkCell({ s }: { s: PlanillaSugerenciaDto | undefined }) {
   if (!s || s.diasHastaQuiebre === null) return <span className="muted">—</span>;
-  const dias = Math.round(s.diasHastaQuiebre);
+  const dias = redondearDiasQuiebre(s.diasHastaQuiebre);
   return <span className={qbkClass(dias)}>{dias}d</span>;
 }
 
@@ -486,8 +486,8 @@ export default function PlanillaTable({ params, onPageChange, sugerencias, suger
                     '  Rojo    = 0d — sin stock ya\n' +
                     '  Amarillo ≤ 15d — menos de 2 semanas (lead time típico)\n' +
                     '  Verde   > 15d — margen suficiente\n\n' +
-                    '— = sin ROT.S calculada, o el último dato de stock del\n' +
-                    'artículo tiene más de 7 días de antigüedad.'
+                    '— = sin ROT.S calculada o ROT.S en cero, o el último dato\n' +
+                    'de stock del artículo tiene más de 7 días de antigüedad.'
                   }
                 />
               </th>

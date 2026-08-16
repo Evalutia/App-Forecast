@@ -110,6 +110,16 @@ describe('buildPlanillaWorkbook (#107)', () => {
     expect(filaA.getCell(17).value).toBe('NOTEBOOKS'); // Género al final
   });
 
+  it('hoja 1: issue #143 -- QBK con cobertura real (0.4d) no redondea a 0 ("ya sin stock")', () => {
+    const skuC: PlanillaVentasDto = { ...skuA, sku: 'SKU-C' };
+    const sugerenciasConBorde = new Map<string, PlanillaSugerenciaDto>([
+      ['SKU-C', { sku: 'SKU-C', rotacionSugerida: 1.5, fiabilidadPorcentaje: 80, diasHastaQuiebre: 0.4 }],
+    ]);
+    const wbBorde = buildPlanillaWorkbook([skuC], sugerenciasConBorde);
+    const filaC = wbBorde.getWorksheet('Planilla de Reposición')!.getRow(2);
+    expect(filaC.getCell(16).value).toBe(1); // 0.4d de cobertura real, no 0
+  });
+
   it('hoja 1: mes sin_datos exporta celda vacía con fondo gris claro, no un 0', () => {
     const filaB = hoja1.getRow(3); // SKU-B
     expect(filaB.getCell(4).value).toBeNull();       // Vta.May/26
@@ -241,6 +251,18 @@ describe('hoja Criterios (#109)', () => {
     for (const col of ['QBK (días)', 'ROT.S', 'Fiabilidad %', 'DDSTK', 'Estado Art.']) {
       expect(filasCriterios).toContain(col);
     }
+  });
+
+  it('issue #143: QBK explica las tres razones por las que puede quedar vacía', () => {
+    const fila = CRITERIOS_COLUMNAS.find(c => c.col === 'QBK (días)')!;
+    expect(fila.como).toContain('no hay ROT.S');
+    expect(fila.como).toContain('en cero');
+    expect(fila.como).toContain('7 días de antigüedad');
+  });
+
+  it('issue #143: Hist.[mes] no afirma "mismo valor siempre" sin aclarar los huecos', () => {
+    const fila = CRITERIOS_COLUMNAS.find(c => c.col === 'Hist.[mes]')!;
+    expect(fila.como).toContain('vacía en los meses sin datos');
   });
 
   it('incluye las bandas de tickets y la leyenda de colores con swatches pintados', () => {

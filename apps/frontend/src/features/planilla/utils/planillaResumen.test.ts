@@ -5,6 +5,7 @@ import {
   calcularDdstk,
   calcularRotDesEstac,
   celdaRotacionMes,
+  redondearDiasQuiebre,
 } from './planillaResumen';
 
 function mes(overrides: Partial<PlanillaMesDto>): PlanillaMesDto {
@@ -303,5 +304,23 @@ describe('celdaRotacionMes', () => {
   it('una rotación desestacionalizada de 0 es un dato real, no un hueco', () => {
     const c = celdaRotacionMes(mes({ estadoMes: 'normal', rotacionDiariaReal: 0, rotacionDiariaDesestacionalizada: 0 }));
     expect(c).toEqual({ valor: 0, estado: 'normal' });
+  });
+});
+
+describe('redondearDiasQuiebre', () => {
+  it('issue #143: un valor positivo que redondearía a 0 se muestra como 1, no como "ya sin stock"', () => {
+    expect(redondearDiasQuiebre(0.4)).toBe(1);
+    expect(redondearDiasQuiebre(0.01)).toBe(1);
+  });
+
+  it('exactamente 0 se muestra como 0 (ya sin stock, dato real)', () => {
+    expect(redondearDiasQuiebre(0)).toBe(0);
+  });
+
+  it('valores que ya redondeaban a 1 o más no cambian de comportamiento', () => {
+    expect(redondearDiasQuiebre(0.5)).toBe(1);
+    expect(redondearDiasQuiebre(1.4)).toBe(1);
+    expect(redondearDiasQuiebre(15.2)).toBe(15);
+    expect(redondearDiasQuiebre(15.5)).toBe(16);
   });
 });

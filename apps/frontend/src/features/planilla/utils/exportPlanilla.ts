@@ -1,6 +1,6 @@
 import ExcelJS, { type Cell } from 'exceljs';
 import { fetchPlanillaVentas } from './api';
-import { DDSTK_MIN_DIAS_CON_STOCK, calcularDdstk, calcularRotDesEstac, celdaRotacionMes } from './planillaResumen';
+import { DDSTK_MIN_DIAS_CON_STOCK, calcularDdstk, calcularRotDesEstac, celdaRotacionMes, redondearDiasQuiebre } from './planillaResumen';
 import type { PlanillaMesDto, PlanillaSugerenciaDto, PlanillaVentasDto, PlanillaVentasParams } from '../types/planilla';
 
 const MESES = ['Ene','Feb','Mar','Abr','May','Jun','Jul','Ago','Sep','Oct','Nov','Dic'];
@@ -179,7 +179,7 @@ function buildHojaPlanilla(
       calcularDdstk(item.meses),
       sug?.rotacionSugerida ?? null,
       sug?.fiabilidadPorcentaje ?? null,
-      sug?.diasHastaQuiebre != null ? Math.round(sug.diasHastaQuiebre) : null,
+      sug?.diasHastaQuiebre != null ? redondearDiasQuiebre(sug.diasHastaQuiebre) : null,
       item.generoDescripcion ?? '',
     ]);
     row.height = 18;
@@ -365,7 +365,7 @@ export const CRITERIOS_COLUMNAS: CriterioRow[] = [
   { col: 'Fiabilidad %', hoja: 'Planilla', que: 'Qué tan estable es la rotación del artículo — cuánto confiar en ROT.S.',
     como: '100% = rotación idéntica todos los meses; baja cuanto más varía de mes a mes, incluida la intermitencia (un artículo que solo vende algunos meses del año no puede dar fiabilidad alta). Siempre entre 0% y 100%.' },
   { col: 'QBK (días)', hoja: 'Planilla', que: 'Días estimados hasta quedarse sin stock.',
-    como: 'Stock actual ÷ ROT.S. 0 = ya sin stock. Vacía si el último dato de stock del artículo tiene más de 7 días de antigüedad (evita estimar sobre un stock desactualizado).' },
+    como: 'Stock actual ÷ ROT.S. 0 = ya sin stock. Vacía si no hay ROT.S calculada o ROT.S está en cero, o si el último dato de stock del artículo tiene más de 7 días de antigüedad (evita estimar sobre un stock desactualizado).' },
   { col: 'Género', hoja: 'Planilla', que: 'Género del artículo.', como: 'Tal como figura en el catálogo.' },
   // Hoja 2 — Detalle de cálculo
   { col: 'Rot.Real.[mes]', hoja: 'Detalle', que: 'Rotación diaria del mes SIN corregir por estacionalidad.',
@@ -373,7 +373,7 @@ export const CRITERIOS_COLUMNAS: CriterioRow[] = [
   { col: 'Tick.[mes]', hoja: 'Detalle', que: 'Tickets: cantidad de días de ese mes con al menos una venta real.',
     como: 'Se cuentan días con venta, no unidades. Define qué método se usa para el valor ajustado (ver bandas abajo).' },
   { col: 'Hist.[mes]', hoja: 'Detalle', que: 'Histórico: venta mensual promedio del artículo.',
-    como: 'Promedio de ventas de los 12 meses cerrados en los que el artículo ya existía. Es el mismo valor en todos los meses de la fila.' },
+    como: 'Promedio de ventas de los 12 meses cerrados en los que el artículo ya existía. El valor no varía de un mes a otro para el mismo artículo — pero la celda queda vacía en los meses sin datos (ej. artículo dado de alta después), aunque en los meses que sí tienen dato el valor sea siempre el mismo.' },
   { col: 'V/E.[mes]', hoja: 'Detalle', que: 'Venta real del mes, o su extrapolación si hubo quiebre.',
     como: 'Con stock todo el mes: la venta real. Con quiebre: la venta se proyecta al mes completo, y cuanto menos duró el stock más se proyecta — pero nunca más del doble de lo realmente vendido, por poco que haya durado. Vacía si el mes no tuvo stock.' },
   { col: 'Crit.[mes]', hoja: 'Detalle', que: 'Método usado para el valor ajustado de ese mes.',

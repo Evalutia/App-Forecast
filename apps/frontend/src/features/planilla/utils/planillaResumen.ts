@@ -136,3 +136,19 @@ export function calcularDdstk(meses: PlanillaMesDto[]): number | null {
   if (totalDias < DDSTK_MIN_DIAS_CON_STOCK) return null;
   return totalVentas / totalDias;
 }
+
+/**
+ * Redondea QBK (días hasta quiebre) para mostrar, sin exagerar la urgencia
+ * por redondeo (issue #143). `diasHastaQuiebre` viene del backend como
+ * `stock_actual / rotacion_sugerida`, siempre >= 0 -- un artículo con 0.4
+ * días de cobertura real (todavía tiene stock) redondeaba a 0 con
+ * `Math.round`, y la hoja "Criterios" dice "0 = ya sin stock": sobre-reporta
+ * urgencia justo en el borde. Cualquier valor > 0 se muestra como mínimo 1;
+ * solo un valor exactamente 0 (stock_actual en 0, clampeado en el backend)
+ * se muestra como 0. Fuente única -- antes cada archivo redondeaba por su
+ * cuenta con `Math.round`, mismo patrón divergente que #117 documenta para
+ * DDSTK/Rot.DesEstac.
+ */
+export function redondearDiasQuiebre(dias: number): number {
+  return dias > 0 ? Math.max(1, Math.round(dias)) : 0;
+}
