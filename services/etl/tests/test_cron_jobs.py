@@ -356,12 +356,12 @@ def sku_articulo(conn):
     conn.commit()
 
 
-def _cargar_stock(conn, sku, fecha, cantidad):
+def _cargar_stock(conn, sku, fecha, cantidad, deposito_id="D1"):
     with conn.cursor() as cur:
         cur.execute(
             "INSERT INTO stock_diario (sku, fecha, cantidad, deposito_id, fuente) "
-            "VALUES (%s, %s, %s, 'D1', 'test')",
-            (sku, fecha, cantidad),
+            "VALUES (%s, %s, %s, %s, 'test')",
+            (sku, fecha, cantidad, deposito_id),
         )
     conn.commit()
 
@@ -603,7 +603,9 @@ def test_cmd_stock_gaps_default_sin_fechas_usa_ventana_de_7_dias(conn, monkeypat
         capturado["desde"] = desde
         capturado["hasta"] = hasta
         return {"fecha_desde": desde, "fecha_hasta": hasta,
-                "dias_sin_datos": [], "num_dias_sin_datos": 0}
+                "dias_sin_datos": [], "num_dias_sin_datos": 0,
+                "depositos_esperados": [], "dias_con_depositos_faltantes": [],
+                "num_dias_con_depositos_faltantes": 0}
 
     monkeypatch.setattr(cron_jobs, "_calcular_stock_gaps", _fake_calcular)
 
@@ -628,7 +630,9 @@ def test_cmd_stock_gaps_con_solo_fecha_desde_se_acota_a_ese_unico_dia(conn, monk
         capturado["desde"] = desde
         capturado["hasta"] = hasta
         return {"fecha_desde": desde, "fecha_hasta": hasta,
-                "dias_sin_datos": [], "num_dias_sin_datos": 0}
+                "dias_sin_datos": [], "num_dias_sin_datos": 0,
+                "depositos_esperados": [], "dias_con_depositos_faltantes": [],
+                "num_dias_con_depositos_faltantes": 0}
 
     monkeypatch.setattr(cron_jobs, "_calcular_stock_gaps", _fake_calcular)
 
@@ -660,6 +664,147 @@ def test_cmd_stock_gaps_conexion_caida_no_propaga_excepcion(monkeypatch, capsys)
 
     assert rc == 1
     assert "no se pudo conectar" in capsys.readouterr().err
+
+
+# ---------------------------------------------------------------------------
+# stock_gaps por deposito (Issue #155) -- hueco PARCIAL: la fecha tiene
+# filas (algun deposito escribio), pero no todos los depositos configurados
+# lo hicieron. _calcular_stock_gaps (#133) es ciego a esto: solo mira
+# presencia/ausencia de fecha, nunca agrupa por deposito_id.
+# ---------------------------------------------------------------------------
+
+def test_depositos_esperados_desde_env_lee_s_depositos_separado_por_coma(monkeypatch):
+    monkeypatch.setenv("S_DEPOSITOS", "1,5,8,9,10,11")
+    assert cron_jobs._depositos_esperados_desde_env() == ["1", "10", "11", "5", "8", "9"]
+
+
+def test_depositos_esperados_desde_env_ignora_espacios_y_tokens_vacios(monkeypatch):
+    """Mismo criterio de parseo que run_extract_stockxml.sh (coma, trim por token)."""
+    monkeypatch.setenv("S_DEPOSITOS", " 1, 5,,8 ,9,10,11 ")
+    assert cron_jobs._depositos_esperados_desde_env() == ["1", "10", "11", "5", "8", "9"]
+
+
+def test_depositos_esperados_desde_env_no_seteada_devuelve_vacio(monkeypatch):
+    monkeypatch.delenv("S_DEPOSITOS", raising=False)
+    assert cron_jobs._depositos_esperados_desde_env() == []
+
+
+def test_stock_gaps_detecta_deposito_faltante_con_parametro_explicito(conn, sku_articulo):
+    """Firma real de #155: D2 no escribe el 2030-04-10, D1 si -- la fecha
+    'tiene datos' pero esta incompleta."""
+    _cargar_stock(conn, sku_articulo, "2030-04-10", 10, deposito_id="D1")
+    # D2 -- sin cargar ese dia, el hueco parcial
+
+    resultado = cron_jobs._calcular_stock_gaps(
+        conn, "2030-04-10", "2030-04-10", depositos_esperados=["D1", "D2"]
+    )
+
+    assert resultado["num_dias_sin_datos"] == 0  # la fecha SI tiene filas
+    assert resultado["num_dias_con_depositos_faltantes"] == 1
+    assert resultado["dias_con_depositos_faltantes"] == [
+        {"fecha": "2030-04-10", "depositos_faltantes": ["D2"]}
+    ]
+
+
+def test_stock_gaps_sin_faltantes_cuando_todos_los_depositos_escriben(conn, sku_articulo):
+    _cargar_stock(conn, sku_articulo, "2030-04-11", 10, deposito_id="D1")
+    _cargar_stock(conn, sku_articulo, "2030-04-11", 7, deposito_id="D2")
+
+    resultado = cron_jobs._calcular_stock_gaps(
+        conn, "2030-04-11", "2030-04-11", depositos_esperados=["D1", "D2"]
+    )
+
+    assert resultado["num_dias_con_depositos_faltantes"] == 0
+    assert resultado["dias_con_depositos_faltantes"] == []
+
+
+def test_stock_gaps_dia_totalmente_vacio_no_duplica_en_depositos_faltantes(conn, sku_articulo):
+    """
+    Issue #155 AC: el hueco parcial es ADEMAS del hueco total que ya cubre
+    #133, no un duplicado -- un dia sin NINGUNA fila ya queda en
+    dias_sin_datos y no debe reaparecer en dias_con_depositos_faltantes.
+    """
+    _cargar_stock(conn, sku_articulo, "2030-04-12", 10, deposito_id="D1")
+    _cargar_stock(conn, sku_articulo, "2030-04-12", 7, deposito_id="D2")
+    # 2030-04-13 -- ninguna fila, hueco TOTAL (no parcial)
+
+    resultado = cron_jobs._calcular_stock_gaps(
+        conn, "2030-04-12", "2030-04-13", depositos_esperados=["D1", "D2"]
+    )
+
+    assert resultado["dias_sin_datos"] == ["2030-04-13"]
+    assert resultado["num_dias_con_depositos_faltantes"] == 0
+    assert resultado["dias_con_depositos_faltantes"] == []
+
+
+def test_stock_gaps_sin_depositos_esperados_no_rompe(conn, sku_articulo, monkeypatch):
+    """
+    S_DEPOSITOS sin configurar (dev/manual) no debe romper el chequeo de
+    huecos totales que ya funcionaba -- el chequeo por deposito simplemente
+    no corre (no hay contra que comparar).
+    """
+    monkeypatch.delenv("S_DEPOSITOS", raising=False)
+    _cargar_stock(conn, sku_articulo, "2030-04-14", 10, deposito_id="D1")
+
+    resultado = cron_jobs._calcular_stock_gaps(conn, "2030-04-14", "2030-04-14")
+
+    assert resultado["depositos_esperados"] == []
+    assert resultado["num_dias_con_depositos_faltantes"] == 0
+    assert resultado["dias_con_depositos_faltantes"] == []
+
+
+def test_stock_gaps_depositos_esperados_por_defecto_sale_de_env(conn, sku_articulo, monkeypatch):
+    """AC #155: la cantidad esperada de depositos no queda hardcodeada --
+    sale de S_DEPOSITOS (Issue #139)."""
+    monkeypatch.setenv("S_DEPOSITOS", "D1,D2")
+    _cargar_stock(conn, sku_articulo, "2030-04-15", 10, deposito_id="D1")
+    # D2 -- sin cargar, el hueco parcial
+
+    resultado = cron_jobs._calcular_stock_gaps(conn, "2030-04-15", "2030-04-15")
+
+    assert resultado["depositos_esperados"] == ["D1", "D2"]
+    assert resultado["dias_con_depositos_faltantes"] == [
+        {"fecha": "2030-04-15", "depositos_faltantes": ["D2"]}
+    ]
+
+
+def test_cmd_stock_gaps_guarda_depositos_faltantes_bajo_detalle_stock_gaps(
+    conn, sku_articulo, monkeypatch, capsys
+):
+    monkeypatch.setenv("S_DEPOSITOS", "D1,D2")
+    cron_jobs.cmd_start()
+    job_id = int(capsys.readouterr().out.strip())
+    cron_jobs.cmd_end(str(job_id), "0", "12.0")
+    capsys.readouterr()
+
+    _cargar_stock(conn, sku_articulo, "2030-04-16", 10, deposito_id="D1")
+    # D2 -- sin cargar, el hueco parcial
+
+    rc = cron_jobs.cmd_stock_gaps(str(job_id), "2030-04-16", "2030-04-16")
+    assert rc == 0
+
+    fila = _fila(conn, job_id)
+    assert fila["detalle"]["stock_gaps"]["num_dias_con_depositos_faltantes"] == 1
+    assert fila["detalle"]["stock_gaps"]["dias_con_depositos_faltantes"] == [
+        {"fecha": "2030-04-16", "depositos_faltantes": ["D2"]}
+    ]
+
+    salida = capsys.readouterr().out
+    assert "PARCIAL" in salida
+    assert "D2" in salida
+
+
+def test_cmd_stock_gaps_sin_depositos_faltantes_no_menciona_parcial(
+    conn, sku_articulo, monkeypatch, capsys
+):
+    monkeypatch.setenv("S_DEPOSITOS", "D1")
+    _cargar_stock(conn, sku_articulo, "2030-04-17", 10, deposito_id="D1")
+
+    rc = cron_jobs.cmd_stock_gaps("-", "2030-04-17", "2030-04-17")
+    assert rc == 0
+
+    salida = capsys.readouterr().out
+    assert "PARCIAL" not in salida
 
 
 # ---------------------------------------------------------------------------

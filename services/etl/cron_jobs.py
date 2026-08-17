@@ -69,6 +69,21 @@ Subcomandos:
       ventana que la recuperacion de ventas). No bloqueante: un chequeo
       caido se loguea y devuelve !=0, pero nunca corta la corrida.
 
+      Issue #155: ademas del hueco TOTAL de arriba, detecta el hueco
+      PARCIAL -- una fecha que SI tiene filas en stock_diario, pero no de
+      todos los depositos configurados (ej. 5 de los 6 depositos de
+      S_DEPOSITOS escriben bien un dia, uno falla). stock_total suma todos
+      los depositos, asi que un deposito faltante subestima el stock real y
+      puede fabricar quiebres que no existieron -- silencioso para el hueco
+      TOTAL de #133, porque la fecha "tiene datos". La cantidad esperada de
+      depositos sale de la variable de entorno S_DEPOSITOS (Issue #139,
+      misma fuente que usa la extraccion) -- nunca hardcodeada, para que el
+      chequeo no mienta el dia que se agregue un deposito nuevo. Mismo
+      alcance informativo que el hueco TOTAL: un dia de stock perdido de un
+      deposito puntual tampoco se puede volver a pedir (ConsStockXml
+      siempre trae la foto de HOY, sin importar el deposito) -- esto avisa,
+      no repara.
+
   abort <motivo>
       Issue #132: fallo ANTES de poder registrar `start` (ej. run_ofelia.sh
       aborta por un archivo faltante, como paso el 2026-08-11 con
@@ -411,7 +426,24 @@ def cmd_coherencia(job_id: str, fecha_desde: str = None, fecha_hasta: str = None
     return 0
 
 
-def _calcular_stock_gaps(conn, fecha_desde: str, fecha_hasta: str) -> dict:
+def _depositos_esperados_desde_env() -> list:
+    """
+    Issue #155 / #139: S_DEPOSITOS vive en la variable de entorno (mismo
+    origen que usan run_extract_stockxml.sh, run_extract_sales_chunk.sh y
+    run_backfill_ventas.sh), nunca hardcodeada aca -- si se agrega un
+    deposito nuevo a la extraccion, el chequeo de huecos parciales lo sabe
+    sin tocar codigo. Mismo criterio de parseo que esos scripts bash: lista
+    separada por comas, cada token sin espacios. Vacia (variable no seteada,
+    o seteada vacia) es una respuesta valida -- no hay contra que comparar,
+    ver _calcular_stock_gaps.
+    """
+    crudo = os.environ.get("S_DEPOSITOS", "")
+    return sorted({token.strip() for token in crudo.split(",") if token.strip()})
+
+
+def _calcular_stock_gaps(
+    conn, fecha_desde: str, fecha_hasta: str, depositos_esperados: list = None
+) -> dict:
     """
     Fechas en [fecha_desde, fecha_hasta] sin NINGUNA fila en stock_diario --
     pregunta distinta de _calcular_coherencia (que compara venta contra
@@ -422,6 +454,27 @@ def _calcular_stock_gaps(conn, fecha_desde: str, fecha_hasta: str) -> dict:
     fecha pedida (ver assert_ventana_no_peligrosa en run_extract_stockxml.sh).
     Calcula el calendario completo en Python en vez de un generate_series en
     SQL -- mas simple, y el rango nunca es mas que unos pocos dias.
+
+    Issue #155: ademas del hueco TOTAL, detecta el hueco PARCIAL -- una
+    fecha CON filas en stock_diario, pero no de todos los depositos de
+    `depositos_esperados` (por defecto, S_DEPOSITOS via
+    _depositos_esperados_desde_env -- explicito solo para tests). Un dia sin
+    NINGUNA fila ya cuenta como hueco TOTAL y a proposito no se repite aca
+    (evita que el mismo dia aparezca duplicado bajo dos etiquetas distintas
+    con el mismo significado). Igual que el hueco TOTAL, esto es
+    informativo, no reparable: un deposito que no escribio un dia puntual
+    tampoco se puede volver a pedir -- ConsStockXml siempre trae la foto de
+    HOY, no la del dia pedido, sin importar el deposito.
+
+    Nota (no bloqueante, sin evidencia de que pase hoy): run_extract_stockxml.py
+    prioriza el IdDeposito que viene en el cuerpo de la respuesta del WS sobre
+    el token de S_DEPOSITOS, y solo cae a este ultimo si el campo viene vacio
+    (ver deposito_val alli). Si el WS alguna vez devolviera el deposito en un
+    formato distinto al token plano de S_DEPOSITOS (padding, prefijo), ese
+    deposito_id no matchearia contra `depositos_esperados` y la fecha
+    quedaria marcada como hueco PARCIAL permanente sin serlo -- falso
+    positivo, no falso negativo, asi que no esconde un problema real, pero
+    vale tenerlo presente si este chequeo empieza a reportar ruido persistente.
     """
     desde = dt.date.fromisoformat(fecha_desde)
     hasta = dt.date.fromisoformat(fecha_hasta)
@@ -433,17 +486,37 @@ def _calcular_stock_gaps(conn, fecha_desde: str, fecha_hasta: str) -> dict:
 
     with conn.cursor() as cur:
         cur.execute(
-            "SELECT DISTINCT fecha FROM stock_diario WHERE fecha BETWEEN %(desde)s AND %(hasta)s",
+            "SELECT DISTINCT fecha, deposito_id FROM stock_diario "
+            "WHERE fecha BETWEEN %(desde)s AND %(hasta)s",
             {"desde": fecha_desde, "hasta": fecha_hasta},
         )
-        fechas_con_dato = {row[0] for row in cur.fetchall()}
+        depositos_por_fecha = {}
+        for fecha, deposito_id in cur.fetchall():
+            depositos_por_fecha.setdefault(fecha, set()).add(deposito_id)
 
-    faltantes = sorted(todas_las_fechas - fechas_con_dato)
+    faltantes = sorted(todas_las_fechas - set(depositos_por_fecha))
+
+    if depositos_esperados is None:
+        depositos_esperados = _depositos_esperados_desde_env()
+    esperados = set(depositos_esperados)
+
+    dias_con_depositos_faltantes = []
+    if esperados:
+        for fecha in sorted(depositos_por_fecha):
+            faltan = sorted(esperados - depositos_por_fecha[fecha])
+            if faltan:
+                dias_con_depositos_faltantes.append(
+                    {"fecha": fecha.isoformat(), "depositos_faltantes": faltan}
+                )
+
     return {
         "fecha_desde": fecha_desde,
         "fecha_hasta": fecha_hasta,
         "dias_sin_datos": [d.isoformat() for d in faltantes],
         "num_dias_sin_datos": len(faltantes),
+        "depositos_esperados": sorted(esperados),
+        "dias_con_depositos_faltantes": dias_con_depositos_faltantes,
+        "num_dias_con_depositos_faltantes": len(dias_con_depositos_faltantes),
     }
 
 
@@ -462,6 +535,11 @@ def cmd_stock_gaps(job_id: str, fecha_desde: str = None, fecha_hasta: str = None
     -- code review: la version anterior ignoraba fecha_desde en ese caso y
     recalculaba fecha_hasta como "ayer" igual, corriendo silenciosamente
     sobre una ventana distinta a la pedida.
+
+    Issue #155: el mismo resultado (bajo la misma clave detalle.stock_gaps)
+    ahora tambien trae el hueco PARCIAL por deposito -- ver
+    _calcular_stock_gaps. Informativo, igual que el hueco TOTAL: no hay
+    reparacion posible para ninguno de los dos.
     """
     if fecha_desde is None:
         fecha_hasta = _ayer_iso()
@@ -498,14 +576,30 @@ def cmd_stock_gaps(job_id: str, fecha_desde: str = None, fecha_hasta: str = None
                   file=sys.stderr)
     conn.close()
 
-    if resultado["num_dias_sin_datos"] == 0:
+    dias_con_depositos_faltantes = resultado["dias_con_depositos_faltantes"]
+    hay_hueco_total = resultado["num_dias_sin_datos"] > 0
+    hay_hueco_parcial = bool(dias_con_depositos_faltantes)
+
+    if not hay_hueco_total and not hay_hueco_parcial:
         print(f"[CRON][STOCK_GAPS] {fecha_desde}..{fecha_hasta}: sin huecos "
               f"(stock_diario tiene datos todos los dias del rango).")
         return 0
 
-    print(f"[CRON][STOCK_GAPS] {fecha_desde}..{fecha_hasta}: "
-          f"{resultado['num_dias_sin_datos']} dia(s) sin ningun dato de stock: "
-          f"{', '.join(resultado['dias_sin_datos'])}")
+    if hay_hueco_total:
+        print(f"[CRON][STOCK_GAPS] {fecha_desde}..{fecha_hasta}: "
+              f"{resultado['num_dias_sin_datos']} dia(s) sin ningun dato de stock: "
+              f"{', '.join(resultado['dias_sin_datos'])}")
+
+    if hay_hueco_parcial:
+        detalle_por_dia = "; ".join(
+            f"{item['fecha']}: deposito(s) faltante(s) {', '.join(item['depositos_faltantes'])}"
+            for item in dias_con_depositos_faltantes
+        )
+        print(f"[CRON][STOCK_GAPS] {fecha_desde}..{fecha_hasta}: "
+              f"{len(dias_con_depositos_faltantes)} dia(s) con hueco PARCIAL "
+              f"(algun deposito de {', '.join(resultado['depositos_esperados'])} no "
+              f"escribio ese dia, aunque la fecha tiene datos de otros): {detalle_por_dia}")
+
     return 0
 
 
