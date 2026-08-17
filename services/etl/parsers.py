@@ -56,7 +56,7 @@ def parse_decimal(valor):
         raise ParseError(f"numero no interpretable: {valor!r}")
 
 
-def parse_entero(valor, *, signed=False, default=0):
+def parse_entero(valor, *, signed=False, default=0, contexto=None):
     """Entero redondeado a partir de parse_decimal.
 
     None/'' -> default. Si signed=False (caso por defecto: cantidades de
@@ -64,13 +64,22 @@ def parse_entero(valor, *, signed=False, default=0):
     una regla de negocio deliberada, no un fallo de parseo, y se preserva
     tal cual la tenian los extractores originales. Un valor realmente no
     interpretable (p. ej. 'abc') levanta ParseError, nunca cae a 0.
+
+    Un clamp real (negativo -> 0) deja rastro en el log (Issue #156): antes
+    ese 0 era indistinguible de un 0 real del WS. No cambia el valor
+    persistido ni afecta al camino signed=True (donde el negativo es
+    legitimo, ver #80). `contexto` es opcional -- si el caller ya sabe
+    sku/fecha de la fila, lo pasa para que el WARN quede tan identificable
+    como los demas WARN de fila descartada.
     """
     d = parse_decimal(valor)
     if d is None:
         return default
     n = int(d.to_integral_value(rounding=ROUND_HALF_UP))
-    if not signed:
-        n = max(0, n)
+    if not signed and n < 0:
+        sufijo = f" {contexto}" if contexto else ""
+        print(f"[WARN] parse_entero: valor negativo real recortado a 0 (valor original={valor!r}, interpretado={n}){sufijo}")
+        n = 0
     return n
 
 

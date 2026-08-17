@@ -167,7 +167,7 @@ def procesar_payload(conn, payload, deposito_forzado=None, grupo_id=None):
                         stock_dec = parsers.parse_decimal(stock)
                         values["stock"] = str(stock_dec) if stock_dec is not None else "0"
                     else:
-                        values["stock"] = parsers.parse_entero(stock)
+                        values["stock"] = parsers.parse_entero(stock, contexto=f"sku={sku} fecha={fecha}")
                 except parsers.ParseError as e:
                     stock_parseable = False
                     if sql_sin_stock is not None:
@@ -206,7 +206,7 @@ def procesar_payload(conn, payload, deposito_forzado=None, grupo_id=None):
                     if not stock_is_decimal and stock_parseable:
                         stock_diario_val = values["stock"]
                     else:
-                        stock_diario_val = parsers.parse_entero(stock)
+                        stock_diario_val = parsers.parse_entero(stock, contexto=f"sku={sku} fecha={fecha}")
                 except parsers.ParseError as e:
                     print(f"[WARN] stock_diario no actualizado, stock no interpretable sku={sku} fecha={fecha}: {e}")
                 else:
