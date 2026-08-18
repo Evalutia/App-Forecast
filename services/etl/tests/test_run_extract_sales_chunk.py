@@ -18,6 +18,7 @@ import os
 
 import pytest
 
+import fixtures_ws_payloads as fx
 import run_extract_sales_chunk as rsc
 
 
@@ -210,6 +211,24 @@ def test_venta_con_coma_decimal_no_cae_en_cero_silencioso(conn):
     filas = _filas(conn)
     assert len(filas) == 1
     assert filas[0]["cantidad"] == 2
+
+
+def test_venta_no_interpretable_se_descarta_y_queda_contada_como_skip(conn):
+    """Issue #158 (auditoria de la extraccion cruda, 2026-08-16): el caso
+    '1,5' de arriba es un valor VALIDO mal formateado (coma decimal). Este
+    es el caso "basura real" que el ticket encontro sin cobertura de
+    punta a punta -- 'abc' no es interpretable de ninguna forma. Ya estaba
+    cubierto a nivel unitario del parser (test_parsers.py, via el mismo
+    fixture NUMEROS_NO_INTERPRETABLES) pero faltaba confirmar contra la
+    base que la fila entera se descarta (rows_skip), no que se escriba
+    como un 0 silencioso que pisaria una venta real ya cargada."""
+    ins, skip, _, failed, _ = rsc.procesar_payload(
+        conn, [_item(venta=fx.NUMEROS_NO_INTERPRETABLES[0])], deposito_forzado="5", grupo_id="30"
+    )
+
+    assert fx.NUMEROS_NO_INTERPRETABLES[0] == "abc"
+    assert (ins, skip, failed) == (0, 1, 0)
+    assert _filas(conn) == []
 
 
 def test_venta_con_miles_punto_no_se_trunca(conn):

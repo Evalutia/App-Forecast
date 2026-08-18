@@ -3,6 +3,41 @@ import html, json, os, pymysql
 
 import parsers
 
+# Issue #159: nombres alternativos de campo que el WS puede usar para venta y
+# stock -- listados una sola vez (antes vivian inline en el loop de parseo,
+# duplicados si hacia falta consultarlos desde otro lado).
+CAMPOS_VENTA = ['Venta', 'VentaQty', 'Cantidad', 'CantVenta', 'CantidadVta',
+                'CantVta', 'CantidadVenta', 'CANTIDAD', 'CANT_VENTA']
+CAMPOS_STOCK = ['Stock', 'StockDisp', 'StockDisponible', 'Existencia',
+                'Existencias', 'CantidadStock']
+
+
+class ContractDriftError(Exception):
+    """Issue #159: ninguna fila del payload trae un campo reconocible (venta
+    o stock) -- firma de un cambio de contrato del WS (renombre de campo),
+    no de una ausencia de dato puntual (ver _campo_ausente_en_todas)."""
+
+
+def _campo_ausente_en_todas(payload, candidatos):
+    """
+    True si el payload tiene al menos un item de tipo dict y NINGUNO trae
+    ninguno de los campos candidatos con un valor no-nulo.
+
+    La señal es la ausencia TOTAL del campo, no el valor que trae: un dia
+    real sin ventas (domingo) tiene el campo presente con valor 0, y
+    it.get(k) is not None ya es True para 0 -- eso cuenta como "encontrado".
+    Un payload vacio (sin items) no dice nada sobre el contrato -- devuelve
+    False, no es la clase de fallo que este chequeo busca (ver #124/#133
+    para el manejo de respuesta vacia/legitimamente sin datos).
+    """
+    items = [it for it in payload if isinstance(it, dict)]
+    if not items:
+        return False
+    return not any(
+        any(it.get(k) is not None for k in candidatos)
+        for it in items
+    )
+
 
 def procesar_payload(conn, payload, deposito_forzado=None, grupo_id=None):
     """
@@ -11,6 +46,13 @@ def procesar_payload(conn, payload, deposito_forzado=None, grupo_id=None):
     rows_stock_ins, rows_failed, rows_stock_failed) -- rows_failed/
     rows_stock_failed son excepciones reales de MySQL al escribir (Issue
     #154), distintas de rows_skip (descarte legitimo de datos).
+
+    Issue #159: si NINGUNA fila del payload trae un campo de venta
+    reconocible, levanta ContractDriftError ANTES de escribir nada -- sin
+    este chequeo, parse_entero(None) defaultea a 0 y esas filas pisarian
+    ventas buenas via ON DUPLICATE KEY UPDATE, sistematicamente, sin
+    ningun error. Mismo criterio para stock, pero solo si deposito_forzado
+    esta seteado (sin eso, stock_diario nunca se escribe de todos modos).
 
     Issue #114: idempotente por (fecha, sku, deposito_id). Antes, el INSERT
     era plano y sin clave unica -- un articulo devuelto por varios grupos
@@ -47,6 +89,23 @@ def procesar_payload(conn, payload, deposito_forzado=None, grupo_id=None):
             grupo_val = int(grupo_id)
         except (TypeError, ValueError):
             grupo_val = None
+
+    # Issue #159: chequeo de contract drift ANTES de tocar la DB -- si esto
+    # dispara, no debe quedar ninguna fila a medio escribir con datos malos.
+    if _campo_ausente_en_todas(payload, CAMPOS_VENTA):
+        raise ContractDriftError(
+            "ninguna fila del payload trae un campo de venta reconocible -- "
+            f"se probaron: {', '.join(CAMPOS_VENTA)}. Posible cambio de "
+            "contrato del WS (renombre de campo), no una ausencia de dato "
+            "puntual (un dia sin ventas real trae el campo presente en 0)."
+        )
+    if deposito_forzado and _campo_ausente_en_todas(payload, CAMPOS_STOCK):
+        raise ContractDriftError(
+            "ninguna fila del payload trae un campo de stock reconocible -- "
+            f"se probaron: {', '.join(CAMPOS_STOCK)}. Posible cambio de "
+            "contrato del WS (renombre de campo), no una ausencia de dato "
+            "puntual (un dia con stock en 0 real trae el campo presente)."
+        )
 
     with conn.cursor() as cur:
         cur.execute("""
@@ -142,11 +201,11 @@ def procesar_payload(conn, payload, deposito_forzado=None, grupo_id=None):
                 rows_skip += 1
                 continue
             venta = None
-            for k in ['Venta','VentaQty','Cantidad','CantVenta','CantidadVta','CantVta','CantidadVenta','CANTIDAD','CANT_VENTA']:
+            for k in CAMPOS_VENTA:
                 if it.get(k) is not None:
                     venta = it.get(k); break
             stock = None
-            for k in ['Stock','StockDisp','StockDisponible','Existencia','Existencias','CantidadStock']:
+            for k in CAMPOS_STOCK:
                 if it.get(k) is not None:
                     stock = it.get(k); break
             if not fecha or not sku:
@@ -287,9 +346,16 @@ def main():
     deposito_forzado = os.environ.get("__FORCED_DEPOSITO") or None
     grupo_id = os.environ.get("__FORCED_GRUPO") or None
 
-    rows_ins, rows_skip, rows_stock_ins, rows_failed, rows_stock_failed = procesar_payload(
-        conn, payload, deposito_forzado=deposito_forzado, grupo_id=grupo_id
-    )
+    try:
+        rows_ins, rows_skip, rows_stock_ins, rows_failed, rows_stock_failed = procesar_payload(
+            conn, payload, deposito_forzado=deposito_forzado, grupo_id=grupo_id
+        )
+    except ContractDriftError as e:
+        # Issue #159: nada se escribio (el chequeo corre antes de la
+        # primera escritura) -- falla fuerte en vez de dejar que el resto
+        # del pipeline reciba ceros silenciosos.
+        print(f"[ERROR] posible cambio de contrato del WS: {e}")
+        raise SystemExit(1)
 
     print(f"[INFO] Inserted {rows_ins} rows into ventas_historicas_stage (skipped {rows_skip}, failed {rows_failed})")
     print(f"[INFO] Upserted {rows_stock_ins} rows into stock_diario (fuente={('ws_consstockventa' if rows_stock_ins else '-')}, failed {rows_stock_failed})")
