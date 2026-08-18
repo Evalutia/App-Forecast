@@ -3602,6 +3602,28 @@ Tickets: **#154** (fallo silencioso de escritura, `blocker`), **#155** (huecos p
 
 ---
 
+### #144 -- exponente de la extrapolación parametrizado y medido (no cerrado, decisión pendiente de Rodrigo) (2026-08-17/18)
+
+`/implement issue 144` directo. El issue tiene 5 AC y tres dependen de una respuesta de Rodrigo que todavía no llegó (plantearle el tope, decidir con él el exponente, medir impacto si cambia) -- esta sesión sólo cubre los dos primeros, que no dependen de él: parametrizar la fórmula y medir contra la historia real. **Producción sigue en `p=1`, sin cambios**, y el issue queda abierto a propósito.
+
+**Parametrización**: `extrapolacion_mes()` (`run_calc_planilla.py`) generaliza la fórmula de #129 con `p` (default `1.0`) según la contrapropuesta de Rodrigo: `Estimacion = V*[1 + w*(D/d-1)]`, `w=(d/D)^p`. Con `p=1` da algebraicamente lo mismo que `V*(2-d/D)` -- verificado bit a bit contra los valores ya conocidos de #129 y con test de regresión explícito, así que ningún call site necesita cambiar. 6 tests nuevos (regresión de `p=1`, los 4 ejemplos de `p=0.5` que el propio Rodrigo verificó en su contrapropuesta, monotonía, pérdida del tope con `p<1`, casos borde independientes de `p`). `/code-review` sin hallazgos.
+
+**Medición, corrida contra producción** (la réplica local está incompleta y ya se documentó que fabrica resultados equivocados en este tipo de análisis, ver #127/#149/#153): reutiliza el concepto que ya tiene el propio pipeline, `rotacion_diaria_desestacionalizada` de `planilla_ventas_calculada` -- promedio en los meses `normal` del SKU (≥3 meses exigidos) como tasa de base ya corregida por estacionalidad, multiplicada por el factor estacional del mes de quiebre y los días naturales, da una `demanda_real_esperada` independiente contra la que comparar `Estimacion(p)` para `p` de 0.25 a 4.0. Métrica: MAE/RMSE del error relativo (no absoluto, para no pesar igual un SKU que vende 5/mes que uno que vende 500/mes), con la mediana como chequeo de robustez.
+
+**Bloqueador de infraestructura, no del ticket**: el primer intento de SSH a la VM de producción colgó en el intercambio de banner (~3-5 min sin respuesta, luego "closed by remote host") en tres intentos seguidos -- resultó ser que **la VM se había reiniciado sola** (todos los contenedores con "Up 34 seconds" al primer `docker ps` que respondió). Una vez arriba, la conexión fue normal (~2s). No se tocó nada de la causa del reinicio, quedó fuera de alcance de este ticket -- vale la pena investigarlo aparte si se repite.
+
+**Muestra final: 917 meses-SKU de quiebre_parcial sobre 552 SKUs** (de 1.502 quiebres totales en la ventana de 13 meses vigente), después de excluir: 151 SKUs con menos de 3 meses `normal` (357 meses-quiebre), 0 sin factor estacional para ese mes puntual, 207 con venta ≤0 en el mes de quiebre (ahí no se extrapola, no aportan señal para elegir `p`), 21 con referencia ≤0. `dias_con_stock≤2` son 50 casos (5,5%) -- se corrió con y sin ellos, sin cambio de resultado.
+
+**Resultado: `p=0.5` (lo que pidió Rodrigo) es el peor exponente de todo el barrido, en cada métrica y en cada corte de robustez probado** (muestra completa, sin `dias_con_stock≤2`, restringido a SKUs con ≥3 unidades/mes de base para sacar del medio a los SKUs de venta casi nula que dominaban el MAE con outliers). Contra `p=1` (producción): MAE ~28% más alto, RMSE ~26% más alto, mediana ~9% más alta. El barrido más amplio (hasta `p=4` y el punto "sin extrapolar") muestra una tendencia monótona a favor de exponentes aún mayores que 1, con retornos decrecientes -- no hay un mínimo claro dentro de la familia de Rodrigo, el error sigue bajando cuanto menos se extrapola.
+
+**Duda metodológica, dejada explícita en el comentario del issue en vez de escondida**: un mes `quiebre_parcial` es por definición un mes donde algo salió de lo esperado, y en parte de los casos eso puede ser porque la demanda real *fue* más alta que la estacional típica (lo que agotó el stock) -- si es así, la referencia (calibrada sobre meses `normal`) subestima esos meses de forma sistemática, y cualquier exponente, incluso "no extrapolar", va a parecer mejor de lo que en verdad es. La comparación *relativa* entre valores de `p` sigue siendo válida igual (todos se miden contra la misma referencia por fila), que es la pregunta que pide el ticket -- lo que no se puede afirmar con esta metodología es la magnitud absoluta del error de producción.
+
+**Resultados completos y metodología detallada en el [comentario del issue](https://github.com/Evalutia/App-Forecast/issues/144#issuecomment-5323026273).** Commit `2be6999`. Suite: 78/78 en `test_run_calc_planilla.py`.
+
+**#144 permanece abierto**: quedan pendientes plantearle a Rodrigo el asunto del tope con el caso extremo de `I02552`, decidir con él el exponente final (con esta medición -- que contradice su intuición de `p=0.5` -- como evidencia), y si cambia, medir el impacto en producción antes de que los números se muevan. Ninguno de los tres se resuelve sin su respuesta.
+
+---
+
 ### #160 -- La reconciliación descartó la afirmación original, y destapó algo más grande (2026-08-17/18)
 
 Bloqueaba el mail a Rodrigo (#126 punto 2). Corrido contra producción real (túnel SSH, `openpyxl` + `pymysql` desde el host) sobre los 3 archivos reales del cliente (`fantech_2026-11`, `foneng-auricular_2026-11`, `toner-cpt_2026-10`, 1.240 SKUs únicos).

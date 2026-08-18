@@ -172,7 +172,7 @@ def calcular_historico(
 
 
 def extrapolacion_mes(
-    ventas: int, dias_con_stock: int, dias_naturales: int
+    ventas: int, dias_con_stock: int, dias_naturales: int, p: float = 1.0
 ) -> float | None:
     """
     Estima cuanto se habria vendido en el mes completo, para los meses con
@@ -188,28 +188,35 @@ def extrapolacion_mes(
     mientras no hubo stock, asi que ese ritmo es mas alto que el sostenido y
     extrapolarlo al mes entero infla por construccion.
 
-    El criterio nuevo es recorrer el salto de la venta observada al mes
-    completo **en proporcion a cuanto del mes se pudo observar**:
+    Issue #144 (contrapropuesta de Rodrigo a #129): generaliza el criterio con
+    un exponente `p`. Con `w = (dias_con_stock / dias_naturales) ** p`:
 
-        ventas + (extrapolacion_vieja - ventas) * (dias_con_stock / dias_naturales)
+        estimacion = ventas * (1 + w * (dias_naturales / dias_con_stock - 1))
 
-    que se simplifica a `ventas * (2 - dias_con_stock / dias_naturales)`.
+    `p=1` (default -- el valor en produccion) da algebraicamente lo mismo que
+    la formula de #129, `ventas * (2 - dias_con_stock / dias_naturales)`: con
+    p=1, w = dias_con_stock/dias_naturales y el termino w * (D/d - 1) se
+    simplifica a `1 - dias_con_stock/dias_naturales`. `p<1` (Rodrigo pidio
+    p=0.5) proyecta mas -- y pierde el tope de x2 que tiene p=1, crece sin
+    limite a medida que quedan menos dias observados. `p>1` proyecta menos.
+    Cambiar el exponente es cambiar un valor, no reescribir la formula.
 
-    Tres propiedades por las que se eligio esta y no un tope fijo:
-      - el multiplicador queda acotado en [1, 2): nunca se proyecta mas del
-        doble de lo realmente vendido, y el tope **emerge** en vez de elegirse;
-      - es continua, sin escalones arbitrarios a mitad de mes;
-      - reproduce los dos ejemplos que dio el cliente sin calibrar nada: un mes
-        que se agota el dia 29 queda en x1.03 -- su "tan solo un 3% mas".
+    Cual `p` predice mejor la demanda real de un mes con quiebre se midio
+    contra la historia real en #144 (ver .claude/CONTEXTO.md) -- produccion
+    sigue en p=1 hasta que el cliente decida lo contrario con esa evidencia
+    en mano.
 
     Venta <= 0 no se extrapola (desde #80 un mes puede cerrar en negativo por
-    notas de credito, y amplificar una devolucion no significa nada).
+    notas de credito, y amplificar una devolucion no significa nada) --
+    tampoco depende de `p`.
     """
     if dias_con_stock <= 0 or dias_naturales <= 0:
         return None
     if ventas <= 0:
         return float(ventas)
-    return round(ventas * (2 - dias_con_stock / dias_naturales), 2)
+    d_sobre_D = dias_con_stock / dias_naturales
+    w = d_sobre_D ** p
+    return round(ventas * (1 + w * (1 / d_sobre_D - 1)), 2)
 
 
 def _venta_real_o_extrapolada(
