@@ -201,7 +201,7 @@ with conn.cursor() as cur:
             continue
 
         try:
-            cantidad_val = parsers.parse_entero(stock)
+            cantidad_val = parsers.parse_entero(stock, contexto=f"sku={sku}")
         except parsers.ParseError as e:
             print(f"[WARN] fila descartada, stock no interpretable sku={sku}: {e}")
             rows_skip += 1

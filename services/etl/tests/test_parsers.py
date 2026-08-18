@@ -75,6 +75,58 @@ def test_parse_entero_nonneg_clampea_a_cero(valor):
     assert parsers.parse_entero(valor, signed=False) == 0
 
 
+# ── Numeros: el clamp real deja rastro (Issue #156) ───────────────────────
+
+@pytest.mark.parametrize("valor", fx.NUMEROS_NEGATIVOS)
+def test_parse_entero_clamp_real_deja_rastro_en_log(valor, capsys):
+    """El recorte sigue funcionando igual (valor persistido = 0), pero ahora
+    queda visible en el log -- antes era indistinguible de un 0 real del WS."""
+    resultado = parsers.parse_entero(valor, signed=False)
+    assert resultado == 0
+    salida = capsys.readouterr().out
+    assert "[WARN]" in salida
+    assert repr(valor) in salida
+
+
+def test_parse_entero_clamp_real_contexto_aparece_en_log(capsys):
+    """Los extractores conocen sku/fecha al momento de parsear -- si lo
+    pasan, el WARN de clamp queda tan identificable como los demas WARN de
+    fila descartada (que ya incluyen sku=... fecha=...)."""
+    parsers.parse_entero(-5, signed=False, contexto="sku=ABC123 fecha=2026-08-01")
+    salida = capsys.readouterr().out
+    assert "[WARN]" in salida
+    assert "sku=ABC123 fecha=2026-08-01" in salida
+
+
+def test_parse_entero_clamp_sin_contexto_no_rompe(capsys):
+    """contexto es opcional -- sin el, el log sigue funcionando (compat con
+    callers que todavia no lo pasan)."""
+    parsers.parse_entero(-5, signed=False)
+    salida = capsys.readouterr().out
+    assert "[WARN]" in salida
+
+
+@pytest.mark.parametrize("valor", fx.NUMEROS_CERO)
+def test_parse_entero_cero_real_no_genera_ruido_en_log(valor, capsys):
+    """Un 0 (o positivo) que no pasó por el clamp no debe generar log --
+    solo se avisa cuando el recorte realmente ocurre."""
+    parsers.parse_entero(valor, signed=False)
+    assert capsys.readouterr().out == ""
+
+
+def test_parse_entero_signed_negativo_no_generar_log():
+    """El camino signed=True (ventas, negativo legitimo desde #80) no debe
+    verse afectado por este log -- ahi no hay clamp."""
+    import io
+    import contextlib
+
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        resultado = parsers.parse_entero(-3, signed=True)
+    assert resultado == -3
+    assert buf.getvalue() == ""
+
+
 # ── Numeros: el bug original -- no interpretable nunca es 0 silencioso ───
 
 @pytest.mark.parametrize("valor", fx.NUMEROS_NO_INTERPRETABLES)
