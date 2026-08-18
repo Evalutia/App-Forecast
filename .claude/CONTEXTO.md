@@ -3599,3 +3599,35 @@ Pedida por Nico con un razonamiento textual que vale conservar: *"sin los datos 
 **No accionado, evaluado y descartado**: el manejo de XML/JSON malformado en `run_extract_stockxml.py` resultó **correcto** (aborta todo, no procesa parcialmente) -- la hipótesis inicial de que el `except` genérico perdía filas en silencio era equivocada, envuelve el parseo completo, no un loop fila por fila.
 
 Tickets: **#154** (fallo silencioso de escritura, `blocker`), **#155** (huecos por depósito), **#156** (rastro del clamp negativo), **#157** (merge por grupo en vez de todo-o-nada -- el único donde la solución actual es un trade-off deliberado y documentado, así que su primer AC es confirmar que se quiere cambiar), **#158** (tests de rutas de fallo), **#159** (contract drift, `blocker`, bloqueado por #154 porque tocan la misma función).
+
+---
+
+### #160 -- La reconciliación descartó la afirmación original, y destapó algo más grande (2026-08-17/18)
+
+Bloqueaba el mail a Rodrigo (#126 punto 2). Corrido contra producción real (túnel SSH, `openpyxl` + `pymysql` desde el host) sobre los 3 archivos reales del cliente (`fantech_2026-11`, `foneng-auricular_2026-11`, `toner-cpt_2026-10`, 1.240 SKUs únicos).
+
+**Coincidencia agregada: 90,2% de 14.931 celdas comparables** (mejor que el 87,9% medido en #127 contra la réplica local -- datos más frescos). 1.461 diferencias sobre 476 SKUs.
+
+**Clasificación celda por celda, causa concreta o "inexplicado" explícito** (script `clasificar_diferencias_160.py`, no commiteado al repo -- vive en el scratchpad de la sesión, ver nota abajo):
+
+| Causa | Celdas | Unidades | SKUs |
+|---|---|---|---|
+| Inexplicado | 1.426 (97,6%) | 8.606 | 459 |
+| Merchandising (grupos 71/80) | 29 (2,0%) | 101 | 13 |
+| Ajuste de fin de mes confirmado | 5 (0,3%) | 150 | 5 |
+| Devolución neta | 1 (0,1%) | 1 | 1 |
+
+**Veredicto sobre el punto 2 de #126 ("+87 unidades día 28-31"): se retira, no se reformula.** Con el criterio correcto (sacar el movimiento de fin de mes y ver si el residuo coincide con el cliente, no solo mirar si cae en día 28-31), solo **5 celdas de 1.461** confirman la hipótesis -- 150 unidades, no 87, y sobre una base de datos totalmente distinta a la que motivó la afirmación original. No hay una pregunta defendible que armar con esto; el patrón real es otro (ver abajo).
+
+**El 97,6% "inexplicado" no es ruido disperso -- tiene una señal real adentro.** Sobre los 431 SKUs no-merchandising con diferencia, se buscó el mismo criterio que ya había funcionado en #126 (dirección consistente en varios meses seguidos, no valores dispersos):
+
+- **131 SKUs** tienen diferencia en 4 o más meses.
+- **Cero** van en la dirección "nosotros > cliente" de forma sistemática.
+- **64 SKUs** van siempre en la dirección opuesta -- el cliente reporta más que nosotros, en 4 a 12 de sus meses, sumando 2.196 unidades.
+- **De los 14 casos de mayor magnitud, los 14 son tóner o tambor de la marca "GRAVITY Consumibles" (grupo_id 15)** -- incluidos `C00160`, `C00184`, `C00204`, que **#126 ya había marcado como resueltos** (backfill del clamp pre-#80).
+
+**Esto significa que el cierre de #126 fue prematuro.** Los archivos usados acá son de octubre/noviembre 2026 -- posteriores al deploy de #80 (18/07) y al backfill completo. El sesgo sigue apareciendo con el fix ya en producción, así que la causa que #126 encontró era real pero no explica el grueso de lo que sigue pasando. Verificado antes de abrir el ticket nuevo: los 6 depósitos tienen 34.880 filas de stock cada uno para el grupo 15 completo (554 SKUs) en los últimos 60 días -- perfectamente balanceados, no es un depósito faltante (mismo chequeo que #126 ya había hecho para los 5 SKUs puntuales, extendido acá a todo el grupo). **Abierto #161** para investigar la causa real, con la lección explícita de que #126 cerró por eliminación sin confirmar una causa raíz sólida para el volumen completo.
+
+**Nota de reproducibilidad**: los dos scripts de análisis (`clasificar_diferencias_160.py`, `analizar_residuo_160.py`) quedaron en el scratchpad de la sesión, no en el repo -- son exploratorios, no una herramienta de diagnóstico permanente como `diagnostico_planillas_cliente.py` (#127) o `qa_planilla_oracle.py` (#137). Si #161 necesita repetir este análisis, la lógica de clasificación (merchandising por grupo 71/80, devolución neta por suma de negativos del mes, ajuste de fin de mes por exclusión de movimientos día≥28 redondos) está documentada acá para reconstruirla, no perdida.
+
+**Conclusión para el mail a Rodrigo**: de las 4 preguntas pendientes, el punto 2 de #126 queda **fuera** hasta que #161 tenga una causa real. Las otras tres (#135, #144, #146) no dependían de esta reconciliación y ya estaban verificadas contra producción independientemente -- ver sus propias secciones.
