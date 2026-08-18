@@ -270,6 +270,78 @@ def test_sin_base_para_proyectar_devuelve_none(ds, dn):
     assert extrapolacion_mes(ventas=10, dias_con_stock=ds, dias_naturales=dn) is None
 
 
+# ── extrapolacion_mes(p=...) — Issue #144 ────────────────────────────────────
+# Rodrigo contrapropuso generalizar #129 con un exponente `p`: w = (d/D)**p,
+# estimacion = ventas * (1 + w * (D/d - 1)). p=1 es la formula de #129 (la que
+# sigue en produccion); p=0.5 es lo que el pidio. La medicion de que p predice
+# mejor esta en #144 / CONTEXTO.md -- estos tests solo verifican que la formula
+# generalizada es correcta, no deciden el valor de produccion.
+
+@pytest.mark.parametrize(
+    "ventas,ds,dn",
+    [(30, 30, 30), (6, 6, 30), (29, 29, 30), (5, 5, 30), (40, 1, 30), (100, 16, 30)],
+)
+def test_p_default_es_1_y_reproduce_exactamente_la_formula_de_129(ventas, ds, dn):
+    """
+    Regresion: no pasar `p` (el caso de todos los call sites de produccion
+    hoy) tiene que dar bit a bit el mismo resultado que antes de parametrizar
+    -- produccion no cambia con este refactor.
+    """
+    sin_p = extrapolacion_mes(ventas, ds, dn)
+    con_p_explicito = extrapolacion_mes(ventas, ds, dn, p=1.0)
+    formula_129 = round(ventas * (2 - ds / dn), 2)
+    assert sin_p == con_p_explicito == formula_129
+
+
+@pytest.mark.parametrize(
+    "ventas,ds,dn,multiplicador_p05",
+    [
+        (100, 6, 30, 2.79),    # issue #144: "se agota dia 6 (6/30)"
+        (100, 15, 30, 1.71),   # issue #144: "mitad de mes (15/30)"
+        (100, 29, 30, 1.03),   # issue #144: "se agota dia 29 (29/30)"
+        (100, 5, 30, 3.04),    # issue #144: "importacion dia 25 (5/30)"
+    ],
+)
+def test_p_0_5_reproduce_los_ejemplos_verificados_de_rodrigo(ventas, ds, dn, multiplicador_p05):
+    valor = extrapolacion_mes(ventas, ds, dn, p=0.5)
+    assert valor / ventas == pytest.approx(multiplicador_p05, abs=0.005)
+
+
+def test_p_menor_a_1_proyecta_mas_que_p_1():
+    """p=0.5 (lo que pidio Rodrigo) da un valor mayor que p=1 (produccion) --
+    es justamente lo que el issue #144 describe: "proyecta mas"."""
+    con_p1 = extrapolacion_mes(ventas=30, dias_con_stock=1, dias_naturales=31, p=1.0)
+    con_p05 = extrapolacion_mes(ventas=30, dias_con_stock=1, dias_naturales=31, p=0.5)
+    assert con_p05 > con_p1
+
+
+def test_p_menor_a_1_pierde_el_tope_de_x2():
+    """
+    El caso real de I02552 citado en #144: 30 unidades en 1 solo dia de 31.
+    Con p=1 el multiplicador esta acotado en [1,2) por construccion; con
+    p=0.5 no hay tope y crece bastante mas alla del doble.
+    """
+    con_p1 = extrapolacion_mes(ventas=30, dias_con_stock=1, dias_naturales=31, p=1.0)
+    con_p05 = extrapolacion_mes(ventas=30, dias_con_stock=1, dias_naturales=31, p=0.5)
+    assert con_p1 < 2 * 30
+    assert con_p05 > 2 * 30
+
+
+def test_p_mayor_a_1_proyecta_menos_que_p_1():
+    con_p1 = extrapolacion_mes(ventas=30, dias_con_stock=6, dias_naturales=30, p=1.0)
+    con_p15 = extrapolacion_mes(ventas=30, dias_con_stock=6, dias_naturales=30, p=1.5)
+    assert con_p15 < con_p1
+
+
+def test_p_no_afecta_los_casos_borde_de_ventas_o_dias():
+    """Los guard clauses (sin_stock -> None, venta<=0 -> sin extrapolar) son
+    anteriores a aplicar `p` -- cualquier valor de p da el mismo resultado ahi."""
+    for p in (0.25, 0.5, 1.0, 1.5, 2.0):
+        assert extrapolacion_mes(ventas=10, dias_con_stock=0, dias_naturales=30, p=p) is None
+        assert extrapolacion_mes(ventas=0, dias_con_stock=6, dias_naturales=30, p=p) == 0.0
+        assert extrapolacion_mes(ventas=-5, dias_con_stock=6, dias_naturales=30, p=p) == -5.0
+
+
 # ── venta_o_extrapolacion() -- Issue #137 ────────────────────────────────────
 # "V/E" de la hoja de detalle, persistido para que ya no haga falta
 # recalcularlo en el browser (la fuente de la desincronizacion real de #129).
