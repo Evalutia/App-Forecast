@@ -30,10 +30,12 @@ del `bash -c` que invoca el script) que escribe FAKE_CURL_BODY en el
 archivo que el script pasa con `-o`, sin pegarle a ningun WS real. Cada
 test controla el cuerpo que "responde" el WS.
 
-Se saltan enteros si el contenedor no esta corriendo, y el unico test que
-necesita escritura real (el camino de EXITO, de control) se salta aparte
-si no hay MySQL -- mismo criterio de skip que el resto de la suite (CI no
-levanta ninguno de los dos para services/etl/tests).
+Se saltan enteros si el contenedor o MySQL no estan disponibles -- Issue
+#157 agrego un reset de ventas_grupos_fallidos_run al principio del
+script, fatal si no hay conexion real, asi que los cinco tests necesitan
+MySQL real ahora (antes solo el camino de EXITO lo necesitaba). Mismo
+criterio de skip que el resto de la suite (CI no levanta ninguno de los
+dos para services/etl/tests).
 """
 
 import os
@@ -68,12 +70,19 @@ done
 exit "${FAKE_CURL_EXIT:-0}"
 """
 
+# Issue #157: MYSQL_* ya no pueden ser fake -- run_extract_sales_chunk.sh
+# ahora resetea ventas_grupos_fallidos_run ANTES de procesar cualquier
+# grupo, y ese reset es fatal si no hay conexion real (mismo criterio que
+# TRUNCATE VENTAS_STAGE: un fallo de bookkeeping global no debe dejar
+# corromperse el merge en silencio). Antes de #157 estos tests nunca
+# necesitaban MySQL real porque cortaban en el curl stub, mucho antes de
+# tocar la DB.
 BASE_ENV = {
     "WS_URL": "http://fake-ws.invalid",
-    "MYSQL_HOST": "fake-host",
-    "MYSQL_DB": "fake-db",
-    "MYSQL_USER": "fake-user",
-    "MYSQL_PASSWORD": "fake-pass",
+    "MYSQL_HOST": "mysql",
+    "MYSQL_DB": "evalutia",
+    "MYSQL_USER": "evalutia",
+    "MYSQL_PASSWORD": "evalutia",
     "CERT_PATH": "/dev/null",
     "CACERT_PATH": "/dev/null",
     "CERT_PASSWORD": "x",
@@ -92,7 +101,26 @@ def _docker_disponible():
         return False
 
 
-pytestmark = pytest.mark.skipif(not _docker_disponible(), reason=f"contenedor {CONTAINER} no disponible")
+def _mysql_disponible():
+    if not _docker_disponible():
+        return False
+    r = subprocess.run(
+        [
+            "docker", "exec", CONTAINER, "python3", "-c",
+            "import pymysql; pymysql.connect(host='mysql', port=3306, user='evalutia', "
+            "password='evalutia', database='evalutia').close()",
+        ],
+        capture_output=True, timeout=10,
+    )
+    return r.returncode == 0
+
+
+# Issue #157: los 5 tests necesitan MySQL real ahora (antes solo el de
+# control) -- el reset de ventas_grupos_fallidos_run corre antes de
+# cualquier otra cosa en el script y es fatal si falla.
+pytestmark = pytest.mark.skipif(
+    not _mysql_disponible(), reason=f"contenedor {CONTAINER} o MySQL no disponibles"
+)
 
 
 @pytest.fixture(scope="module", autouse=True)
@@ -113,6 +141,28 @@ def _imagen_sincronizada():
             f"{SCRIPT_CONTAINER} en el contenedor difiere de {SCRIPT_HOST.name} en el host "
             "-- correr `docker compose build etl` antes de confiar en estos tests."
         )
+
+
+@pytest.fixture(autouse=True)
+def _limpiar_grupo_99():
+    """Issue #157 (hallazgo de /code-review): 4 de los 5 tests de este
+    archivo hacen fallar al grupo 99 a proposito, y run_extract_sales_chunk.sh
+    ahora lo marca en ventas_grupos_fallidos_run -- sin limpiar, el grupo
+    99 quedaria marcado como fallido en la DB compartida despues de correr
+    la suite (o si se corre un subconjunto que nunca llega al test de
+    control, el unico que hace `reset`), afectando corridas reales si 99
+    fuera alguna vez un grupo de produccion."""
+    def _delete():
+        subprocess.run(
+            ["docker", "exec", CONTAINER, "python3", "-c",
+             "import pymysql; c = pymysql.connect(host='mysql', port=3306, user='evalutia', "
+             "password='evalutia', database='evalutia'); cur = c.cursor(); "
+             "cur.execute('DELETE FROM ventas_grupos_fallidos_run WHERE grupo_id = 99'); c.commit()"],
+            capture_output=True, timeout=10,
+        )
+    _delete()
+    yield
+    _delete()
 
 
 @pytest.fixture(scope="module", autouse=True)
@@ -145,18 +195,6 @@ def _correr(env_extra, timeout=20):
 def _falla_count(proc):
     m = re.search(r"^\[ERROR\] (\d+) grupo\(s\)/deposito\(s\) fallaron esta corrida:$", proc.stdout, re.M)
     return int(m.group(1)) if m else 0
-
-
-def _mysql_disponible():
-    r = subprocess.run(
-        [
-            "docker", "exec", CONTAINER, "python3", "-c",
-            "import pymysql; pymysql.connect(host='mysql', port=3306, user='evalutia', "
-            "password='evalutia', database='evalutia').close()",
-        ],
-        capture_output=True, timeout=10,
-    )
-    return r.returncode == 0
 
 
 def test_mens_error_en_cuerpo_marca_grupo_deposito_como_fallido():
@@ -223,14 +261,11 @@ def test_sin_fallos_no_marca_nada_y_sale_con_exit_0():
     """
     Control del mecanismo: una respuesta VALIDA con JSON real no debe
     activar nada de lo de arriba -- FAILED_GRUPO_DEPOSITO queda vacio y el
-    wrapper sale con exit 0. A diferencia de los otros cuatro tests, esto
-    si llega a invocar run_extract_sales_chunk.py con una conexion MySQL
-    real (aunque el lote venga vacio) -- se salta si no hay MySQL
-    disponible en el compose local.
+    wrapper sale con exit 0. Este era el unico de los cinco que ya
+    necesitaba MySQL real antes de #157 (invoca run_extract_sales_chunk.py
+    con el lote vacio); ahora BASE_ENV ya trae credenciales reales para
+    los cinco, no hace falta overridearlas aca.
     """
-    if not _mysql_disponible():
-        pytest.skip("Sin MySQL real disponible (compose local) para ejercitar el camino de exito.")
-
     body = (
         '<?xml version="1.0"?>'
         '<soap:Envelope xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/">'
@@ -241,10 +276,6 @@ def test_sin_fallos_no_marca_nada_y_sale_con_exit_0():
     proc = _correr({
         **BASE_ENV,
         "FAKE_CURL_BODY": body,
-        "MYSQL_HOST": "mysql",
-        "MYSQL_DB": "evalutia",
-        "MYSQL_USER": "evalutia",
-        "MYSQL_PASSWORD": "evalutia",
     })
 
     assert proc.returncode == 0, f"stdout={proc.stdout!r} stderr={proc.stderr!r}"

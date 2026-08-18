@@ -216,6 +216,23 @@ merge_y_truncar_stage() {
   # .kjb -- si uno cambia, el otro se tiene que actualizar a mano junto con
   # este (no hay forma barata de compartir una sola definicion entre SQL
   # embebido en XML de Pentaho y SQL embebido en este heredoc de Python).
+  # Verificado por test_filtro_del_merge_identico_al_del_cron_diario --
+  # compara solo hasta "WHERE s.sku IS NOT NULL", no el WHERE completo.
+  #
+  # Issue #157 (excepcion deliberada, no un olvido): el merge del .kjb
+  # agrega un "AND NOT EXISTS (... ventas_grupos_fallidos_run ...)" para
+  # excluir grupos que fallaron en la extraccion nocturna SIN saltear el
+  # merge entero. Este script NO necesita esa clausula -- ya logra el mismo
+  # objetivo por su propio flujo: procesa un grupo a la vez, llama a
+  # merge_y_truncar_stage() SOLO si ese grupo salio bien (ver mas abajo,
+  # donde el caller decide entre esta funcion y truncar_stage()), asi que
+  # el stage nunca mezcla un grupo bueno con uno fallido al momento de este
+  # INSERT. Agregar la misma exclusion aca seria peor que inerte: este
+  # script no resetea ni escribe en ventas_grupos_fallidos_run (esa tabla
+  # es del ciclo de vida de run_extract_sales_chunk.sh/el cron), asi que un
+  # backfill corrido despues de una noche con fallos podria heredar
+  # entradas viejas y excluir de mas datos que este backfill si logro
+  # extraer bien.
   python3 - <<PY
 import os, pymysql
 conn = pymysql.connect(

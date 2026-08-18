@@ -48,13 +48,23 @@
     * MERGE STAGING -> STOCK_DIARIO: hoy es un SELECT 1 (no-op), casi no
       puede fallar salvo DB abajo; si pasa, el resto de los pasos SQL
       fallan igual y marcan la corrida sin necesidad de un abort especial.
-    * RUN EXTRACT VENTAS: ya resuelto en #124, si falla NO corre el merge
-      (evita pisar ventas reales con ceros) pero la cadena sigue.
-    * MERGE STAGING -> VENTAS: mismo principio que #124. Si el INSERT
-      falla (deadlock, perdida de conexion, exactamente lo que tumbo
-      calc_planilla 3 noches seguidas en julio), predict.py y los 3
+    * RUN EXTRACT VENTAS: resuelto en #124, si falla la cadena sigue.
+      Issue #157 cambio QUE pasa despues: antes, cualquier fallo saltaba
+      el MERGE entero (los ~66 grupos, incluidos los que salieron bien,
+      quedaban sin mergear esa noche; un grupo cronicamente roto
+      congelaba la tabla completa). Ahora el fallo se registra por grupo
+      (ventas_grupos_fallidos_run, via grupos_fallidos_run.py) y la cadena
+      SIEMPRE sigue al MERGE: el radio del dano pasa de "los 66" a "el
+      grupo puntual que fallo".
+    * MERGE STAGING -> VENTAS: mismo principio que #124 para un fallo del
+      propio INSERT (deadlock, perdida de conexion, exactamente lo que
+      tumbo calc_planilla 3 noches seguidas en julio); predict.py y los 3
       calculos siguen trabajando con el ventas_historicas de ayer,
-      degradado pero util, en vez de con nada.
+      degradado pero util, en vez de con nada. Issue #157: el WHERE del
+      INSERT ahora excluye los grupos de ventas_grupos_fallidos_run, asi
+      que un grupo fallido en la extraccion no llega a pisar nada con
+      datos parciales; los grupos buenos se mergean igual, en la misma
+      corrida.
     * RUN PREDICT.PY: ejemplo explicito del ticket, que predict.py falle
       no debe impedir que se recalcule la planilla.
     * RUN CALC_PLANILLA / RUN CALC_SUGERENCIAS / RUN CALC_STOCK_RESUMEN:
@@ -340,9 +350,33 @@ SELECT 1;
       <arguments><argument>-c</argument></arguments>
       <insertScript>Y</insertScript>
       <script><![CDATA[
+# Issue #157: el motivo lista los grupos afectados (AC "con el detalle de
+# cuales") -- grupos_fallidos_run.py listar lee la misma tabla que el MERGE
+# de abajo usa para excluirlos, asi que el mensaje y el comportamiento real
+# nunca pueden desalinearse.
+#
+# Hallazgo de /code-review: un GRUPOS_FALLIDOS vacio es ambiguo -- puede
+# significar "nada fallo a nivel de grupo" (el caso comun) o "no se pudo
+# ni siquiera leer la tabla" (listar en si fallo, ej. MySQL abajo) o "el
+# reset inicial fallo o no habia grupos, el script aborto ANTES de que
+# ningun grupo se procesara" (exit 2/3 de run_extract_sales_chunk.sh) --
+# en los ultimos dos casos, decir "esos grupos no se mergean; el resto se
+# actualiza igual" seria directamente falso (no se proceso NADA esta
+# noche). Se distinguen los tres casos explicitamente en vez de ocultarlos
+# todos detras del mismo "sin detalle".
+if ! GRUPOS_FALLIDOS="$(python3 /app/services/etl/grupos_fallidos_run.py listar 2>&1)"; then
+  DETALLE_GRUPOS="no se pudo leer ventas_grupos_fallidos_run (fallo tecnico, ver log de la corrida) -- puede haber grupos excluidos sin que este mensaje lo refleje"
+  RESTO_TEXTO="el estado del resto de ventas_historicas esta noche no se puede confirmar desde este mensaje"
+elif [[ -z "${GRUPOS_FALLIDOS}" ]]; then
+  DETALLE_GRUPOS="ninguno registrado a nivel de grupo (si RUN EXTRACT VENTAS fallo igual, puede haber sido un abort temprano -- ej. reset inicial o lista de grupos vacia -- revisar si la corrida realmente proceso algun grupo)"
+  RESTO_TEXTO="si hubo un abort temprano, el resto tampoco se actualizo esta noche"
+else
+  DETALLE_GRUPOS="${GRUPOS_FALLIDOS}"
+  RESTO_TEXTO="esos grupos no se mergean esta noche; el resto de ventas_historicas se actualiza igual"
+fi
 /bin/bash /app/services/etl/mark_step_failed.sh \
   "RUN EXTRACT VENTAS" \
-  "Fallo en uno o mas grupos/depositos de ConsStockVenta (respuesta vacia, JSON ilegible o MensError del WS) -- ver log de la corrida. ventas_historicas NO se tocó esta noche (el hop condicional saltea el MERGE, Issue #124)." \
+  "Fallo en uno o mas grupos/depositos de ConsStockVenta (respuesta vacia, JSON ilegible o MensError del WS) -- grupo(s) afectado(s): ${DETALLE_GRUPOS}. ${RESTO_TEXTO} (Issue #157). Ver log de la corrida." \
   "${ETL_FAIL_MARKER}"
       ]]></script>
       <wait>Y</wait>
@@ -375,6 +409,17 @@ SELECT 1;
 -- Python del ETL (run_calc_planilla.py y otros, via SET time_zone). Se usa
 -- una expresion self-contained (no un SET previo) porque este step SQL no
 -- garantiza compartir sesion con un statement anterior.
+--
+-- Issue #157: NOT EXISTS contra ventas_grupos_fallidos_run excluye los
+-- grupos que fallaron en la extraccion de ESTA corrida (ver
+-- grupos_fallidos_run.py) -- antes, cualquier fallo saltaba este INSERT
+-- entero via el hop condicional de RUN EXTRACT VENTAS, y los ~66 grupos
+-- (incluidos los que salieron bien) quedaban sin mergear. Ahora el hop
+-- siempre llega aca, y son estas dos lineas las que deciden que se merge:
+-- s.grupo_id es solo trazabilidad (#114, no participa en ninguna clave
+-- unica), asi que un valor NULL (esquema viejo, o una fila que nunca pudo
+-- asociarse a un grupo) nunca matchea el subquery -- no se excluye por
+-- falta de dato, unicamente por un fallo confirmado y registrado.
 INSERT INTO ventas_historicas
   (fecha, sku, cantidad, ts_carga, fuente)
 SELECT
@@ -386,6 +431,9 @@ SELECT
 FROM ventas_historicas_stage s
 INNER JOIN articulos a ON a.sku = TRIM(s.sku)
 WHERE s.sku IS NOT NULL
+  AND NOT EXISTS (
+    SELECT 1 FROM ventas_grupos_fallidos_run f WHERE f.grupo_id = s.grupo_id
+  )
 GROUP BY DATE(s.fecha), TRIM(s.sku)
 ON DUPLICATE KEY UPDATE
   cantidad = VALUES(cantidad),
@@ -747,15 +795,29 @@ exit 0
     <hop><from>MARK STOCK MERGE FAILED</from><to>RUN EXTRACT VENTAS</to><enabled>Y</enabled><unconditional>Y</unconditional></hop>
 
     <!-- Issue #124: antes este hop era unconditional, el MERGE corria aunque
-         la extracción hubiera fallado. Ahora solo sigue a MERGE si RUN EXTRACT
-         VENTAS salió con éxito (exit 0); si falló, va a MARK VENTAS EXTRACT
-         FAILED, que no toca ventas_historicas y deja el fallo registrado en
-         jobs_historial. Las dos ramas reconvergen en RUN PREDICT.PY, no en
-         CALC_UPSERT_VENTAS_MENSUALES (ver el comentario de #112 mas abajo,
-         que movio ese paso al final de la cadena). -->
+         la extracción hubiera fallado; ahora solo sigue directo a MERGE si
+         RUN EXTRACT VENTAS salió con éxito (exit 0), y si falló pasa primero
+         por MARK VENTAS EXTRACT FAILED (deja el fallo registrado en
+         jobs_historial).
+         Actualizado por Issue #157 (el texto original decía que la rama de
+         fallo "no toca ventas_historicas" y que las dos ramas reconvergían
+         en RUN PREDICT.PY; las dos afirmaciones dejaron de ser ciertas):
+         MARK VENTAS EXTRACT FAILED ya NO salta el MERGE, reconverge en el
+         mismo MERGE STAGING -> VENTAS que la rama de éxito (ver el hop de
+         abajo y su comentario); el WHERE del propio INSERT es lo que
+         excluye solo los grupos fallidos, asi que la rama de fallo SI toca
+         ventas_historicas, para los grupos que salieron bien. Las dos ramas
+         reconvergen recien en RUN PREDICT.PY (no en CALC_UPSERT_VENTAS_MENSUALES,
+         ver el comentario de #112 mas abajo que movio ese paso al final de
+         la cadena), pero pasando primero por el MERGE, no saltandoselo. -->
     <hop><from>RUN EXTRACT VENTAS</from><to>MERGE STAGING -> VENTAS (con snapshot)</to><enabled>Y</enabled><evaluation>Y</evaluation><unconditional>N</unconditional></hop>
     <hop><from>RUN EXTRACT VENTAS</from><to>MARK VENTAS EXTRACT FAILED</to><enabled>Y</enabled><evaluation>N</evaluation><unconditional>N</unconditional></hop>
-    <hop><from>MARK VENTAS EXTRACT FAILED</from><to>RUN PREDICT.PY</to><enabled>Y</enabled><unconditional>Y</unconditional></hop>
+    <!-- Issue #157: antes iba directo a RUN PREDICT.PY, saltando el MERGE
+         entero. Ahora reconverge al MERGE igual que la rama de exito; el
+         WHERE del propio INSERT (ver esa entrada) es lo que excluye solo
+         los grupos fallidos, asi que llegar aca ya no implica perder los
+         grupos que si salieron bien. -->
+    <hop><from>MARK VENTAS EXTRACT FAILED</from><to>MERGE STAGING -> VENTAS (con snapshot)</to><enabled>Y</enabled><unconditional>Y</unconditional></hop>
 
     <hop><from>MERGE STAGING -> VENTAS (con snapshot)</from><to>RUN PREDICT.PY</to><enabled>Y</enabled><evaluation>Y</evaluation><unconditional>N</unconditional></hop>
     <hop><from>MERGE STAGING -> VENTAS (con snapshot)</from><to>MARK VENTAS MERGE FAILED</to><enabled>Y</enabled><evaluation>N</evaluation><unconditional>N</unconditional></hop>

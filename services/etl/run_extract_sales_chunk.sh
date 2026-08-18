@@ -169,8 +169,47 @@ XML
   return "$py_rc"
 }
 
+# Issue #157: marca/desmarca en ventas_grupos_fallidos_run, para que el
+# MERGE STAGING -> VENTAS del .kjb sepa que grupo excluir. Un WARN, no
+# aborta -- mismo criterio que el resto de este script: un fallo puntual
+# de bookkeeping no debe tumbar la extraccion real de los demas grupos.
+# Un solo helper para las dos direcciones (mismo patron que
+# truncar_stage_or_die() en run_backfill_ventas.sh, que colapso un guard
+# duplicado equivalente) -- marcar/desmarcar solo difieren en el
+# subcomando y en si el WARN aclara "podria incluirlo" o "podria
+# excluirlo", lo demas es identico.
+set_grupo_estado() {
+  local subcomando="$1" verbo="$2" grupo="$3" consecuencia="$4"
+  python3 /app/services/etl/grupos_fallidos_run.py "${subcomando}" "${grupo}" \
+    || echo "[WARN] no se pudo ${verbo} grupo ${grupo} en ventas_grupos_fallidos_run -- ${consecuencia}." >&2
+}
+
+marcar_grupo_fallido() {
+  set_grupo_estado marcar registrar "$1" "el merge de hoy podria incluirlo igual pese al fallo"
+}
+
+desmarcar_grupo_exitoso() {
+  set_grupo_estado desmarcar desmarcar "$1" "el merge de hoy podria excluirlo pese a haber salido bien (se autocorrige la proxima corrida, que resetea la tabla)"
+}
+
+# Issue #157 (hallazgo de /code-review): marcar solo DESPUES de un fallo
+# dejaba un hueco real -- si el contenedor moria a mitad de este grupo
+# (OOM, timeout) entre un deposito que ya habia escrito filas en stage y
+# el siguiente, el grupo nunca llegaba a marcarse, y el merge lo hubiera
+# tratado como exitoso pese a tener datos parciales. Ahora se marca
+# PESIMISTA al entrar (antes de intentar nada) y se desmarca al final SOLO
+# si TODOS sus depositos salieron bien -- una muerte a mitad de camino deja
+# la marca puesta, que es exactamente lo que se quiere. El timing es
+# seguro: el MERGE corre recien despues de que este script termina del
+# todo, nunca en paralelo con el, asi que un desmarque tardio no puede
+# pisarse con una lectura en curso. Efecto lateral bueno: marcar_grupo_fallido
+# ahora se llama una sola vez por grupo (antes, una vez por CADA deposito
+# fallido del mismo grupo -- llamadas redundantes bajo una falla amplia).
 process_grupo() {
   local grupo="$1"
+  marcar_grupo_fallido "${grupo}"
+  local grupo_ok=1
+
   if [[ "${S_DEPOSITOS}" == *","* ]]; then
     local OLD_IFS="$IFS"
     IFS=","
@@ -181,6 +220,7 @@ process_grupo() {
       if ! call_for_grupo_deposito "${grupo}" "${dep}"; then
         echo "[WARN] Fallo en grupo ${grupo} deposito ${dep}, continuando con el siguiente..."
         FAILED_GRUPO_DEPOSITO+=("grupo=${grupo} dep=${dep}")
+        grupo_ok=0
       fi
     done
     IFS="$OLD_IFS"
@@ -188,9 +228,46 @@ process_grupo() {
     if ! call_for_grupo_deposito "${grupo}" "${S_DEPOSITOS:-}"; then
       echo "[WARN] Fallo en grupo ${grupo}, continuando con el siguiente..."
       FAILED_GRUPO_DEPOSITO+=("grupo=${grupo} dep=${S_DEPOSITOS:-(ninguno)}")
+      grupo_ok=0
     fi
   fi
+
+  # Bug real encontrado corriendo los tests (no solo teorico): con
+  # `set -e` activo, el ultimo comando ejecutado dentro de una funcion se
+  # convierte en su codigo de retorno -- `[[ "${grupo_ok}" == "1" ]]` sola
+  # (sin && desmarcar) devuelve 1 cuando el grupo fallo, y ese 1 se filtra
+  # como resultado de `process_grupo "${G}"` en el loop de mas abajo, que
+  # no esta protegido por if/&&/||. Eso cortaba el script ahi mismo, antes
+  # de llegar al resumen final de "grupo(s)/deposito(s) fallaron" -- el
+  # `return 0` explicito evita que un grupo fallido (estado ya manejado,
+  # no un error del script) se confunda con un error real.
+  if [[ "${grupo_ok}" == "1" ]]; then
+    desmarcar_grupo_exitoso "${grupo}"
+  fi
+  return 0
 }
+
+# Issue #157 (hallazgo de /code-review): se vacia ANTES de CUALQUIER otra
+# cosa -- incluso antes de resolver GROUPS_LIST. Si esto quedara despues
+# del chequeo de GROUPS_LIST y esa lista viniera vacia, el script
+# terminaria (exit 2) sin haber tocado la tabla, dejando entradas de la
+# noche anterior -- exactamente el estado stale que este reset existe para
+# evitar. ventas_grupos_fallidos_run es el estado de "esta corrida", una
+# entrada vieja no debe sobrevivir. A diferencia de marcar/desmarcar (WARN,
+# per-grupo, un fallo puntual no debe tumbar a los demas), este SI es
+# fatal -- mismo criterio que TRUNCATE VENTAS_STAGE al principio del .kjb
+# ("riesgo real de corrupcion silenciosa"): si el reset falla y la corrida
+# sigue igual, un grupo que fallo ANOCHE queda marcado para siempre, y el
+# merge de HOY excluiria de mas -- datos genuinamente buenos de un grupo
+# que esta noche si funciono, descartados en silencio. Abortar aca es
+# seguro: staging arranca vacio (lo trunca el .kjb) y el merge de mas
+# abajo no encuentra filas nuevas, asi que ventas_historicas simplemente
+# conserva el valor de ayer, degradado pero util -- mismo principio que el
+# resto de este archivo.
+if ! python3 /app/services/etl/grupos_fallidos_run.py reset; then
+  echo "[ERROR] no se pudo vaciar ventas_grupos_fallidos_run -- abortando antes de extraer nada, para no arriesgar que el merge excluya de mas por una entrada vieja." >&2
+  exit 3
+fi
 
 GROUPS_LIST="$(python3 /app/services/etl/get_grupos.py)"
 if [[ -z "${GROUPS_LIST}" ]]; then
