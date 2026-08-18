@@ -183,10 +183,11 @@ def test_filas_sin_fecha_o_sku_se_saltean(conn):
         {"Fecha": "2026-08-01", "Venta": 5},          # sin sku
         _item(venta=8),
     ]
-    ins, skip, _ = rsc.procesar_payload(conn, payload, deposito_forzado="5", grupo_id="30")
+    ins, skip, _, failed, _ = rsc.procesar_payload(conn, payload, deposito_forzado="5", grupo_id="30")
 
     assert ins == 1
     assert skip == 2
+    assert failed == 0
     assert len(_filas(conn)) == 1
 
 
@@ -246,5 +247,7 @@ def test_stock_diario_se_upsertea_con_grupo_pisando_igual(conn):
 
 
 def test_conteos_de_retorno(conn):
-    ins, skip, stock_ins = rsc.procesar_payload(conn, [_item(venta=1)], deposito_forzado="5", grupo_id="30")
-    assert (ins, skip, stock_ins) == (1, 0, 1)
+    ins, skip, stock_ins, failed, stock_failed = rsc.procesar_payload(
+        conn, [_item(venta=1)], deposito_forzado="5", grupo_id="30"
+    )
+    assert (ins, skip, stock_ins, failed, stock_failed) == (1, 0, 1, 0, 0)

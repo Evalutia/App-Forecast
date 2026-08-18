@@ -8,7 +8,9 @@ def procesar_payload(conn, payload, deposito_forzado=None, grupo_id=None):
     """
     Inserta/actualiza en ventas_historicas_stage y stock_diario a partir de
     un payload ya parseado de ConsStockVenta. Retorna (rows_ins, rows_skip,
-    rows_stock_ins).
+    rows_stock_ins, rows_failed, rows_stock_failed) -- rows_failed/
+    rows_stock_failed son excepciones reales de MySQL al escribir (Issue
+    #154), distintas de rows_skip (descarte legitimo de datos).
 
     Issue #114: idempotente por (fecha, sku, deposito_id). Antes, el INSERT
     era plano y sin clave unica -- un articulo devuelto por varios grupos
@@ -116,6 +118,15 @@ def procesar_payload(conn, payload, deposito_forzado=None, grupo_id=None):
     rows_ins = 0
     rows_skip = 0
     rows_stock_ins = 0
+    # Issue #154 (mismo patron que #141 en run_extract_stockxml.py): antes,
+    # una excepcion real de MySQL al escribir stage o stock_diario se
+    # contaba junto con los descartes legitimos (rows_skip) o se ignoraba
+    # del todo (`except Exception: pass` en stock_diario) -- en los dos
+    # casos el script terminaba en exit 0 con el job 'exitoso' aunque la
+    # escritura hubiera fallado. rows_failed/rows_stock_failed separan el
+    # error real del descarte esperado (sin fecha, venta no interpretable).
+    rows_failed = 0
+    rows_stock_failed = 0
     with conn.cursor() as cur:
         cur.execute("SET time_zone = '+00:00'")
         for it in payload:
@@ -191,9 +202,20 @@ def procesar_payload(conn, payload, deposito_forzado=None, grupo_id=None):
 
             try:
                 cur.execute(active_sql, tuple(values[c] for c in active_cols))
+                # Issue #154: commit por fila, no uno solo al final del lote.
+                # InnoDB resuelve un deadlock con ROLLBACK de la transaccion
+                # ENTERA -- con un commit unico al final, la fila que dispara
+                # el deadlock se llevaba puestas todas las filas previas del
+                # lote, ya contadas como escritas (rows_ins/rows_stock_ins),
+                # sin que el script se enterara. Comitear apenas se escribe
+                # la deja durable de inmediato: una falla posterior solo
+                # puede perder su propia fila.
+                conn.commit()
                 rows_ins += 1
-            except Exception:
-                rows_skip += 1
+            except Exception as e:
+                conn.rollback()
+                print(f"[ERROR] fila no escrita en stage, excepcion de MySQL sku={sku} fecha={fecha}: {e}")
+                rows_failed += 1
                 continue
 
             if stock is not None and deposito_forzado:
@@ -212,12 +234,14 @@ def procesar_payload(conn, payload, deposito_forzado=None, grupo_id=None):
                 else:
                     try:
                         cur.execute(sql_stock_diario, (sku, fecha, stock_diario_val, deposito_forzado, fuente))
+                        conn.commit()
                         rows_stock_ins += 1
-                    except Exception:
-                        pass
-        conn.commit()
+                    except Exception as e:
+                        conn.rollback()
+                        print(f"[ERROR] fila no escrita en stock_diario, excepcion de MySQL sku={sku} fecha={fecha}: {e}")
+                        rows_stock_failed += 1
 
-    return rows_ins, rows_skip, rows_stock_ins
+    return rows_ins, rows_skip, rows_stock_ins, rows_failed, rows_stock_failed
 
 
 def main():
@@ -263,12 +287,21 @@ def main():
     deposito_forzado = os.environ.get("__FORCED_DEPOSITO") or None
     grupo_id = os.environ.get("__FORCED_GRUPO") or None
 
-    rows_ins, rows_skip, rows_stock_ins = procesar_payload(
+    rows_ins, rows_skip, rows_stock_ins, rows_failed, rows_stock_failed = procesar_payload(
         conn, payload, deposito_forzado=deposito_forzado, grupo_id=grupo_id
     )
 
-    print(f"[INFO] Inserted {rows_ins} rows into ventas_historicas_stage (skipped {rows_skip})")
-    print(f"[INFO] Upserted {rows_stock_ins} rows into stock_diario (fuente={('ws_consstockventa' if rows_stock_ins else '-')})")
+    print(f"[INFO] Inserted {rows_ins} rows into ventas_historicas_stage (skipped {rows_skip}, failed {rows_failed})")
+    print(f"[INFO] Upserted {rows_stock_ins} rows into stock_diario (fuente={('ws_consstockventa' if rows_stock_ins else '-')}, failed {rows_stock_failed})")
+
+    # Issue #154: una excepcion real de MySQL al escribir (stage o
+    # stock_diario) ya no puede terminar en exit 0 -- antes se contaba como
+    # skip legitimo o se ignoraba del todo, y el job quedaba 'exitoso' en
+    # jobs_historial pese a haber perdido datos.
+    if rows_failed or rows_stock_failed:
+        print(f"[ERROR] {rows_failed} fila(s) de stage y {rows_stock_failed} fila(s) de stock_diario "
+              "no se pudieron escribir por una excepcion de MySQL")
+        raise SystemExit(1)
 
 
 if __name__ == "__main__":
