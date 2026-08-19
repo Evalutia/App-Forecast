@@ -6,6 +6,7 @@ import {
   calcularRotDesEstac,
   celdaRotacionMes,
   redondearDiasQuiebre,
+  redondearFiabilidad,
 } from './planillaResumen';
 
 function mes(overrides: Partial<PlanillaMesDto>): PlanillaMesDto {
@@ -323,5 +324,79 @@ describe('redondearDiasQuiebre', () => {
     expect(redondearDiasQuiebre(1.4)).toBe(1);
     expect(redondearDiasQuiebre(15.2)).toBe(15);
     expect(redondearDiasQuiebre(15.5)).toBe(16);
+  });
+});
+
+// ── redondearFiabilidad — issue #169 ─────────────────────────────────────────
+// Mismo patrón que #143 fijó arriba para redondearDiasQuiebre: un solo
+// redondeo, fuente de verdad compartida por PlanillaTable.tsx (texto +
+// fiabilidadClass) y exportPlanilla.ts, para que el badge de color nunca
+// contradiga el número que el cliente lee.
+
+describe('redondearFiabilidad', () => {
+  it('redondea al entero más cercano, sin piso especial (0% es un valor válido)', () => {
+    expect(redondearFiabilidad(0)).toBe(0);
+    expect(redondearFiabilidad(0.4)).toBe(0);
+    expect(redondearFiabilidad(100)).toBe(100);
+  });
+
+  it('valor exactamente en el borde de 70 (69,5 redondea a 70)', () => {
+    expect(redondearFiabilidad(69.5)).toBe(70);
+  });
+
+  it('valor exactamente en el borde de 40 (39,5 redondea a 40)', () => {
+    expect(redondearFiabilidad(39.5)).toBe(40);
+  });
+
+  it('caso real C00679 (69,75 crudo) redondea a 70', () => {
+    expect(redondearFiabilidad(69.75)).toBe(70);
+  });
+
+  it('caso real T00145E (39,99 crudo) redondea a 40', () => {
+    expect(redondearFiabilidad(39.99)).toBe(40);
+  });
+});
+
+// ── fiabilidadClass sobre el valor YA redondeado — issue #169 ───────────────
+// `fiabilidadClass` vive en PlanillaTable.tsx (se exporta ahí para este
+// test); acá se verifica la composición completa redondearFiabilidad() ->
+// fiabilidadClass(), que es exactamente lo que hace AeCell para decidir el
+// texto y el color del badge con el MISMO valor.
+
+describe('redondearFiabilidad + fiabilidadClass: texto y color coherentes en el borde', () => {
+  it('69,5 crudo: texto "70%" y badge verde (69,5 >= 70 solo tras redondear)', async () => {
+    const { fiabilidadClass } = await import('../components/PlanillaTable');
+    const redondeado = redondearFiabilidad(69.5);
+    expect(redondeado).toBe(70);
+    expect(`${redondeado}%`).toBe('70%');
+    expect(fiabilidadClass(redondeado)).toBe('planilla-badge planilla-badge--verde');
+  });
+
+  it('issue #169: caso real C00679 (69,75) -- ANTES del fix el badge era amarillo (69,75 < 70 crudo) pese a mostrar "70%"; DESPUÉS es verde, coherente con el texto', async () => {
+    const { fiabilidadClass } = await import('../components/PlanillaTable');
+    const crudo = 69.75;
+
+    // Comportamiento viejo (clasificar sobre el crudo, como hacía el bug):
+    // documenta la contradicción real que reportó el issue.
+    expect(fiabilidadClass(crudo)).toBe('planilla-badge planilla-badge--amarillo');
+
+    // Comportamiento nuevo (clasificar sobre el ya redondeado):
+    const redondeado = redondearFiabilidad(crudo);
+    expect(redondeado).toBe(70);
+    expect(fiabilidadClass(redondeado)).toBe('planilla-badge planilla-badge--verde');
+  });
+
+  it('issue #169: caso real T00145E (39,99) -- ANTES del fix el badge era rojo pese a mostrar "40%"; DESPUÉS es amarillo, coherente con la banda 40-69% de la leyenda', async () => {
+    const { fiabilidadClass } = await import('../components/PlanillaTable');
+    const crudo = 39.99;
+
+    // Comportamiento viejo: 39,99 < 40 crudo -> rojo, pese a que el texto
+    // redondeado ya mostraba "40%".
+    expect(fiabilidadClass(crudo)).toBe('planilla-badge planilla-badge--rojo');
+
+    // Comportamiento nuevo: 39,99 redondea a 40, que cae en la banda Amarillo.
+    const redondeado = redondearFiabilidad(crudo);
+    expect(redondeado).toBe(40);
+    expect(fiabilidadClass(redondeado)).toBe('planilla-badge planilla-badge--amarillo');
   });
 });

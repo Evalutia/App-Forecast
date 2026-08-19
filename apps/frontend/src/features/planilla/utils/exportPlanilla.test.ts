@@ -121,6 +121,36 @@ describe('buildPlanillaWorkbook (#107)', () => {
     expect(filaC.getCell(16).value).toBe(1); // 0.4d de cobertura real, no 0
   });
 
+  it('issue #169: Fiabilidad % sale como entero (formato 0"%"), no con un decimal', () => {
+    const filaA = hoja1.getRow(2); // SKU-A, fiabilidadPorcentaje: 80
+    const cell = filaA.getCell(15);
+    expect(cell.value).toBe(80);
+    expect(cell.numFmt).toBe('0"%"');
+  });
+
+  it('issue #169: Fiabilidad % se redondea ANTES de escribir la celda -- mismo valor que muestra la web', () => {
+    const skuBorde: PlanillaVentasDto = { ...skuA, sku: 'SKU-FIAB' };
+    const sugerenciasConBorde = new Map<string, PlanillaSugerenciaDto>([
+      ['SKU-FIAB', { sku: 'SKU-FIAB', rotacionSugerida: 1.5, fiabilidadPorcentaje: 69.5, diasHastaQuiebre: 12.3 }],
+    ]);
+    const wbBorde = buildPlanillaWorkbook([skuBorde], sugerenciasConBorde);
+    const fila = wbBorde.getWorksheet('Planilla de Reposición')!.getRow(2);
+    expect(fila.getCell(15).value).toBe(70); // 69,5 redondea a 70, no 69.5
+  });
+
+  it('issue #169: casos reales del ticket -- C00679 (69,75) y T00145E (39,99) exportan el mismo entero que redondearFiabilidad', () => {
+    const skuC00679: PlanillaVentasDto = { ...skuA, sku: 'C00679' };
+    const skuT00145E: PlanillaVentasDto = { ...skuA, sku: 'T00145E' };
+    const sugerencias169 = new Map<string, PlanillaSugerenciaDto>([
+      ['C00679', { sku: 'C00679', rotacionSugerida: 1.5, fiabilidadPorcentaje: 69.75, diasHastaQuiebre: 12.3 }],
+      ['T00145E', { sku: 'T00145E', rotacionSugerida: 1.5, fiabilidadPorcentaje: 39.99, diasHastaQuiebre: 12.3 }],
+    ]);
+    const wb169 = buildPlanillaWorkbook([skuC00679, skuT00145E], sugerencias169);
+    const hoja = wb169.getWorksheet('Planilla de Reposición')!;
+    expect(hoja.getRow(2).getCell(15).value).toBe(70); // C00679: 69,75 -> 70
+    expect(hoja.getRow(3).getCell(15).value).toBe(40); // T00145E: 39,99 -> 40
+  });
+
   it('hoja 1: mes sin_datos exporta celda vacía con fondo gris claro, no un 0', () => {
     const filaB = hoja1.getRow(3); // SKU-B
     expect(filaB.getCell(4).value).toBeNull();       // Vta.May/26

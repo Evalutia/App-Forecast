@@ -3,7 +3,7 @@ import { useRef, useState } from 'react';
 import type { PlanillaMesDto, PlanillaSugerenciaDto, PlanillaVentasDto, PlanillaVentasParams } from '../types/planilla';
 import { usePlanillaVentas } from '../hooks/usePlanilla';
 import { exportPlanillaExcel } from '../utils/exportPlanilla';
-import { DDSTK_MIN_DIAS_CON_STOCK, calcularDdstk, calcularRotDesEstac, celdaRotacionMes, redondearDiasQuiebre } from '../utils/planillaResumen';
+import { DDSTK_MIN_DIAS_CON_STOCK, calcularDdstk, calcularRotDesEstac, celdaRotacionMes, redondearDiasQuiebre, redondearFiabilidad } from '../utils/planillaResumen';
 import { useUmbralesTickets } from '../../configuracion/hooks/useConfiguracion';
 import { useAuthUser } from '../../auth/hooks/useAuthUser';
 
@@ -60,7 +60,14 @@ function calcVta(meses: PlanillaMesDto[]): number {
   return meses.slice(0, -1).reduce((s, m) => s + (m.ventasCantidad ?? 0), 0);
 }
 
-function fiabilidadClass(pct: number): string {
+// Issue #169: recibe la fiabilidad YA REDONDEADA (redondearFiabilidad), nunca
+// el valor crudo -- antes clasificaba sobre el crudo mientras el texto
+// mostraba el redondeado, y el badge podía contradecir el número que el
+// cliente leía justo en el borde de 70/40. Exportada para poder probar la
+// coherencia texto+color en el test de este ticket sin renderizar el
+// componente completo -- función pura sin estado, no afecta fast refresh en dev.
+// eslint-disable-next-line react-refresh/only-export-components
+export function fiabilidadClass(pct: number): string {
   if (pct >= 70) return 'planilla-badge planilla-badge--verde';
   if (pct >= 40) return 'planilla-badge planilla-badge--amarillo';
   return 'planilla-badge planilla-badge--rojo';
@@ -90,11 +97,16 @@ function AeCell({ s }: { s: PlanillaSugerenciaDto | undefined }) {
   return (
     <div className="planilla-ae-cell">
       <span className="planilla-ae-rot">{s.rotacionSugerida.toFixed(4)}</span>
-      {s.fiabilidadPorcentaje !== null && (
-        <span className={fiabilidadClass(s.fiabilidadPorcentaje)}>
-          {s.fiabilidadPorcentaje.toFixed(0)}%
-        </span>
-      )}
+      {s.fiabilidadPorcentaje !== null && (() => {
+        // Issue #169: un único redondeo fuente-de-verdad -- el texto y el
+        // color del badge tienen que coincidir siempre, incluso en el borde.
+        const fiabRedondeada = redondearFiabilidad(s.fiabilidadPorcentaje);
+        return (
+          <span className={fiabilidadClass(fiabRedondeada)}>
+            {fiabRedondeada}%
+          </span>
+        );
+      })()}
     </div>
   );
 }
