@@ -417,17 +417,89 @@ def test_meses_disponibles_excluye_meses_antes_de_fec_alta():
     assert set(disponibles) == {(2026, 5), (2026, 4)}
 
 
-def test_calcular_historico_promedia_incluyendo_meses_sin_ventas_como_cero():
+def test_calcular_historico_promedia_incluyendo_mes_sin_venta_real_como_cero():
+    """Mes 'normal' (tuvo stock) sin fila en ventas_historicas SI cuenta como
+    "vendio cero" -- es un dato real, no un mes sin_stock. Issue #163
+    (code review de #63) separa explicitamente este caso del de abajo, que
+    el test viejo confundia al no pasar estados en absoluto."""
     meses_cerrados = [(2026, 3), (2026, 4), (2026, 5)]
     ventas = {("C001", 2026, 3): 30, ("C001", 2026, 5): 30}  # abril sin fila = 0
-    historico = calcular_historico("C001", None, meses_cerrados, ventas)
+    estados = {
+        ("C001", 2026, 3): "normal",
+        ("C001", 2026, 4): "normal",
+        ("C001", 2026, 5): "normal",
+    }
+    historico = calcular_historico("C001", None, meses_cerrados, ventas, estados, {})
     assert historico == 20.0  # (30 + 0 + 30) / 3
+
+
+def test_calcular_historico_excluye_meses_sin_stock():
+    """Issue #163: un mes sin_stock no es "vendio cero", es "no sabemos" --
+    se excluye del promedio (ni suma ni denominador), mismo criterio que
+    #116 ya aplico a rotacion_ajustada en run_calc_sugerencias.py."""
+    meses_cerrados = [(2026, 3), (2026, 4), (2026, 5)]
+    ventas = {("C001", 2026, 3): 30, ("C001", 2026, 5): 30}
+    estados = {
+        ("C001", 2026, 3): "normal",
+        ("C001", 2026, 4): "sin_stock",  # se excluye, aunque no tenga fila en ventas
+        ("C001", 2026, 5): "normal",
+    }
+    historico = calcular_historico("C001", None, meses_cerrados, ventas, estados, {})
+    assert historico == 30.0  # (30 + 30) / 2, abril no cuenta
+
+
+def test_calcular_historico_todos_los_meses_sin_stock_devuelve_none():
+    meses_cerrados = [(2026, 4), (2026, 5)]
+    estados = {("C001", 2026, 4): "sin_stock", ("C001", 2026, 5): "sin_stock"}
+    historico = calcular_historico("C001", None, meses_cerrados, {}, estados, {})
+    assert historico is None
+
+
+def test_calcular_historico_usa_extrapolacion_no_venta_cruda_en_quiebre_parcial():
+    """Issue #163: un mes quiebre_parcial aporta al historico su venta
+    extrapolada (proyectada al mes completo), no la venta cruda deprimida
+    por el propio quiebre -- mismo ajuste que #116 aplico a
+    rotacion_ajustada."""
+    meses_cerrados = [(2026, 4), (2026, 5)]
+    ventas = {("C001", 2026, 4): 10, ("C001", 2026, 5): 30}
+    estados = {("C001", 2026, 4): "quiebre_parcial", ("C001", 2026, 5): "normal"}
+    extrapolaciones = {("C001", 2026, 4): 22.0}  # ej: 10 vendidas con medio mes de stock
+    historico = calcular_historico("C001", None, meses_cerrados, ventas, estados, extrapolaciones)
+    assert historico == 26.0  # (22 + 30) / 2, no (10 + 30) / 2
+
+
+def test_calcular_historico_quiebre_parcial_sin_extrapolacion_usa_venta_cruda():
+    """Fallback defensivo: si por algun motivo no hay extrapolacion
+    calculada para un mes quiebre_parcial (no deberia pasar en el flujo
+    real, extrapolacion_mes() siempre devuelve algo con dias_con_stock>0),
+    no se pierde el mes -- cae a la venta cruda en vez de romper."""
+    meses_cerrados = [(2026, 4)]
+    ventas = {("C001", 2026, 4): 10}
+    estados = {("C001", 2026, 4): "quiebre_parcial"}
+    historico = calcular_historico("C001", None, meses_cerrados, ventas, estados, {})
+    assert historico == 10.0
 
 
 def test_calcular_historico_sin_meses_disponibles_devuelve_none():
     # SKU dado de alta despues del ultimo mes cerrado
-    historico = calcular_historico("C002", dt.date(2026, 6, 1), [(2026, 5), (2026, 4)], {})
+    historico = calcular_historico(
+        "C002", dt.date(2026, 6, 1), [(2026, 5), (2026, 4)], {}, {}, {},
+    )
     assert historico is None
+
+
+def test_calcular_historico_mes_sin_fila_en_ningun_lado_usa_default_normal():
+    """Un mes ausente de `estados` (ni fila en ventas_historicas ni en
+    stock_diario -- no llega a entrar a `filas` en calcular_filas()) cae al
+    default 'normal'/0 de estados.get(), no a un KeyError ni a 'sin_stock'.
+    Mismo comportamiento heredado que el docstring ya documentaba para "mes
+    sin fila en ventas" -- este test fija ese contrato explicitamente en vez
+    de dejarlo cubierto solo por casualidad (hallazgo de /code-review)."""
+    meses_cerrados = [(2026, 3), (2026, 4)]
+    ventas = {("C001", 2026, 3): 30}  # abril: ausente de ventas Y de estados
+    estados = {("C001", 2026, 3): "normal"}  # abril deliberadamente sin clave
+    historico = calcular_historico("C001", None, meses_cerrados, ventas, estados, {})
+    assert historico == 15.0  # (30 + 0) / 2 -- abril cuenta como "vendio cero"
 
 
 # ── cargar_tickets() -- regresion del bug de #64 (dias con cantidad=0 inflaban tickets) ──

@@ -156,19 +156,51 @@ def calcular_historico(
     fec_alta: dt.date | None,
     meses_cerrados: list[tuple[int, int]],
     ventas: dict[tuple, int],
+    estados: dict[tuple, str],
+    extrapolaciones: dict[tuple, float | None],
 ) -> float | None:
     """
     Promedio de ventas_cantidad en los meses cerrados disponibles para este
     SKU. Un mes sin fila en ventas_historicas SI cuenta como "disponible con
     0 ventas" (dato real) cuando el SKU ya existia ese mes -- solo se
     excluyen los meses anteriores a fec_alta (no existia todavia).
-    Retorna None si no hay ningun mes disponible (SKU recien agregado).
+
+    Issue #163 (mismo criterio que #116 ya aplico a rotacion_ajustada en
+    run_calc_sugerencias.py):
+    - Meses 'sin_stock' se excluyen del promedio (ni suma ni denominador) --
+      no son "vendio cero", son "no sabemos" o "no tenia para vender".
+    - Meses 'quiebre_parcial' aportan su venta extrapolada (proyectada al
+      mes completo), no la venta cruda deprimida por el propio quiebre --
+      la venta cruda subestima la demanda real de ese mes por construccion.
+
+    `estados`/`extrapolaciones` faltan una clave (sku, yr, mo) cuando ese
+    mes no tiene fila ni en ventas_historicas ni en stock_diario -- se trata
+    como 'normal'/0, mismo comportamiento historico que este docstring ya
+    documentaba para "sin fila en ventas".
+
+    Retorna None si no hay ningun mes disponible (SKU recien agregado) o si
+    todos los meses disponibles fueron sin_stock (no queda ningun dato
+    utilizable para promediar).
     """
     disponibles = meses_disponibles_historico(fec_alta, meses_cerrados)
     if not disponibles:
         return None
-    total = sum(ventas.get((sku, yr, mo), 0) for (yr, mo) in disponibles)
-    return round(total / len(disponibles), 2)
+
+    valores = []
+    for (yr, mo) in disponibles:
+        key = (sku, yr, mo)
+        estado = estados.get(key, "normal")
+        if estado == "sin_stock":
+            continue
+        if estado == "quiebre_parcial":
+            extrap = extrapolaciones.get(key)
+            valores.append(extrap if extrap is not None else float(ventas.get(key, 0)))
+        else:
+            valores.append(float(ventas.get(key, 0)))
+
+    if not valores:
+        return None
+    return round(sum(valores) / len(valores), 2)
 
 
 def extrapolacion_mes(
@@ -656,10 +688,24 @@ def calcular_filas(conn: pymysql.Connection) -> tuple[list[dict], int, int, int]
             return round(r_baja, 4)
         return round((r_alta + r_baja) / 2, 4)
 
+    # estado_mes y extrapolacion por (sku, year, month), calculados una sola vez
+    # sobre `filas` (Issue #163) -- calcular_historico() los necesita para excluir
+    # meses sin_stock y usar la extrapolacion (no la venta cruda) en quiebre_parcial.
+    estados_mes: dict[tuple, str] = {}
+    extrapolaciones_mes: dict[tuple, float | None] = {}
+    for fila in filas:
+        key = (fila["sku"], fila["year"], fila["month"])
+        estados_mes[key] = fila["estado_mes"]
+        extrapolaciones_mes[key] = extrapolacion_mes(
+            fila["ventas_cantidad"], fila["dias_con_stock"], fila["dias_naturales_mes"],
+        )
+
     # Historico por SKU (una sola vez, no varia mes a mes dentro de la misma corrida)
     historicos: dict[str, float | None] = {}
     for sku in {f["sku"] for f in filas}:
-        historicos[sku] = calcular_historico(sku, fec_altas.get(sku), meses_cerrados, ventas)
+        historicos[sku] = calcular_historico(
+            sku, fec_altas.get(sku), meses_cerrados, ventas, estados_mes, extrapolaciones_mes,
+        )
 
     # Anotar frecuencia_nivel, rotacion_ajustada y frecuencia de tickets en cada fila
     for fila in filas:
@@ -680,12 +726,9 @@ def calcular_filas(conn: pymysql.Connection) -> tuple[list[dict], int, int, int]
         historico = historicos.get(sku)
         # Issue #129: la extrapolacion ahora pondera por cuanto del mes se pudo
         # observar, en vez de proyectar el ritmo de los dias con stock al mes
-        # entero. Ver extrapolacion_mes().
-        extrapolacion = extrapolacion_mes(
-            fila["ventas_cantidad"],
-            fila["dias_con_stock"],
-            fila["dias_naturales_mes"],
-        )
+        # entero. Ver extrapolacion_mes(). Reutiliza el valor ya calculado
+        # arriba (Issue #163) en vez de volver a invocar extrapolacion_mes().
+        extrapolacion = extrapolaciones_mes[(sku, fila["year"], fila["month"])]
         es_quiebre = fila["estado_mes"] != "normal"
 
         fila["valor_historico"] = round(historico, 2) if historico is not None else None
