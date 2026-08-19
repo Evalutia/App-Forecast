@@ -21,6 +21,16 @@ const COLOR_HEADER        = '0D5C2E'; // dark green for headers
 const COLOR_SUMMARY       = '1B4332'; // darker green for summary col headers
 const COLOR_SUMMARY_BG    = 'D1FAE5'; // light green for summary data cells
 const COLOR_SUMMARY_FG    = '065F46'; // dark green text for summary data cells
+// Issue #165: marca del mes en curso (última columna, incompleto). Antes era
+// SOLO texto itálico gris, y solo se aplicaba cuando la celda no tenía color
+// de estado -- en producción casi ninguna celda del mes en curso está en
+// 'normal' (medido: 5.549/5.550 filas en quiebre_parcial o sin_stock), así
+// que el aviso casi nunca se veía. Ahora es itálica SIEMPRE (encima del color,
+// no en su lugar, igual que PlanillaTable.tsx:568/595 en la web) + un borde
+// punteado como segundo canal -- itálica sola en tamaño 10 puede no notarse
+// sobre un fondo sólido, el borde no depende del contraste de texto/fondo.
+const COLOR_MES_REF_BORDE = 'FF374151'; // slate-700, ya usado como texto de sin_stock -- contraste probado contra los 4 colores de quiebre + celeste de #145
+const MES_REF_BORDE: ExcelJS.Border = { style: 'dashed', color: { argb: COLOR_MES_REF_BORDE } };
 
 // Issue #107: fondo por criterio de frecuencia en las celdas VAj de la hoja 2.
 // Paleta fría de #65 (azul/violeta/teal), tintes claros para celda de Excel —
@@ -70,14 +80,19 @@ function applyMesStyle(cell: Cell, mes: PlanillaMesDto, isRef: boolean, estado?:
   const bg = mesBgColor(est, mes.frecuenciaNivel, mes.ingresoDuranteQuiebre);
   if (bg) {
     cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: `FF${bg}` } };
-    cell.font = { color: { argb: mesFgColor(est, mes.frecuenciaNivel, mes.ingresoDuranteQuiebre) }, size: 10 };
+    cell.font = { color: { argb: mesFgColor(est, mes.frecuenciaNivel, mes.ingresoDuranteQuiebre) }, size: 10, italic: isRef };
   } else if (isRef) {
     cell.font = { color: { argb: 'FF6B7280' }, italic: true, size: 10 };
   } else {
     cell.font = { size: 10 };
   }
   cell.alignment = { vertical: 'middle', horizontal: 'right' };
-  cell.border    = { right: { style: 'hair', color: { argb: 'FFD1D5DB' } } };
+  // Issue #165: el mes en curso lleva el borde punteado en las 4 caras
+  // ENCIMA de cualquier color de estado, no en su lugar -- reemplaza el hair
+  // divisor normal porque el borde punteado ya cumple esa función.
+  cell.border = isRef
+    ? { top: MES_REF_BORDE, bottom: MES_REF_BORDE, left: MES_REF_BORDE, right: MES_REF_BORDE }
+    : { right: { style: 'hair', color: { argb: 'FFD1D5DB' } } };
 }
 
 function applySummaryStyle(cell: Cell, numFmt: string): void {
@@ -338,7 +353,10 @@ function buildHojaDetalle(wb: ExcelJS.Workbook, items: PlanillaVentasDto[]): voi
       const crit = mes.criterioFrecuencia != null ? CRITERIO_FILL[mes.criterioFrecuencia] : undefined;
       if (crit) {
         vaj.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: `FF${crit.bg}` } };
-        vaj.font = { size: 10, color: { argb: `FF${crit.fg}` } };
+        // Issue #165: esta reasignación pisaba el font completo de applyMesStyle
+        // (incluida la itálica del mes en curso) -- por eso VAj perdía el aviso
+        // de "incompleto" incluso después del fix general en applyMesStyle.
+        vaj.font = { size: 10, color: { argb: `FF${crit.fg}` }, italic: isRef };
       }
     });
   }
@@ -361,7 +379,7 @@ export const CRITERIOS_COLUMNAS: CriterioRow[] = [
   { col: 'Descripcion', hoja: 'Planilla', que: 'Descripción del artículo.', como: 'Tal como figura en el catálogo.' },
   { col: 'Codigos Barras', hoja: 'Planilla', que: 'Código de barras.', como: 'Tal como figura en el catálogo. Vacío si el artículo no tiene.' },
   { col: 'Vta.[mes]', hoja: 'Planilla', que: 'Unidades vendidas en ese mes (ventas netas: descuenta devoluciones).',
-    como: 'Suma de las ventas del mes. La columna de más a la derecha es el mes en curso (incompleto), en letra gris. Celda vacía gris claro = sin datos de ese mes (ej. artículo dado de alta después).' },
+    como: 'Suma de las ventas del mes. La columna de más a la derecha es el mes en curso (incompleto): letra itálica y borde punteado en la celda, tenga o no color de estado. Celda vacía gris claro = sin datos de ese mes (ej. artículo dado de alta después).' },
   { col: '[mes]', hoja: 'Planilla', que: 'Rotación diaria del mes, corregida por estacionalidad.',
     como: 'Unidades vendidas ÷ días con stock, dividido por el factor estacional del mes; en los meses con quiebre se parte de la rotación ajustada por frecuencia. Un mes con quiebre y venta 0 muestra 0 (dato real, no se descarta). Es exactamente el valor que promedia la columna "Rotacion DesEstac.": ese promedio es el de estas celdas, sin contar el mes en curso (la última columna) ni las vacías. Queda vacía si el mes no tuvo stock, o si el artículo no tiene factor estacional cargado para ese mes (celda lila). La rotación sin corregir está en la hoja "Detalle de cálculo".' },
   { col: 'Rotacion DesEstac.', hoja: 'Planilla', que: 'Rotación diaria promedio del año, corregida por estacionalidad.',
