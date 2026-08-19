@@ -3880,3 +3880,11 @@ Tercer ticket accionable de la auditoría de precisión de datos (2026-08-19, ve
 **Tests**: 5 tests nuevos en `exportPlanilla.test.ts` (mes en curso sin color mantiene el comportamiento previo, mes en curso con color `quiebre_parcial`/`sin_stock` ahora sí lleva itálico, un mes cerrado con el mismo color NO lleva la marca -- control negativo, la columna VAj también preserva el itálico bajo el override de color, y el texto de "Criterios" quedó actualizado). 31/31 tests de `exportPlanilla.test.ts`, 64/64 de la suite completa de frontend, `tsc -b --noEmit` limpio, `eslint` limpio. `/code-review` sin hallazgos.
 
 **Trabajado por un subagente en un worktree aislado, sin intervención**: a diferencia de #164, este cerró de punta a punta sin colgarse -- implementación, tests, CONTEXTO.md y code-review completos en una sola pasada.
+
+---
+
+### Deploy de #163/#164/#165 a producción (2026-08-19)
+
+`git merge` (fast-forward, sin migraciones nuevas) + `docker compose build etl webapp` + `--force-recreate etl webapp`. Verificado post-deploy: `inspect.signature()` de `calcular_historico`/`detectar_ingreso_durante_mes` dentro del contenedor `etl` confirma las firmas nuevas; el bundle JS de `evalutia-webapp` contiene el string `dashed` (borde del fix de #165). Ambos contenedores healthy sin errores en logs.
+
+**Importante**: esto pone el código nuevo en producción, pero `planilla_ventas_calculada` todavía tiene los valores calculados con la lógica vieja -- el ETL diario corre a las 3am (`ofelia.ini`, job `etl_diario`), así que recién en esa corrida (o si se dispara manualmente) la planilla real va a reflejar estos 3 fixes. Hasta entonces, lo que el cliente ve en la web/Excel no cambió todavía.
