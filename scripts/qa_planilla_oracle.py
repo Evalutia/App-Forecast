@@ -173,9 +173,13 @@ def verificar_sku(cur, sku, ventana, cerrados, ref):
                 (sku, desde, hasta, stock_min or 0))
     raw_ds = {(y, m): int(c) for y, m, c in cur.fetchall()}
 
-    # Issue #145: detalle día a día (no el agregado de arriba) para poder
-    # detectar si el stock pasó de 0 a positivo en algún punto del mes --
-    # mismo criterio que detectar_ingreso_durante_mes() en run_calc_planilla.py.
+    # Issue #145/#164: detalle día a día (no el agregado de arriba) para poder
+    # detectar si el stock pasó de "sin stock" a "con stock" en algún punto del
+    # mes -- mismo criterio que detectar_ingreso_durante_mes() en
+    # run_calc_planilla.py: el umbral de "sin stock" es stock<=stock_minimo
+    # (no stock<=0 literal, corregido en #164 -- 88% del catálogo tiene
+    # stock_minimo>0, así que el umbral viejo dejaba el flag inalcanzable
+    # para la mayoría de los SKUs).
     cur.execute("SELECT fecha, SUM(cantidad) FROM stock_diario "
                 "WHERE sku=%s AND fecha BETWEEN %s AND %s GROUP BY fecha ORDER BY fecha",
                 (sku, desde, hasta))
@@ -184,11 +188,11 @@ def verificar_sku(cur, sku, ventana, cerrados, ref):
     for ym in ventana:
         y, m = ym
         serie = [float(t) for f, t in dias_stock_diario if (f.year, f.month) == ym]
-        visto_cero, ingreso = False, False
+        sin_stock, ingreso = False, False
         for stock in serie:
-            if stock <= 0:
-                visto_cero = True
-            elif visto_cero:
+            if stock <= (stock_min or 0):
+                sin_stock = True
+            elif sin_stock:
                 ingreso = True
                 break
         raw_ingreso[ym] = ingreso
