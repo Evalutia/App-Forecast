@@ -461,10 +461,10 @@ _SQL_STOCK_DIARIO = """
 """
 
 
-def detectar_ingreso_durante_mes(dias_ordenados: list[float]) -> bool:
+def detectar_ingreso_durante_mes(dias_ordenados: list[float], stock_minimo: float = 0.0) -> bool:
     """
-    Issue #145: True si el stock total del SKU pasa de 0 (o menos) a
-    positivo en algún punto de `dias_ordenados` -- ya ordenada
+    Issue #145/#164: True si el stock total del SKU pasa de "sin stock" a
+    "con stock" en algún punto de `dias_ordenados` -- ya ordenada
     cronológicamente, un día por elemento, dentro de un mismo mes.
 
     Distingue "el artículo se agotó y no repuso" (quiebre común) de "se
@@ -472,15 +472,23 @@ def detectar_ingreso_durante_mes(dias_ordenados: list[float]) -> bool:
     Rodrigo): en el segundo caso la venta baja no significa que el artículo
     no venda, significa que no había qué vender hasta que llegó el barco.
 
+    El umbral de "con stock" es `stock > stock_minimo` -- el mismo que ya
+    usa dias_con_stock/_SQL_STOCK, no `stock > 0` literal. Antes de #164
+    usaba `<= 0`: el 88% del catálogo tiene stock_minimo > 0 (NOT NULL
+    DEFAULT 0), así que para esos SKUs el flag era estructuralmente
+    inalcanzable -- 61% de los meses quiebre_parcial nunca tocan stock=0,
+    solo caen por debajo de stock_minimo (ver CONTEXTO.md, auditoría
+    2026-08-19, hallazgo C2).
+
     Solo usa los días con fila real en stock_diario ese mes -- no rellena
     huecos de calendario sin dato, mismo criterio que ya usa dias_con_stock
     (tampoco asume un valor para un día sin fila).
     """
-    visto_cero = False
+    sin_stock = False
     for stock in dias_ordenados:
-        if stock <= 0:
-            visto_cero = True
-        elif visto_cero:
+        if stock <= stock_minimo:
+            sin_stock = True
+        elif sin_stock:
             return True
     return False
 
@@ -488,7 +496,19 @@ def detectar_ingreso_durante_mes(dias_ordenados: list[float]) -> bool:
 def cargar_ingreso_durante_quiebre(
     conn: pymysql.Connection, fecha_desde: dt.date, fecha_hasta: dt.date, meses_set: set[tuple[int, int]]
 ) -> dict[tuple, bool]:
-    """Por SKU×mes, si hubo un ingreso de stock a mitad del mes (issue #145)."""
+    """Por SKU×mes, si hubo un ingreso de stock a mitad del mes (issue #145).
+
+    Issue #164: el umbral de "tiene stock" es `stock > stock_minimo`, el
+    mismo que ya usa dias_con_stock/_SQL_STOCK -- no `stock > 0` literal.
+    stock_minimo se precarga por SKU (consulta aparte, mismo patrón que
+    cargar_factores/cargar_fec_alta) en vez de meterlo en _SQL_STOCK_DIARIO
+    con un JOIN: eso cambiaría su plan de ejecución (hoy una sola tabla con
+    el FORCE INDEX de #153) y arriesgaría el guardrail que ya lo cubre.
+    """
+    with conn.cursor() as cur:
+        cur.execute("SELECT sku, COALESCE(stock_minimo, 0) FROM articulos")
+        stock_minimo_por_sku = {sku: float(sm) for sku, sm in cur.fetchall()}
+
     with conn.cursor() as cur:
         cur.execute(_SQL_STOCK_DIARIO, (fecha_desde, fecha_hasta))
         rows = cur.fetchall()
@@ -502,8 +522,10 @@ def cargar_ingreso_durante_quiebre(
 
     resultado: dict[tuple, bool] = {}
     for key, dias in por_sku_mes.items():
+        sku = key[0]
         dias_ordenados = [stock for _, stock in sorted(dias)]
-        resultado[key] = detectar_ingreso_durante_mes(dias_ordenados)
+        stock_minimo = stock_minimo_por_sku.get(sku, 0.0)
+        resultado[key] = detectar_ingreso_durante_mes(dias_ordenados, stock_minimo)
     return resultado
 
 

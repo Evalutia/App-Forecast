@@ -664,6 +664,43 @@ def test_stock_negativo_por_devolucion_cuenta_como_cero_no_como_positivo():
     assert detectar_ingreso_durante_mes([5, 5, -3]) is False
 
 
+# ── detectar_ingreso_durante_mes(stock_minimo=...) -- issue #164 ────────────
+# El bug: el umbral de "tiene stock" usaba `stock <= 0` en vez del que ya usa
+# dias_con_stock/_SQL_STOCK (`stock > stock_minimo`). El 88% del catalogo
+# tiene stock_minimo > 0 (ver CONTEXTO.md, auditoria 2026-08-19, hallazgo
+# C2) -- para esos SKUs el flag era estructuralmente inalcanzable: 61% de
+# los meses quiebre_parcial nunca tocan stock=0 literal, solo caen por
+# debajo de stock_minimo.
+
+def test_con_stock_minimo_detecta_ingreso_sin_tocar_cero_literal():
+    """El caso mayoritario que el bug dejaba sin poder dispararse: el stock
+    cae a 3 (bajo el minimo de 5) y sube a 8 -- nunca toca 0, pero es
+    exactamente la transicion sin-stock -> con-stock que #145 pidio marcar."""
+    assert detectar_ingreso_durante_mes([3, 3, 3, 8, 8], stock_minimo=5) is True
+
+
+def test_con_stock_minimo_quiebre_que_nunca_se_recupera_no_es_ingreso():
+    """Quiebre parcial que se queda todo el mes por debajo del minimo -- no
+    hubo ingreso real, tiene que seguir dando False."""
+    assert detectar_ingreso_durante_mes([3, 3, 3, 3], stock_minimo=5) is False
+
+
+def test_con_stock_minimo_umbral_estricto_igual_al_minimo_cuenta_como_sin_stock():
+    """Mismo criterio estricto que _SQL_STOCK (`>`, no `>=`) -- stock ==
+    stock_minimo NO es "con stock" (ver test_sql_stock_respeta_stock_minimo_
+    como_umbral_estricto, issue #153)."""
+    assert detectar_ingreso_durante_mes([5, 5, 8], stock_minimo=5) is True
+    assert detectar_ingreso_durante_mes([8, 8, 5], stock_minimo=5) is False
+
+
+def test_sin_pasar_stock_minimo_el_default_reproduce_el_comportamiento_previo():
+    """Regresion: sin pasar stock_minimo (default 0, el caso del 12% del
+    catalogo con stock_minimo=0) el resultado tiene que ser bit a bit el
+    mismo que antes del fix de #164."""
+    assert detectar_ingreso_durante_mes([0, 0, 0, 5, 5, 5]) is True
+    assert detectar_ingreso_durante_mes([5, 5, 5, 0, 0, 0]) is False
+
+
 # ── cargar_ingreso_durante_quiebre() -- integracion, issue #145 ─────────────
 
 def test_cargar_ingreso_durante_quiebre_detecta_transicion_real():
@@ -695,6 +732,53 @@ def test_cargar_ingreso_durante_quiebre_detecta_transicion_real():
         )
 
         assert resultado.get((sku, 2026, 2)) is True
+    finally:
+        with conn.cursor() as cur:
+            cur.execute("DELETE FROM stock_diario WHERE sku = %s", (sku,))
+            cur.execute("DELETE FROM articulo_grupo WHERE sku = %s", (sku,))
+            cur.execute("DELETE FROM articulos WHERE sku = %s", (sku,))
+        conn.commit()
+        conn.close()
+
+
+def test_cargar_ingreso_durante_quiebre_con_stock_minimo_mayor_a_cero():
+    """Issue #164: caso mayoritario (88% del catalogo) que el test original
+    de #145 no cubria -- ese test usaba stock_minimo=0, el 12% minoritario
+    donde el umbral viejo (`stock<=0`) coincidia con el correcto por
+    casualidad. Aca stock_minimo=5 y el stock nunca toca 0 literal, solo cae
+    por debajo del minimo y despues sube -- antes del fix esto daba False
+    por construccion."""
+    conn = _try_connect()
+    sku = "TESTINGRESO02"
+    try:
+        with conn.cursor() as cur:
+            cur.execute("DELETE FROM stock_diario WHERE sku = %s", (sku,))
+            cur.execute("DELETE FROM articulo_grupo WHERE sku = %s", (sku,))
+            cur.execute("DELETE FROM articulos WHERE sku = %s", (sku,))
+            cur.execute(
+                "INSERT INTO articulos (sku, descripcion, grupo_id, stock_minimo) "
+                "VALUES (%s, %s, %s, %s)",
+                (sku, "SKU de prueba -- ingreso durante quiebre con stock_minimo>0 #164", 201, 5),
+            )
+            cur.executemany(
+                "INSERT INTO stock_diario (sku, fecha, cantidad, deposito_id) VALUES (%s, %s, %s, %s)",
+                [
+                    (sku, dt.date(2026, 3, 1), 3, "TEST"),   # bajo el minimo, nunca 0
+                    (sku, dt.date(2026, 3, 2), 3, "TEST"),
+                    (sku, dt.date(2026, 3, 15), 8, "TEST"),  # llegó la importación acá
+                    (sku, dt.date(2026, 3, 20), 6, "TEST"),
+                ],
+            )
+        conn.commit()
+
+        resultado = cargar_ingreso_durante_quiebre(
+            conn, dt.date(2026, 3, 1), dt.date(2026, 3, 31), {(2026, 3)}
+        )
+
+        assert resultado.get((sku, 2026, 3)) is True, (
+            "con stock_minimo=5 y stock que nunca toca 0 pero cruza el minimo, "
+            "tiene que detectar el ingreso -- si da False/None volvio el bug de #164"
+        )
     finally:
         with conn.cursor() as cur:
             cur.execute("DELETE FROM stock_diario WHERE sku = %s", (sku,))
