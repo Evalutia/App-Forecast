@@ -241,6 +241,69 @@ describe('buildPlanillaWorkbook (#107)', () => {
   });
 });
 
+// Issue #165: el mes de referencia (última columna, mes en curso incompleto)
+// se marcaba gris itálico SOLO en la rama `else if (isRef)` de applyMesStyle --
+// es decir, únicamente cuando la celda no tenía color de fondo de estado. En
+// producción casi ninguna celda del mes en curso está en 'normal' (5.549/5.550
+// filas medidas en quiebre_parcial/sin_stock), así que el aviso de "incompleto"
+// casi nunca se veía. La web (PlanillaTable.tsx:568/595) aplica el itálico
+// siempre, encima del color -- acá replicamos esa misma definición de "mes en
+// curso" (última columna de la ventana, `idx === lastMesIdx`) y el mismo
+// tratamiento incondicional, más un borde punteado como segundo canal (no solo
+// tipografía) para que se note incluso sobre fondos sólidos.
+describe('issue #165: mes en curso queda marcado como incompleto aun con color de estado', () => {
+  function buildConMesRef(estadoRef: Partial<PlanillaMesDto>) {
+    const meses = [skuA.meses[0], skuA.meses[1], mes({ month: 7, ventasCantidad: 40, ...estadoRef })];
+    const sku: PlanillaVentasDto = { ...skuA, sku: 'SKU-REF', meses };
+    return buildPlanillaWorkbook([sku], sugerencias).getWorksheet('Planilla de Reposición')!;
+  }
+
+  it('mes en curso SIN color de estado: itálica + borde de "incompleto" (caso ya cubierto antes del bug)', () => {
+    const hoja = buildConMesRef({ estadoMes: 'normal' });
+    const cell = hoja.getRow(2).getCell(6); // Vta.Jul/26 -- última columna, mes en curso
+    expect(fillColor(cell)).toBeUndefined();
+    expect(cell.font?.italic).toBe(true);
+    expect(cell.border?.bottom?.style).toBe('dashed');
+  });
+
+  it('mes en curso CON color de estado (quiebre_parcial): sigue itálica y con el borde, sin perder el color -- este es el bug reportado', () => {
+    const hoja = buildConMesRef({ estadoMes: 'quiebre_parcial', frecuenciaNivel: 'media' });
+    const cell = hoja.getRow(2).getCell(6);
+    expect(fillColor(cell)).toBe('FFFFB74D'); // conserva el naranja de siempre
+    expect(cell.font?.italic).toBe(true);      // antes: undefined -- el aviso desaparecía
+    expect(cell.border?.bottom?.style).toBe('dashed');
+  });
+
+  it('mes en curso CON color sin_stock: también queda itálico y con el borde', () => {
+    const hoja = buildConMesRef({ estadoMes: 'sin_stock', ventasCantidad: 0, diasConStock: 0, rotacionDiariaReal: 0 });
+    const cell = hoja.getRow(2).getCell(6);
+    expect(fillColor(cell)).toBe('FF90A4AE');
+    expect(cell.font?.italic).toBe(true);
+    expect(cell.border?.bottom?.style).toBe('dashed');
+  });
+
+  it('un mes CERRADO con el mismo color de estado NO lleva la marca de incompleto', () => {
+    const hoja = buildConMesRef({});
+    const cellCerrado = hoja.getRow(2).getCell(5); // Vta.Jun/26 -- quiebre_parcial media, mes cerrado (fixture skuA)
+    expect(fillColor(cellCerrado)).toBe('FFFFB74D');
+    expect(cellCerrado.font?.italic).toBeFalsy();
+    expect(cellCerrado.border?.bottom?.style).not.toBe('dashed');
+  });
+
+  it('hoja 2, columna VAj: el color por criterio (#107) no vuelve a pisar la itálica del mes en curso', () => {
+    // VAj reasigna fill/font DESPUES de applyMesStyle según criterioFrecuencia
+    // (exportPlanilla.ts, bloque VAj) -- si esa reasignación no preserva
+    // italic, el mismo bug reaparece sólo en esta columna.
+    const mesRefConCriterio = mes({ month: 7, ventasCantidad: 40, valorAjustado: 10, criterioFrecuencia: 'real_extrapolado' });
+    const sku: PlanillaVentasDto = { ...skuA, sku: 'SKU-VAJ-REF', meses: [skuA.meses[0], skuA.meses[1], mesRefConCriterio] };
+    const hoja2 = buildPlanillaWorkbook([sku], sugerencias).getWorksheet('Detalle de cálculo')!;
+    const vajRef = hoja2.getRow(4).getCell(20); // fila 4 = primer dato (1: leyenda, 2: separador, 3: headers); VAj.Jul/26 = col 20
+    expect(fillColor(vajRef)).toBe('FF99F6E4'); // sigue el teal de "Venta real / Extrapolado"
+    expect(vajRef.font?.italic).toBe(true);
+    expect(vajRef.border?.bottom?.style).toBe('dashed');
+  });
+});
+
 describe('hoja Criterios (#109)', () => {
   const wb = buildPlanillaWorkbook([skuA, skuB], sugerencias);
   const hoja1 = wb.getWorksheet('Planilla de Reposición')!;
@@ -297,6 +360,16 @@ describe('hoja Criterios (#109)', () => {
       if (c.value === 'Amarillo' && fillColor(c) === 'FFFFCA28') amarillo = true;
     });
     expect(amarillo).toBe(true);
+  });
+
+  it('issue #165: Vta.[mes] describe el aviso de mes en curso como itálica + borde, independiente del color de estado', () => {
+    const fila = CRITERIOS_COLUMNAS.find(c => c.col === 'Vta.[mes]')!;
+    // Antes decía "en letra gris" a secas, que sólo era cierto cuando la
+    // celda no tenía color de estado (el bug: eso era casi nunca). El texto
+    // ahora tiene que reflejar que el aviso se ve SIEMPRE, tenga o no color.
+    expect(fila.como).toContain('itálica');
+    expect(fila.como).toMatch(/borde|recuadro/);
+    expect(fila.como).toContain('tenga o no color de estado');
   });
 
   it('issue #145: la leyenda de colores incluye el celeste de "quiebre con ingreso"', () => {
