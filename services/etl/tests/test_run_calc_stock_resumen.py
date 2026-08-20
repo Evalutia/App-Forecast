@@ -3,7 +3,7 @@ import os
 
 import pytest
 
-from run_calc_stock_resumen import _SQL_RESUMEN_STOCK, combinar
+from run_calc_stock_resumen import _SQL_RESUMEN_STOCK, VENTANA_DIAS, combinar, ventana_365
 
 
 def _try_connect():
@@ -28,6 +28,43 @@ def _try_connect():
         )
     except pymysql.err.OperationalError:
         pytest.skip("Sin conexion a MySQL disponible -- test de integracion se salta.")
+
+
+# ── ventana_365() -- issue #180: BETWEEN inclusivo con days=365 daba 366 dias ───
+
+def test_ventana_365_da_exactamente_365_dias_anio_no_bisiesto():
+    """2026 no es bisiesto. Caso real: hoy=2026-08-20 (fecha de esta sesion)."""
+    desde, hasta = ventana_365(hoy=dt.date(2026, 8, 20))
+    assert desde == dt.date(2025, 8, 21)
+    assert hasta == dt.date(2026, 8, 20)
+    assert (hasta - desde).days + 1 == 365
+
+
+def test_ventana_365_da_exactamente_365_dias_anio_bisiesto():
+    """2028 es bisiesto (2028/4=507 exacto) y la ventana cruza el 29/feb/2028 --
+    caso real donde un `days=365` sin ajustar rompia mas visiblemente (367 dias,
+    no 366) si no se hubiera corregido el off-by-one."""
+    desde, hasta = ventana_365(hoy=dt.date(2028, 8, 20))
+    assert desde == dt.date(2027, 8, 22)
+    assert hasta == dt.date(2028, 8, 20)
+    assert dt.date(2028, 2, 29) > desde and dt.date(2028, 2, 29) < hasta
+    assert (hasta - desde).days + 1 == 365
+
+
+def test_ventana_365_sin_fecha_inyectada_usa_hoy():
+    hoy = dt.date.today()
+    desde, hasta = ventana_365()
+    assert hasta == hoy
+    assert (hasta - desde).days + 1 == 365
+
+
+def test_ventana_dias_reportado_coincide_con_el_largo_real_de_la_ventana():
+    """jobs_historial.detalle.ventana_dias usa la constante VENTANA_DIAS (365) --
+    este test ata esa constante al largo real que ventana_365() produce, para que
+    un futuro cambio en uno sin el otro falle acá en vez de en produccion."""
+    assert VENTANA_DIAS == 365
+    desde, hasta = ventana_365(hoy=dt.date(2026, 8, 20))
+    assert (hasta - desde).days + 1 == VENTANA_DIAS
 
 
 def test_combinar_sku_sin_ventas_queda_en_cero():

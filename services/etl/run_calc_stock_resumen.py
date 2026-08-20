@@ -71,6 +71,21 @@ def job_end(conn: pymysql.Connection, job_id: int, estado: str, detalle: dict) -
         )
     conn.commit()
 
+# ── Helpers de fecha ───────────────────────────────────────────────────────────
+
+def ventana_365(hoy: dt.date | None = None) -> tuple[dt.date, dt.date]:
+    """Retorna (desde, hasta) tal que el rango `BETWEEN desde AND hasta` (inclusivo
+    en ambos extremos, como usan _SQL_RESUMEN_STOCK y _SQL_VENTAS_365) cubre
+    exactamente VENTANA_DIAS (365) dias -- sin importar año bisiesto (issue #180:
+    `hoy - timedelta(days=365)` con BETWEEN inclusivo daba 366 dias, no 365).
+
+    `hoy` es inyectable para testear sin esperar a que llegue una fecha real;
+    en producción se usa la fecha real (default). Mismo patrón que
+    ventana_meses(n, hoy=None) en run_calc_planilla.py."""
+    hoy = hoy or dt.date.today()
+    desde = hoy - dt.timedelta(days=VENTANA_DIAS - 1)
+    return desde, hoy
+
 # ── Cálculo ────────────────────────────────────────────────────────────────────
 
 # LEFT JOIN desde articulos: cubre todos los SKUs, no solo los que tienen filas
@@ -126,8 +141,7 @@ def combinar(stock_rows: list[tuple], ventas_rows: list[tuple]) -> list[dict]:
 
 
 def calcular_filas(conn: pymysql.Connection) -> list[dict]:
-    hoy = dt.date.today()
-    desde = hoy - dt.timedelta(days=VENTANA_DIAS)
+    desde, hoy = ventana_365()
 
     print(f"[STOCK_RESUMEN] Ventana: {desde} -> {hoy} ({VENTANA_DIAS} dias)")
 
