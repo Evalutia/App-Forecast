@@ -177,3 +177,18 @@ export function redondearDiasQuiebre(dias: number): number {
 export function redondearFiabilidad(pct: number): number {
   return Math.round(pct);
 }
+
+/**
+ * VTA: suma de `ventasCantidad` de los meses cerrados (excluye siempre el
+ * último elemento del array = mes de referencia en curso, mismo contrato que
+ * `calcularRotDesEstac`).
+ *
+ * Issue #171: `PlanillaTable.tsx` y `exportPlanilla.ts` reimplementaban esta
+ * misma expresión cada uno por su lado -- carácter por carácter idénticas al
+ * momento de este ticket, sin divergencia numérica todavía, pero exactamente
+ * la forma que #117 y #129 tenían antes de divergir de verdad en este mismo
+ * código. Fuente única para que arreglar una implique arreglar la otra.
+ */
+export function calcularVta(meses: PlanillaMesDto[]): number {
+  return meses.slice(0, -1).reduce((s, m) => s + (m.ventasCantidad ?? 0), 0);
+}
