@@ -25,13 +25,21 @@ El fix: el caller pasa la lista de grupos que efectivamente hicieron pull
 COMPLETO esta corrida (`full_pull_grupos`, generalmente vacia salvo la
 primera corrida o un grupo nuevo). Solo esos grupos tienen su membresia
 reemplazada por completo (ahi si el stage refleja el 100% real). Para el
-resto -- la inmensa mayoria de las corridas -- el insert es aditivo
-(INSERT IGNORE): suma membresias nuevas vistas esta semana, nunca borra las
-que no aparecieron. Limitacion conocida y aceptada: una membresia que el
-cliente RETIRA de un articulo en un grupo ya "viejo" no se detecta hasta
-que ese grupo vuelva a hacer un pull completo -- mismo tipo de limitacion
-que ya tiene el resto de este ETL incremental (no hay deteccion de bajas),
-no algo nuevo que este script introduce.
+resto -- la inmensa mayoria de las corridas -- el insert es aditivo: suma
+membresias nuevas vistas esta semana, nunca borra las que no aparecieron.
+Limitacion conocida y aceptada: una membresia que el cliente RETIRA de un
+articulo en un grupo ya "viejo" no se detecta hasta que ese grupo vuelva a
+hacer un pull completo -- mismo tipo de limitacion que ya tiene el resto de
+este ETL incremental (no hay deteccion de bajas), no algo nuevo que este
+script introduce.
+
+Issue #168: el insert aditivo ya NO usa `INSERT IGNORE` a granel -- ese
+IGNORE se tragaba por igual duplicados legitimos (esperado) y violaciones
+de FK reales (un SKU en stage que nunca llego a existir en `articulos`).
+Ahora es un insert fila por fila con `ON DUPLICATE KEY UPDATE` (ver
+`finalize()`), que preserva el "no duplicar" pero deja pasar la excepcion
+de una FK invalida para poder contarla y loguearla en vez de perderla en
+silencio.
 
 grupo principal = el de menor id entre los grupos visible_planilla=TRUE de
 la membresia del articulo (para no volver a caer en un catch-all como 199/200
@@ -65,7 +73,7 @@ def db_connect():
     )
 
 
-def finalize(conn, full_pull_grupos=()) -> tuple[int, int]:
+def finalize(conn, full_pull_grupos=()) -> tuple[int, int, int]:
     """
     Ejecuta el swap dentro de la transaccion ya abierta en `conn`. No hace
     commit ni rollback -- eso lo decide el caller (separado para poder
@@ -76,23 +84,65 @@ def finalize(conn, full_pull_grupos=()) -> tuple[int, int]:
     reinsertar -- el resto es aditivo. Vacio -> no se borra nada, solo se
     agregan membresias nuevas.
 
-    Devuelve (n_membresias_insertadas, n_articulos_con_principal_actualizado).
+    Issue #168 -- dos salvaguardas nuevas:
+    1. Un grupo en `full_pull_grupos` sin NINGUNA fila en `articulo_grupo_stage`
+       no se borra -- es la senal de que el pull realmente no trajo nada (WS
+       fallido, o cualquier otra causa), no confiar ciegamente en que el
+       caller haya excluido bien el grupo (defensa en profundidad, #167
+       corrige el root cause del lado del caller pero esta guard es
+       independiente de esa correccion).
+    2. El volcado del stage ya no usa `INSERT IGNORE` a granel -- ese IGNORE
+       se tragaba por igual duplicados legitimos (esperado, no pasa nada) y
+       violaciones de FK reales (un SKU en stage que nunca llego a existir en
+       `articulos`, ej. porque su propia insercion fallo). Ahora se inserta
+       fila por fila con `ON DUPLICATE KEY UPDATE` (no-op en duplicados,
+       pero NO silencia una violacion de FK como el IGNORE) -- una violacion
+       de FK se cuenta y se loguea, sin abortar el resto del lote.
+
+    Devuelve (n_membresias_insertadas, n_articulos_con_principal_actualizado,
+    n_fk_violations).
     """
     full_pull_grupos = [int(g) for g in full_pull_grupos]
 
     with conn.cursor() as cur:
-        if full_pull_grupos:
-            placeholders = ",".join(["%s"] * len(full_pull_grupos))
+        grupos_a_borrar = []
+        for g in full_pull_grupos:
+            cur.execute("SELECT COUNT(*) FROM articulo_grupo_stage WHERE grupo_id = %s", (g,))
+            if cur.fetchone()[0] > 0:
+                grupos_a_borrar.append(g)
+            else:
+                print(
+                    f"[WARN] grupo {g} en full_pull_grupos pero sin ninguna fila en "
+                    "articulo_grupo_stage -- NO se borra su membresia existente (issue #168)"
+                )
+
+        if grupos_a_borrar:
+            placeholders = ",".join(["%s"] * len(grupos_a_borrar))
             cur.execute(
                 f"DELETE FROM articulo_grupo WHERE grupo_id IN ({placeholders})",
-                full_pull_grupos,
+                grupos_a_borrar,
             )
 
-        cur.execute(
-            "INSERT IGNORE INTO articulo_grupo (sku, grupo_id) "
-            "SELECT sku, grupo_id FROM articulo_grupo_stage"
-        )
-        n_membresias = cur.rowcount
+        cur.execute("SELECT sku, grupo_id FROM articulo_grupo_stage")
+        stage_rows = cur.fetchall()
+
+        n_membresias = 0
+        n_fk_violations = 0
+        for sku, grupo_id in stage_rows:
+            try:
+                cur.execute(
+                    "INSERT INTO articulo_grupo (sku, grupo_id) VALUES (%s, %s) "
+                    "ON DUPLICATE KEY UPDATE sku = sku",
+                    (sku, grupo_id),
+                )
+                if cur.rowcount > 0:
+                    n_membresias += 1
+            except pymysql.err.IntegrityError as e:
+                n_fk_violations += 1
+                print(
+                    f"[ERROR] membresia sku={sku} grupo_id={grupo_id} no se pudo insertar "
+                    f"en articulo_grupo (issue #168, probable violacion de FK): {e}"
+                )
 
         cur.execute(
             """
@@ -119,7 +169,7 @@ def finalize(conn, full_pull_grupos=()) -> tuple[int, int]:
         # quedado confirmados para siempre pese al rollback de mas abajo).
         cur.execute("DELETE FROM articulo_grupo_stage")
 
-    return n_membresias, n_articulos
+    return n_membresias, n_articulos, n_fk_violations
 
 
 def main() -> int:
@@ -128,7 +178,7 @@ def main() -> int:
 
     conn = db_connect()
     try:
-        n_membresias, n_articulos = finalize(conn, full_pull_grupos)
+        n_membresias, n_articulos, n_fk_violations = finalize(conn, full_pull_grupos)
         conn.commit()
     except Exception as e:
         conn.rollback()
@@ -139,9 +189,16 @@ def main() -> int:
 
     print(
         f"[INFO] articulo_grupo actualizado: {n_membresias} membresias nuevas, "
-        f"{n_articulos} articulos con grupo principal recalculado "
+        f"{n_articulos} articulos con grupo principal recalculado, "
+        f"{n_fk_violations} violacion(es) de FK descartadas "
         f"(pull completo esta corrida: {full_pull_grupos or 'ninguno'})"
     )
+    # Issue #168: violaciones de FK ya no quedan solo en el log de stdout --
+    # exit code distinto de cero para que jobs_historial refleje que algo se
+    # perdio, aunque el resto del volcado haya salido bien.
+    if n_fk_violations:
+        print(f"[ERROR] {n_fk_violations} membresia(s) no se pudieron insertar por violacion de FK")
+        return 1
     return 0
 
 

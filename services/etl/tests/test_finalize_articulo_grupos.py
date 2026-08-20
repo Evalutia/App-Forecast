@@ -171,6 +171,13 @@ def test_grupo_con_pull_completo_reemplaza_su_membresia_entera(conn):
     pasa a pertenecer a uno solo, y AMBOS grupos hicieron pull completo esta
     corrida (es_grupo_nuevo=1 para los dos, o un re-seed manual). Ahi si debe
     detectarse la baja -- el stage de esta corrida es la foto completa real.
+
+    SKU_B en GRUPO_VISIBLE_BAJO es relleno (issue #168): sin al menos una
+    fila real en stage para ese grupo, un pull completo que genuinamente
+    perdio su unico articulo es indistinguible de un pull que fallo del
+    todo -- la guard nueva de #168 no borraria un grupo con el stage
+    totalmente vacio para el. Este test verifica el reemplazo real, no esa
+    guard (ver test_full_pull_grupo_sin_ninguna_fila_en_stage_no_borra_su_membresia).
     """
     with conn.cursor() as cur:
         cur.executemany(
@@ -179,8 +186,10 @@ def test_grupo_con_pull_completo_reemplaza_su_membresia_entera(conn):
         )
     conn.commit()
 
-    # Esta corrida solo vio al articulo en el grupo alto.
+    # Esta corrida solo vio al articulo A en el grupo alto -- B se queda en
+    # el bajo, prueba de que el pull de GRUPO_VISIBLE_BAJO si trajo datos.
     _stage(conn, SKU_A, [GRUPO_VISIBLE_ALTO])
+    _stage(conn, SKU_B, [GRUPO_VISIBLE_BAJO])
 
     fg.finalize(conn, full_pull_grupos=[GRUPO_VISIBLE_BAJO, GRUPO_VISIBLE_ALTO])
     conn.commit()
@@ -260,8 +269,81 @@ def test_articulo_sin_cambio_de_principal_no_se_toca(conn):
 
     _stage(conn, SKU_A, [GRUPO_VISIBLE_BAJO, GRUPO_VISIBLE_ALTO])
 
-    _, n_articulos = fg.finalize(conn, full_pull_grupos=GRUPOS_TEST)
+    _, n_articulos, _ = fg.finalize(conn, full_pull_grupos=GRUPOS_TEST)
     conn.commit()
 
     assert n_articulos == 0
-    assert _grupo_principal(conn, SKU_A) == GRUPO_VISIBLE_BAJO
+
+
+# ── Issue #168: guard contra vaciado silencioso de grupo ────────────────────
+# Root cause verificado: si un grupo entra a full_pull_grupos pero el WS
+# fallo para el (#167 lo hace fallar de verdad ahora, pero esta guard es
+# defensa en profundidad -- "sea por fallo o por otra causa" dice el propio
+# issue), articulo_grupo_stage nunca tuvo ninguna fila de ese grupo. El
+# DELETE de mas arriba lo vaciaria igual si confiara ciegamente en
+# full_pull_grupos, y el INSERT IGNORE de la reconstruccion no repone nada
+# porque el stage esta vacio para ese grupo -- el grupo queda sin ningun
+# articulo, en silencio.
+
+def test_full_pull_grupo_sin_ninguna_fila_en_stage_no_borra_su_membresia(conn):
+    """Root cause de #168: un grupo en full_pull_grupos sin NINGUNA fila en
+    el stage (WS fallo, o cualquier otra causa) no debe perder su membresia
+    existente -- guard explicito, no basta con que el caller haya excluido
+    el grupo de full_pull_grupos correctamente (defensa en profundidad)."""
+    with conn.cursor() as cur:
+        cur.executemany(
+            "INSERT INTO articulo_grupo (sku, grupo_id) VALUES (%s, %s)",
+            [(SKU_A, GRUPO_VISIBLE_BAJO), (SKU_B, GRUPO_VISIBLE_ALTO)],
+        )
+    conn.commit()
+
+    # GRUPO_VISIBLE_BAJO entra como full_pull pero el stage no tiene NINGUNA
+    # fila suya (simulacro del bug: el WS fallo para este grupo puntual).
+    # GRUPO_VISIBLE_ALTO ni siquiera esta en full_pull_grupos, no deberia
+    # tocarse tampoco.
+    fg.finalize(conn, full_pull_grupos=[GRUPO_VISIBLE_BAJO])
+    conn.commit()
+
+    assert _membresias(conn, SKU_A) == [GRUPO_VISIBLE_BAJO], (
+        "un grupo full_pull sin ninguna fila en stage no debe perder su membresia existente"
+    )
+    assert _membresias(conn, SKU_B) == [GRUPO_VISIBLE_ALTO]
+
+
+def test_violacion_de_fk_se_cuenta_y_loguea_sin_perder_las_filas_buenas(conn, capsys):
+    """El INSERT ya no puede tragarse una violacion de FK en silencio (antes:
+    INSERT IGNORE se tragaba duplicados Y violaciones de FK por igual). Un
+    SKU en stage que nunca llego a existir en `articulos` (ej. fallo su
+    propia insercion en run_extract_articulos.py) debe contarse aparte y
+    loguearse -- sin abortar el resto de las membresias validas del mismo
+    lote."""
+    sku_sin_articulo = "__TEST_168_SIN_ARTICULO__"
+    with conn.cursor() as cur:
+        cur.execute("DELETE FROM articulo_grupo_stage WHERE sku = %s", (sku_sin_articulo,))
+        cur.execute(
+            "INSERT INTO articulo_grupo_stage (sku, grupo_id) VALUES (%s, %s)",
+            (sku_sin_articulo, GRUPO_VISIBLE_BAJO),
+        )
+    conn.commit()
+    _stage(conn, SKU_A, [GRUPO_VISIBLE_ALTO])  # fila valida, en el mismo lote
+
+    try:
+        n_membresias, _, n_fk_violations = fg.finalize(conn, full_pull_grupos=[])
+        conn.commit()
+
+        assert n_fk_violations == 1
+        assert n_membresias == 1  # SKU_A/GRUPO_VISIBLE_ALTO si se inserto
+        assert _membresias(conn, SKU_A) == [GRUPO_VISIBLE_ALTO]
+
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT 1 FROM articulo_grupo WHERE sku = %s", (sku_sin_articulo,)
+            )
+            assert cur.fetchone() is None
+
+        salida = capsys.readouterr().out
+        assert sku_sin_articulo in salida
+    finally:
+        with conn.cursor() as cur:
+            cur.execute("DELETE FROM articulo_grupo_stage WHERE sku = %s", (sku_sin_articulo,))
+        conn.commit()
