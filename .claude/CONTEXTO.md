@@ -3888,3 +3888,28 @@ Tercer ticket accionable de la auditoría de precisión de datos (2026-08-19, ve
 `git merge` (fast-forward, sin migraciones nuevas) + `docker compose build etl webapp` + `--force-recreate etl webapp`. Verificado post-deploy: `inspect.signature()` de `calcular_historico`/`detectar_ingreso_durante_mes` dentro del contenedor `etl` confirma las firmas nuevas; el bundle JS de `evalutia-webapp` contiene el string `dashed` (borde del fix de #165). Ambos contenedores healthy sin errores en logs.
 
 **Importante**: esto pone el código nuevo en producción, pero `planilla_ventas_calculada` todavía tiene los valores calculados con la lógica vieja -- el ETL diario corre a las 3am (`ofelia.ini`, job `etl_diario`), así que recién en esa corrida (o si se dispara manualmente) la planilla real va a reflejar estos 3 fixes. Hasta entonces, lo que el cliente ve en la web/Excel no cambió todavía.
+
+---
+
+### #167 -- `run_extract_articulos.py`/`.sh` ya pueden fallar de verdad (2026-08-19/20)
+
+Cuarto ticket accionable de la auditoría de precisión de datos (2026-08-19). Mismo defecto que #141 (`run_extract_stockxml.py`) y #154 (`run_extract_sales_chunk.py`) ya corrigieron dos veces en este repo, nunca replicado en el tercer extractor. Bloquea el ticket del hallazgo A3 (#168, vaciado silencioso de grupo).
+
+**El bug, en dos archivos**:
+- `run_extract_articulos.py`: un solo `commit()` al final del loop completo -- un deadlock en la fila N se llevaba puestas las N-1 filas previas, ya contadas como insertadas. Un único contador `rows_skip` mezclaba descartes legítimos (SKU vacío) con excepciones reales de MySQL al escribir. `return 0` incondicional en `main()`, sin importar si hubo errores.
+- `run_extract_articulos.sh`: la rama de `MensError` hacía `echo "Salida OK."; return 0` -- Capa 1 de #124, cerrada para ventas (`return 13`) y nunca replicada acá. Además, `GRUPOS_FALLIDOS` se contaba en el loop pero nunca se usaba para el exit code final -- el script simplemente terminaba sin ningún `exit` explícito, pasara lo que pasara.
+
+**Confirmado antes de tocar nada: el `.kjb` ya tiene la plomería lista.** El hop `RUN EXTRACT ARTICULOS` -> `MARK ARTICULOS FAILED` (línea 782 de `job_etl_diario.kjb`) ya está cableado, categoría "marca y sigue" (una noche sin refresco del catálogo no corrompe nada, solo queda desactualizado, pero el fallo debe quedar registrado en `jobs_historial`). El problema nunca fue el `.kjb` -- fue que el script nunca devolvía un código de salida que lo disparara. No hizo falta tocar el `.kjb` para este ticket.
+
+**Fix**: mismo patrón que #141/#154 --
+- `insert_sql` (articulos) y `membership_sql` (articulo_grupo_stage) van en la MISMA transacción por fila y comitean juntos (son un solo hecho atómico: "este SKU existe y pertenece al grupo X"), a diferencia de `sales_chunk.py` donde stage/stock_diario son hechos independientes con commits separados.
+- `rows_failed` separado de `rows_skip`; `main()` retorna 1 si `rows_failed>0`.
+- `MensError` en el `.sh` ahora es `return 13` (mismo código que ya usa `run_extract_sales_chunk.sh`, convención reconocible entre los dos wrappers).
+- Nuevo `if [[ "${GRUPOS_FALLIDOS}" -gt 0 ]]; then exit 1; fi` al final del `.sh`.
+- Decisión tomada explícitamente (sesión de `/grill-me` antes de implementar): **sin infra nueva de persistencia** para los logs de error -- igual que #141/#154, alcanza con `[ERROR]` por stdout + exit code no-cero (que ya es lo que `jobs_historial` necesita). Los JSON de `/tmp` (`skipped_samples`, `insert_errors`) quedan como complemento efímero, sin cambios de fondo.
+
+**Tests, 2 archivos nuevos** (no existía ningún test de este script antes): `test_run_extract_articulos_write_failures.py` (3 tests, unitario vía `subprocess`) fuerza un overflow real de `stock_minimo` (`INT UNSIGNED`, mismo tipo de técnica que #154 usó con `stock_diario.cantidad`) y confirma exit≠0 + la fila buena queda durable pese a la mala; requirió sembrar un grupo de prueba (`grupo_id=90167`, fuera del rango real hasta 201) porque `articulos.grupo_id` tiene una FK real contra `grupos(id)` que `ventas_historicas_stage.grupo_id` no tiene (#114: ahí es solo trazabilidad). `test_run_extract_articulos_grupos_fallidos.py` (2 tests, integración contra el contenedor `evalutia-etl`, mismo motivo que #157/#158 para no usar el bash del host) confirma que un `MensError` real hace fallar el script -- mismo stub de `curl` que esos tests, adaptado al tag `<Grupos>` que usa este script (no `<IdGrupo>` como ventas).
+
+Suite completa: 364 passed / 33 failed (preexistentes, idénticos) / 5 skipped.
+
+**Hallazgos de `/code-review`, no aplicados, candidatos a ticket futuro**: (a) `conn.rollback()` dentro del `except` no está protegido -- si la conexión ya está rota (ej. el propio deadlock la tumbó), el rollback puede lanzar y abortar el resto del batch sin dejar rastro. Mismo patrón ya existe sin corregir en `run_extract_sales_chunk.py` (#154) -- no se corrigió acá en aislamiento para no divergir de un script hermano con el mismo defecto; si se decide arreglar, debería ser un ticket que toque los tres extractores a la vez. (b) el commit por fila puede alargar la corrida de un pull completo grande, y a diferencia de `run_extract_stockxml.sh` (con `timeout` en el `.kjb`), `RUN EXTRACT ARTICULOS` no tiene techo de tiempo -- mismo trade-off ya aceptado en #154, no una regresión nueva.

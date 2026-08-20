@@ -375,6 +375,7 @@ def main():
 
     rows_ins = 0
     rows_skip = 0
+    rows_failed = 0
     skipped_samples = []
     err_log = []
 
@@ -421,10 +422,24 @@ def main():
                             "ConsArticulosWeb",
                         ),
                     )
+                    # Issue #167: insert_sql (articulos) y membership_sql
+                    # (articulo_grupo_stage) son un solo hecho atomico --
+                    # "este SKU existe y pertenece al grupo X" -- van en la
+                    # MISMA transaccion por fila, a diferencia de
+                    # run_extract_sales_chunk.py (#154) donde stage y
+                    # stock_diario son hechos independientes con commits
+                    # separados.
                     cur.execute(membership_sql, (normalized["sku"], grupo_id))
+                    # Issue #167: commit por fila, no uno solo al final del
+                    # lote -- mismo criterio que #154. Un deadlock o un
+                    # "Out of range" en la fila N ya no se lleva puestas las
+                    # N-1 filas previas, que quedan durables de inmediato.
+                    conn.commit()
                     rows_ins += 1
                 except Exception as e:
-                    rows_skip += 1
+                    conn.rollback()
+                    print(f"[ERROR] fila no escrita en articulos, excepcion de MySQL sku={normalized.get('sku')}: {e}")
+                    rows_failed += 1
                     err_log.append(
                         {
                             "index": idx,
@@ -434,8 +449,6 @@ def main():
                             "raw_keys": list(raw.keys()),
                         }
                     )
-
-            conn.commit()
     finally:
         conn.close()
 
@@ -444,8 +457,13 @@ def main():
             with open("/tmp/articulos_skipped_samples.json", "w", encoding="utf-8") as f:
                 json.dump({"skipped_count": rows_skip, "samples": skipped_samples}, f, ensure_ascii=False, indent=2)
             print(f"[WARN] Guardadas muestras de items skippeados en /tmp/articulos_skipped_samples.json (muestras: {len(skipped_samples)})")
-        except Exception:
-            pass
+        except Exception as e:
+            # Issue #167: este log es un complemento en /tmp (efimero, se
+            # pierde al recrear el contenedor) -- si ni siquiera se puede
+            # escribir, no debe tragarse en silencio. El [ERROR] de mas
+            # abajo (via rows_failed) es la senal que de verdad importa y
+            # ya no depende de este archivo.
+            print(f"[WARN] No se pudo escribir /tmp/articulos_skipped_samples.json: {e}")
 
     if err_log:
         try:
@@ -453,10 +471,19 @@ def main():
                 for e in err_log:
                     f.write(json.dumps(e, ensure_ascii=False) + "\n")
             print(f"[ERROR] Errores de inserción registrados en /tmp/articulos_insert_errors.log (count: {len(err_log)})")
-        except Exception:
-            pass
+        except Exception as e:
+            print(f"[WARN] No se pudo escribir /tmp/articulos_insert_errors.log: {e}")
 
-    print(f"[INFO] Inserted/Upserted {rows_ins} articulos (skipped {rows_skip})")
+    print(f"[INFO] Inserted/Upserted {rows_ins} articulos (skipped {rows_skip}, failed {rows_failed})")
+
+    # Issue #167: una excepcion real de MySQL al escribir ya no puede
+    # terminar en exit 0 -- antes se contaba junto con los descartes
+    # legitimos (rows_skip) o se ignoraba del todo, y el job quedaba
+    # 'exitoso' en jobs_historial pese a haber perdido articulos. Mismo
+    # criterio que #141/#154.
+    if rows_failed:
+        print(f"[ERROR] {rows_failed} fila(s) no se pudieron escribir por una excepcion de MySQL")
+        return 1
     return 0
 
 if __name__ == "__main__":

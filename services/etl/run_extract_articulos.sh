@@ -232,12 +232,17 @@ XML
     return 10
   fi
 
+  # Issue #167: un MensError real del WS es un fallo, no "sin resultados" --
+  # mismo chequeo que ya hacia este script, pero antes devolvia `return 0`
+  # ("Salida OK") en vez de propagarlo como el fallo que es. Capa 1 de #124,
+  # cerrada para ventas (run_extract_sales_chunk.sh, return 13) y nunca
+  # replicada aca. Mismo codigo 13 que usa ese script, para que "13" sea una
+  # convencion reconocible entre los dos wrappers.
   local MENSERR
   MENSERR="$(perl -0777 -ne 'print $1 if m{<MensError>([\s\S]*?)</MensError>}i' "$TMP_XML" || true)"
   if [[ -n "${MENSERR//[[:space:]]/}" ]]; then
-    echo "[WARN] MensError en ${WS_METHOD} (grupo ${grupo}): ${MENSERR}"
-    echo "[WARN] No se insertan artículos por MensError. Salida OK."
-    return 0
+    echo "[ERROR] MensError en ${WS_METHOD} (grupo ${grupo}): ${MENSERR}"
+    return 13
   fi
 
   local PAYLOAD
@@ -335,4 +340,16 @@ if debe_reconstruir_articulo_grupo "${CRAWL_COMPLETO}" "${GRUPOS_FALLIDOS}"; the
   python3 /app/services/etl/finalize_articulo_grupos.py "${GRUPOS_FULL_PULL_CSV}"
 elif [[ "${CRAWL_COMPLETO}" == "1" ]]; then
   echo "[WARN] ${GRUPOS_FALLIDOS} grupo(s) fallaron esta corrida -- articulo_grupo NO se toca (queda con los datos de la ultima corrida completa)"
+fi
+
+# Issue #167: antes, GRUPOS_FALLIDOS se contaba pero nunca se usaba para el
+# exit code final -- el script siempre terminaba en exit 0 (implicito, el
+# de la ultima sentencia) pasara lo que pasara con los grupos. El .kjb ya
+# tiene el hop "RUN EXTRACT ARTICULOS" -> "MARK ARTICULOS FAILED" cableado
+# (categoria "marca y sigue": una noche sin refresco no corrompe nada, solo
+# queda desactualizado) -- solo hacia falta que el exit code real lo
+# dispare. Mismo criterio que run_extract_sales_chunk.sh (#124/#157).
+if [[ "${GRUPOS_FALLIDOS}" -gt 0 ]]; then
+  echo "[ERROR] ${GRUPOS_FALLIDOS} grupo(s) fallaron esta corrida"
+  exit 1
 fi
