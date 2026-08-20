@@ -4,6 +4,7 @@ import os
 import pytest
 
 from run_calc_sugerencias import (
+    MAX_DIAS_HASTA_QUIEBRE,
     MAX_MESES,
     MIN_MESES_CON_DATOS,
     MODELO,
@@ -189,6 +190,24 @@ def test_issue_116_umbral_es_inclusive():
 
 def test_none_si_no_hay_fecha_de_stock():
     assert calcular_dias_hasta_quiebre(100.0, 5.0, None, REF) is None
+
+
+def test_issue_183_rotacion_minima_con_stock_alto_no_desborda_decimal_10_2():
+    """dias_hasta_quiebre es DECIMAL(10,2) (max 99.999.999,99). rotacion_sugerida
+    viene redondeada a 4 decimales, asi que su menor valor no nulo es 0,0001 --
+    con stock alto, stock/rotacion desborda el tipo y aborta el executemany
+    completo de escribir_sugerencias (mismo modo de fallo que el code-review
+    de #116 encontro para chk_sugerencias_rotacion, en otra columna). Se
+    acota a MAX_DIAS_HASTA_QUIEBRE en vez de dejar que MySQL lo rechace."""
+    resultado = calcular_dias_hasta_quiebre(20000.0, 0.0001, REF, REF)
+    assert resultado == MAX_DIAS_HASTA_QUIEBRE
+    assert resultado <= 99_999_999.99
+
+
+def test_issue_183_valor_normal_dentro_del_cap_no_se_toca():
+    """El cap no debe interferir con valores normales, muy por debajo del
+    limite -- solo el caso extremo que realmente desbordaria la columna."""
+    assert calcular_dias_hasta_quiebre(100.0, 5.0, REF, REF) == 20.0
 
 
 # ── calcular_sugerencias() — integracion contra MySQL real ────────────────

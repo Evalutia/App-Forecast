@@ -32,6 +32,7 @@ FREQ_ALTA_MIN, FREQ_BAJA_MAX = 9, 3
 TICKETS_BAJO_MAX, TICKETS_ALTO_MIN = 2, 5
 MIN_MESES_CON_DATOS, MAX_MESES = 3, 13
 UMBRAL_DIAS_STOCK_VIEJO = 7  # Issue #116, mismo umbral que run_calc_sugerencias.py
+MAX_DIAS_HASTA_QUIEBRE = 999.99  # Issue #183, mismo cap que run_calc_sugerencias.py
 
 
 def connect():
@@ -366,7 +367,12 @@ def verificar_sku(cur, sku, ventana, cerrados, ref):
         fecha_stock = stock_row[1]
         # Issue #116: QBK es None si el stock conocido esta mas viejo que el umbral
         stock_fresco = fecha_stock is not None and (fecha_ref_qbk - fecha_stock).days <= UMBRAL_DIAS_STOCK_VIEJO
-        r_qbk = round(stock / r_rots, 2) if r_rots > 0 and stock_fresco else None
+        # Issue #183: mismo cap que run_calc_sugerencias.py -- sin esto, un
+        # SKU con rotacion minima y stock alto (el caso que ese ticket
+        # corrige) queda con el valor real sin acotar aca, y el oraculo
+        # reporta un MISMATCH falso contra el valor ya acotado en la DB.
+        r_qbk = (min(MAX_DIAS_HASTA_QUIEBRE, round(stock / r_rots, 2))
+                 if r_rots > 0 and stock_fresco else None)
     for nombre, sv, rv, tol in [("ROT.S", sug[0], r_rots, TOL),
                                 ("Fiabilidad", sug[1], r_fiab, 0.5),
                                 ("QBK", sug[2], r_qbk, 1.0)]:

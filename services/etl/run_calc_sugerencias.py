@@ -42,6 +42,9 @@ Algoritmo dias_hasta_quiebre (QBK):
     UMBRAL_DIAS_STOCK_VIEJO días de antigüedad respecto a hoy -- evita
     reportar días-hasta-quiebre sobre un stock congelado de un SKU que
     desapareció del feed (visto en producción: 1 artículo así).
+  - Issue #183: acotado a MAX_DIAS_HASTA_QUIEBRE (999,99) -- la columna es
+    DECIMAL(10,2) y una rotación mínima (0,0001) con stock alto desborda el
+    tipo, abortando el executemany completo de escribir_sugerencias.
 
 Una sola transacción atómica (ON DUPLICATE KEY UPDATE), no bloqueante.
 
@@ -63,6 +66,16 @@ MODELO                  = "weighted_avg_13m_v2"  # Issue #116: bump por cambio d
 MIN_MESES_CON_DATOS     = 3
 MAX_MESES               = 13
 UMBRAL_DIAS_STOCK_VIEJO = 7
+# Issue #183: planilla_sugerencias.dias_hasta_quiebre es DECIMAL(10,2) (max
+# 99.999.999,99). rotacion_sugerida viene redondeada a 4 decimales (su menor
+# valor no nulo es 0,0001) -- con stock alto, stock/rotacion desborda el tipo
+# y aborta el executemany COMPLETO de escribir_sugerencias, para todos los
+# SKUs del batch, no solo el afectado (mismo modo de fallo que el code-review
+# de #116 encontro para chk_sugerencias_rotacion, en otra columna). 999,99
+# dias (~2,7 años) ya es "no se agota en ningun horizonte previsible" -- un
+# valor mayor no aporta informacion de negocio distinta, solo arriesga romper
+# la escritura.
+MAX_DIAS_HASTA_QUIEBRE = 999.99
 
 # ── Conexión ───────────────────────────────────────────────────────────────────
 
@@ -201,12 +214,16 @@ def calcular_dias_hasta_quiebre(
     tiene más de `umbral_dias` de antigüedad respecto a `fecha_referencia`
     (Issue #116: evita reportar días-hasta-quiebre sobre un stock congelado
     de un SKU que desapareció del feed). Stock negativo se trata como 0.
+
+    Issue #183: el resultado se acota a MAX_DIAS_HASTA_QUIEBRE -- sin cap,
+    una rotación mínima (0,0001) con stock alto desborda el DECIMAL(10,2)
+    de la columna y aborta la escritura de TODO el batch, no solo esta fila.
     """
     if rotacion_sugerida is None or rotacion_sugerida <= 0:
         return None
     if fecha_stock is None or (fecha_referencia - fecha_stock).days > umbral_dias:
         return None
-    return round(max(0.0, stock_actual) / rotacion_sugerida, 2)
+    return min(MAX_DIAS_HASTA_QUIEBRE, round(max(0.0, stock_actual) / rotacion_sugerida, 2))
 
 # ── Cálculo ────────────────────────────────────────────────────────────────────
 
