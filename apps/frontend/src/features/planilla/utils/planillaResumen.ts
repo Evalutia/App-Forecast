@@ -152,3 +152,28 @@ export function calcularDdstk(meses: PlanillaMesDto[]): number | null {
 export function redondearDiasQuiebre(dias: number): number {
   return dias > 0 ? Math.max(1, Math.round(dias)) : 0;
 }
+
+/**
+ * Redondea la fiabilidad (%) para mostrar, fuente única para web y Excel
+ * (issue #169, mismo patrón que #143 fijó arriba para QBK).
+ *
+ * Antes, `fiabilidadClass` en PlanillaTable.tsx clasificaba los umbrales
+ * 70/40 sobre el valor CRUDO mientras el texto mostraba `toFixed(0)`
+ * (redondeado) -- el badge de color y el número que lee el cliente podían
+ * contradecirse en el borde. Casos reales:
+ *   - C00679 (69,75 crudo): el texto mostraba "70%", pero el badge daba
+ *     AMARILLO (69,75 < 70 crudo) -- contradice al propio número mostrado.
+ *   - T00145E (39,99 crudo): el texto mostraba "40%", pero el badge daba
+ *     ROJO (39,99 < 40 crudo) -- 40% cae en la banda Amarillo (40-69%) que
+ *     la leyenda promete, no en Rojo.
+ *
+ * El fix: un solo redondeo (`Math.round`, sin piso especial -- a diferencia
+ * de `redondearDiasQuiebre`, acá 0% es un valor válido que no hay que
+ * proteger de aterrizar en 0), y tanto el texto como `fiabilidadClass`
+ * clasifican sobre ESTE valor ya redondeado, nunca sobre el crudo. Con el
+ * fix, C00679 pasa a badge VERDE (70 >= 70) -- un cambio real de color,
+ * ahora coherente con el "70%" que siempre mostró el texto.
+ */
+export function redondearFiabilidad(pct: number): number {
+  return Math.round(pct);
+}

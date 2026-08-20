@@ -1,6 +1,6 @@
 import ExcelJS, { type Cell } from 'exceljs';
 import { fetchPlanillaVentas } from './api';
-import { DDSTK_MIN_DIAS_CON_STOCK, calcularDdstk, calcularRotDesEstac, celdaRotacionMes, redondearDiasQuiebre } from './planillaResumen';
+import { DDSTK_MIN_DIAS_CON_STOCK, calcularDdstk, calcularRotDesEstac, celdaRotacionMes, redondearDiasQuiebre, redondearFiabilidad } from './planillaResumen';
 import type { PlanillaMesDto, PlanillaSugerenciaDto, PlanillaVentasDto, PlanillaVentasParams } from '../types/planilla';
 
 const MESES = ['Ene','Feb','Mar','Abr','May','Jun','Jul','Ago','Sep','Oct','Nov','Dic'];
@@ -203,7 +203,11 @@ function buildHojaPlanilla(
       item.meses.slice(0, -1).reduce((s, m) => s + (m.ventasCantidad ?? 0), 0),
       calcularDdstk(item.meses),
       sug?.rotacionSugerida ?? null,
-      sug?.fiabilidadPorcentaje ?? null,
+      // Issue #169: mismo redondeo fuente-de-verdad que usa la web
+      // (redondearFiabilidad) -- antes el Excel mostraba 1 decimal
+      // ('0.0"%"') y la web 0, así que el mismo SKU podía leerse distinto
+      // en cada lado.
+      sug?.fiabilidadPorcentaje != null ? redondearFiabilidad(sug.fiabilidadPorcentaje) : null,
       sug?.diasHastaQuiebre != null ? redondearDiasQuiebre(sug.diasHastaQuiebre) : null,
       item.generoDescripcion ?? '',
     ]);
@@ -226,7 +230,7 @@ function buildHojaPlanilla(
     applySummaryStyle(row.getCell(COL_VTA),  '#,##0');
     applySummaryStyle(row.getCell(COL_DD),   '0.0000');
     applySummaryStyle(row.getCell(COL_ROTS), '0.0000');
-    applySummaryStyle(row.getCell(COL_FIAB), '0.0"%"');
+    applySummaryStyle(row.getCell(COL_FIAB), '0"%"');
     applySummaryStyle(row.getCell(COL_QBK),  '0');
     row.getCell(COL_ESTADO).font      = { size: 10 };
     row.getCell(COL_ESTADO).alignment = { vertical: 'middle', horizontal: 'center' };
