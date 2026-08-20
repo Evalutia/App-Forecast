@@ -8,6 +8,34 @@ import pymysql
 
 import parsers
 
+# Issue #173: mismo patron de contract-drift que #159 establecio para
+# run_extract_sales_chunk.py, nunca replicado en este script hermano.
+# Nombres alternativos de campo que el WS puede usar para el stock, en cada
+# formato de payload (mismos que ya se prueban mas abajo en cada rama).
+CAMPOS_STOCK_XML = ["Stock", "Existencia", "Cantidad"]
+CAMPOS_STOCK_JSON = ["Stock", "StockDisp", "Cantidad"]
+
+
+class ContractDriftError(Exception):
+    """Ninguna fila del payload trae un campo de stock reconocible -- firma
+    de un cambio de contrato del WS (renombre de campo), no de un dia real
+    con stock en 0 (ver _campo_stock_ausente_en_todas)."""
+
+
+def _campo_stock_ausente_en_todas(stock_field_presente):
+    """
+    True si hay al menos una fila Y NINGUNA trajo un campo de stock
+    reconocible. La señal es la ausencia TOTAL del campo, no el valor: un
+    dia real con stock en 0 trae el campo presente (valor "0"/0), y
+    `mv.find(k) is not None` / `it.get(k) is not None` ya cuentan eso como
+    "encontrado". Un payload sin filas no dice nada sobre el contrato -- no
+    dispara este chequeo (mismo criterio que el helper analogo de #159).
+    """
+    if not stock_field_presente:
+        return False
+    return not any(stock_field_presente)
+
+
 def trunc(s, maxlen):
     s = "" if s is None else str(s)
     return s[:maxlen]
@@ -27,10 +55,12 @@ with open(json_path, "r", encoding="utf-8") as f:
 content = html.unescape(content)
 
 rows = []
+stock_field_presente = []
 forced_dep = os.environ.get("__FORCED_DEPOSITO")
+es_xml = content.startswith("<")
 
 # Parse XML o JSON
-if content.startswith("<"):
+if es_xml:
     try:
         root = ET.fromstring(content)
     except Exception as e:
@@ -41,6 +71,10 @@ if content.startswith("<"):
         sku = (mv.findtext("IdArticulo") or mv.findtext("Id_Articulo") or
                mv.findtext("Articulo") or mv.findtext("Id") or mv.findtext("SKU"))
         stock = mv.findtext("Stock") or mv.findtext("Existencia") or mv.findtext("Cantidad") or "0"
+        # Issue #173: presencia del TAG (no del valor) -- mv.find(...) es
+        # None solo si el tag no existe; un tag <Stock>0</Stock> real
+        # cuenta como encontrado igual que arriba con findtext.
+        stock_field_presente.append(any(mv.find(c) is not None for c in CAMPOS_STOCK_XML))
         deposito = (mv.findtext("IdDeposito") or mv.findtext("Deposito") or mv.findtext("Id_Deposito"))
         if (not deposito or str(deposito).strip() == "") and forced_dep:
             deposito = forced_dep
@@ -67,10 +101,27 @@ else:
             continue
         sku = it.get("IdArticulo") or it.get("Articulo") or it.get("SKU") or it.get("Codigo")
         stock = it.get("Stock") or it.get("StockDisp") or it.get("Cantidad") or 0
+        stock_field_presente.append(any(it.get(c) is not None for c in CAMPOS_STOCK_JSON))
         deposito = it.get("IdDeposito") or it.get("Deposito") or it.get("Id_Deposito")
         if (not deposito or str(deposito).strip() == "") and forced_dep:
             deposito = forced_dep
         rows.append((sku, stock, deposito))
+
+# Issue #173: chequeo de contract drift ANTES de tocar la DB -- si esto
+# dispara, no debe quedar ninguna fila a medio escribir con datos malos
+# (mismo criterio de placement que #159).
+try:
+    if _campo_stock_ausente_en_todas(stock_field_presente):
+        campos_probados = CAMPOS_STOCK_XML if es_xml else CAMPOS_STOCK_JSON
+        raise ContractDriftError(
+            "ninguna fila del payload trae un campo de stock reconocible -- "
+            f"se probaron: {', '.join(campos_probados)}. No es una ausencia de "
+            "dato puntual (un dia con stock en 0 real trae el campo presente) "
+            "-- puede ser un renombre de campo en el WS."
+        )
+except ContractDriftError as e:
+    print(f"[ERROR] posible cambio de contrato del WS: {e}")
+    raise SystemExit(1)
 
 # Fecha de carga: preferir CHUNK_END (o CHUNK_START), sino hoy
 chunk_end = os.environ.get("CHUNK_END") or os.environ.get("CHUNK_START") or None
