@@ -1,9 +1,9 @@
 import { createPortal } from 'react-dom';
 import { useRef, useState } from 'react';
-import type { PlanillaMesDto, PlanillaSugerenciaDto, PlanillaVentasDto, PlanillaVentasParams } from '../types/planilla';
+import type { PlanillaSugerenciaDto, PlanillaVentasDto, PlanillaVentasParams } from '../types/planilla';
 import { usePlanillaVentas } from '../hooks/usePlanilla';
 import { exportPlanillaExcel } from '../utils/exportPlanilla';
-import { DDSTK_MIN_DIAS_CON_STOCK, calcularDdstk, calcularRotDesEstac, celdaRotacionMes, redondearDiasQuiebre, redondearFiabilidad } from '../utils/planillaResumen';
+import { DDSTK_MIN_DIAS_CON_STOCK, calcularDdstk, calcularRotDesEstac, calcularVta, celdaRotacionMes, redondearDiasQuiebre, redondearFiabilidad } from '../utils/planillaResumen';
 import { useUmbralesTickets } from '../../configuracion/hooks/useConfiguracion';
 import { useAuthUser } from '../../auth/hooks/useAuthUser';
 
@@ -53,11 +53,6 @@ function criterioFrecuenciaLabel(criterio: string | null | undefined, estadoMes:
 
 function fmtResumen(v: number | null): string {
   return v == null ? '—' : v.toFixed(4);
-}
-
-// VTA: suma de ventasCantidad de los 12 meses cerrados (excluye el mes de referencia)
-function calcVta(meses: PlanillaMesDto[]): number {
-  return meses.slice(0, -1).reduce((s, m) => s + (m.ventasCantidad ?? 0), 0);
 }
 
 // Issue #169: recibe la fiabilidad YA REDONDEADA (redondearFiabilidad), nunca
@@ -552,7 +547,7 @@ export default function PlanillaTable({ params, onPageChange, sugerencias, suger
               items.map((row: PlanillaVentasDto) => {
                 const rd  = fmtResumen(calcularRotDesEstac(row.meses));
                 const dd  = fmtResumen(calcularDdstk(row.meses));
-                const vta = calcVta(row.meses);
+                const vta = calcularVta(row.meses);
                 return (
                   <tr key={row.sku}>
                     <td className="planilla-sticky-col planilla-col-sku">

@@ -4,6 +4,7 @@ import {
   DDSTK_MIN_DIAS_CON_STOCK,
   calcularDdstk,
   calcularRotDesEstac,
+  calcularVta,
   celdaRotacionMes,
   redondearDiasQuiebre,
   redondearFiabilidad,
@@ -362,6 +363,41 @@ describe('redondearFiabilidad', () => {
 // test); acá se verifica la composición completa redondearFiabilidad() ->
 // fiabilidadClass(), que es exactamente lo que hace AeCell para decidir el
 // texto y el color del badge con el MISMO valor.
+
+// ── calcularVta — issue #171 ─────────────────────────────────────────────────
+// PlanillaTable.tsx y exportPlanilla.ts reimplementaban esta misma suma cada
+// uno por su lado (carácter por carácter idénticas al momento del ticket) --
+// exactamente la forma que #117 y #129 tenían antes de divergir de verdad.
+
+describe('calcularVta', () => {
+  it('suma ventasCantidad de los meses cerrados, excluyendo el mes de referencia', () => {
+    const meses = conReferencia([
+      mes({ ventasCantidad: 10 }),
+      mes({ ventasCantidad: 20 }),
+    ]);
+    expect(calcularVta(meses)).toBe(30);
+  });
+
+  it('el mes de referencia (ultimo del array) nunca participa en la suma', () => {
+    const meses = [
+      mes({ ventasCantidad: 5 }),
+      mes({ ventasCantidad: 999 }), // referencia
+    ];
+    expect(calcularVta(meses)).toBe(5);
+  });
+
+  it('ventasCantidad ausente (null/undefined) suma como 0, no rompe ni descarta la fila', () => {
+    const meses = conReferencia([
+      mes({ ventasCantidad: 10 }),
+      mes({ ventasCantidad: null as unknown as number }),
+    ]);
+    expect(calcularVta(meses)).toBe(10);
+  });
+
+  it('sin meses cerrados (solo el de referencia) da 0', () => {
+    expect(calcularVta(conReferencia([]))).toBe(0);
+  });
+});
 
 describe('redondearFiabilidad + fiabilidadClass: texto y color coherentes en el borde', () => {
   it('69,5 crudo: texto "70%" y badge verde (69,5 >= 70 solo tras redondear)', async () => {

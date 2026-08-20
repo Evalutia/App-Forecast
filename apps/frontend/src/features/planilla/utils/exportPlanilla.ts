@@ -1,6 +1,6 @@
 import ExcelJS, { type Cell } from 'exceljs';
 import { fetchPlanillaVentas } from './api';
-import { DDSTK_MIN_DIAS_CON_STOCK, calcularDdstk, calcularRotDesEstac, celdaRotacionMes, redondearDiasQuiebre, redondearFiabilidad } from './planillaResumen';
+import { DDSTK_MIN_DIAS_CON_STOCK, calcularDdstk, calcularRotDesEstac, calcularVta, celdaRotacionMes, redondearDiasQuiebre, redondearFiabilidad } from './planillaResumen';
 import type { PlanillaMesDto, PlanillaSugerenciaDto, PlanillaVentasDto, PlanillaVentasParams } from '../types/planilla';
 
 const MESES = ['Ene','Feb','Mar','Abr','May','Jun','Jul','Ago','Sep','Oct','Nov','Dic'];
@@ -200,7 +200,7 @@ function buildHojaPlanilla(
       ...item.meses.map(m => celdaRotacionMes(m).valor),
       calcularRotDesEstac(item.meses),
       item.estadoArticulo ?? 'activo',
-      item.meses.slice(0, -1).reduce((s, m) => s + (m.ventasCantidad ?? 0), 0),
+      calcularVta(item.meses),
       calcularDdstk(item.meses),
       sug?.rotacionSugerida ?? null,
       // Issue #169: mismo redondeo fuente-de-verdad que usa la web

@@ -3941,3 +3941,15 @@ Hallazgo A4 de la auditoría de precisión de datos (2026-08-19, mismo bloque qu
 Verificado post-fix: `evalutia-etl` corriendo `sha256:cc155a2...` (grep confirma `rows_failed`/`return 13` en los archivos horneados), `evalutia-webapp` corriendo `sha256:d0313bc...` (bundle JS con mtime fresco). Ambos contenedores healthy, sin errores en logs.
 
 Mismo estado que el deploy anterior: el código ya está en producción, pero `planilla_ventas_calculada`/`articulo_grupo`/lo que el cliente ve en la web no cambia hasta que corra el ETL de las 3am (o se dispare manualmente).
+
+---
+
+### #171 -- VTA: fuente única en `planillaResumen.ts` (2026-08-20)
+
+Hallazgo medio M2 de la auditoría de precisión de datos (2026-08-19). Último de los cinco resúmenes de columna (`Rot.DesEstac.`, DDSTK, celdas de rotación mensual, QBK, Fiabilidad %, y ahora VTA) que quedaba sin migrar a `planillaResumen.ts` -- `PlanillaTable.tsx` (`calcVta`) y `exportPlanilla.ts` (expresión inline en `ws.addRow`) reimplementaban la misma suma (`meses.slice(0,-1).reduce((s,m) => s + (m.ventasCantidad ?? 0), 0)`) cada uno por su lado. Verificadas carácter por carácter antes de tocar nada: hoy idénticas, sin divergencia numérica -- pero exactamente la forma que #117 y #129 tenían antes de divergir de verdad en este mismo código.
+
+**Fix**: `calcularVta(meses: PlanillaMesDto[]): number` nueva en `planillaResumen.ts`, mismo contrato que `calcularRotDesEstac` (excluye siempre el último elemento del array = mes de referencia). `PlanillaTable.tsx`: se borró la función local `calcVta` y el call site pasa a `calcularVta(row.meses)`; esto dejó `PlanillaMesDto` sin usar en el import de tipos del archivo (era la única anotación que lo necesitaba), así que también se limpió ese import. `exportPlanilla.ts`: la expresión inline en `ws.addRow` se reemplazó por `calcularVta(item.meses)`. Ningún cambio de comportamiento -- refactor de deduplicación puro.
+
+**Tests**: 4 nuevos en `planillaResumen.test.ts` (`describe('calcularVta', ...)`) -- suma de meses cerrados, exclusión del mes de referencia, `ventasCantidad` null/undefined suma como 0, y el caso sin meses cerrados da 0. Suite completa 45/45 en `planillaResumen.test.ts`, 79/79 en toda la suite frontend (2 archivos de test, mismo total que documentó #169 más estas 4). `tsc --noEmit` limpio, `eslint` limpio sobre los 4 archivos tocados. `/code-review` sin hallazgos.
+
+**Nota de proceso, mismo gotcha que #169 ya documentó**: este worktree también arrancó con el `HEAD` desactualizado -- 109 commits detrás de `Develop` (fechado 2026-07-21), sin `planillaResumen.ts` todavía en el árbol. Se confirmó que el branch no tenía commits propios (`git merge-base HEAD Develop` == `HEAD`) y se hizo `git merge --ff-only Develop` antes de empezar, fast-forward limpio sin conflictos. Segunda vez que pasa en la misma sesión -- si vuelve a aparecer en un tercer ticket, vale la pena investigar por qué los worktrees se están creando desde un punto viejo en vez de la punta de `Develop`.
