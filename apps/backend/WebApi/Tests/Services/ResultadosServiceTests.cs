@@ -268,5 +268,29 @@ namespace Tests.Services
       var periodo = trend.Single(t => t.Periodo == $"{esteMes.Year}-{esteMes.Month:D2}");
       periodo.SkusActivos.Should().Be(1);
     }
+
+    // Mismo bug que #180 del lado ETL (run_calc_stock_resumen.py): el filtro
+    // es inclusivo en los dos extremos (>= desde365 && <= today), asi que
+    // AddDays(-365) cubria 366 dias, no 365. Con AddDays(-364) el dia 365 no
+    // debe aparecer en la ventana.
+    [Fact]
+    public void GetAbcClassification_Ventana365Dias_ExcluyeElDia366()
+    {
+      var service = CreateService(out var db);
+      var hoy = DateOnly.FromDateTime(DateTime.UtcNow.Date);
+
+      SeedArticulo(db, "SKU-DENTRO");
+      SeedArticulo(db, "SKU-FUERA");
+      db.VentasHistoricas.Add(new VentaHistorica { Sku = "SKU-DENTRO", Fecha = hoy.AddDays(-364), Cantidad = 10, TsCarga = DateTime.UtcNow });
+      // 365 dias atras: dentro de la ventana vieja (366 dias, el bug), fuera
+      // de la ventana correcta (365 dias exactos).
+      db.VentasHistoricas.Add(new VentaHistorica { Sku = "SKU-FUERA", Fecha = hoy.AddDays(-365), Cantidad = 10, TsCarga = DateTime.UtcNow });
+      db.SaveChanges();
+
+      var result = service.GetAbcClassification();
+
+      result.Items.Should().Contain(i => i.Sku == "SKU-DENTRO" && i.VentasTotal == 10);
+      result.Items.Should().NotContain(i => i.Sku == "SKU-FUERA");
+    }
   }
 }

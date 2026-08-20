@@ -304,7 +304,11 @@ namespace Services.Resultados
     public AbcSummaryDto GetAbcClassification()
     {
       var today = DateOnly.FromDateTime(DateTime.UtcNow.Date);
-      var desde365 = today.AddDays(-365);
+      // Issue #180 (mismo bug encontrado del lado ETL, en run_calc_stock_resumen.py):
+      // el filtro de abajo es inclusivo en los dos extremos (>= desde365 && <= today),
+      // asi que AddDays(-365) cubria 366 dias, no 365. AddDays(-364) da exactamente
+      // 365 dias inclusive.
+      var desde365 = today.AddDays(-364);
 
       var ventasPorSku = _db.VentasHistoricas.AsNoTracking()
         .Where(v => v.Fecha >= desde365 && v.Fecha <= today)
