@@ -1,10 +1,12 @@
+import io
 import json
 import os
+import sys
 
 import pytest
 
 import backfill_jobs
-from backfill_jobs import cmd_check
+from backfill_jobs import cmd_check, cmd_end
 
 
 def _try_connect():
@@ -59,6 +61,34 @@ def _limpiar(conn, grupo_id):
             (str(grupo_id),),
         )
     conn.commit()
+
+
+def _insertar_job_con_detalle(conn, estado, detalle):
+    """Fila 'ejecutando' (o el estado que sea) con un detalle ya escrito,
+    simulando un chequeo hipotetico que corrio antes del `end` -- el mismo
+    escenario que #132 cubrio para cron_jobs.py con `stale`."""
+    with conn.cursor() as cur:
+        cur.execute(
+            "INSERT INTO jobs_historial (tipo_job, estado, fecha_inicio, detalle) "
+            "VALUES ('backfill', %s, NOW(6), %s)",
+            (estado, json.dumps(detalle, ensure_ascii=False)),
+        )
+        job_id = cur.lastrowid
+    conn.commit()
+    return job_id
+
+
+def _leer_fila(conn, job_id):
+    with conn.cursor() as cur:
+        cur.execute(
+            "SELECT estado, fecha_fin, detalle FROM jobs_historial WHERE id = %s",
+            (job_id,),
+        )
+        row = cur.fetchone()
+    return None if row is None else {
+        "estado": row[0], "fecha_fin": row[1],
+        "detalle": json.loads(row[2]) if row[2] else {},
+    }
 
 
 # ── cmd_check(): Issue #104 -- ahora compara tambien fecha_desde/fecha_hasta ──
@@ -130,8 +160,6 @@ def test_solo_fecha_hasta_distinta_no_esta_completo(capsys):
 def test_main_dispatch_check_exige_tres_argumentos():
     """El bug original tomaba `check <grupo_id>` (1 arg). El fix agrega
     fecha_desde/fecha_hasta al dispatch de main(), no solo a cmd_check."""
-    import sys
-
     old_argv = sys.argv
     try:
         sys.argv = ["backfill_jobs.py", "check", "42"]
@@ -139,3 +167,53 @@ def test_main_dispatch_check_exige_tres_argumentos():
         assert rc == 2, "con solo grupo_id (sin fechas) main() debe rechazar el comando"
     finally:
         sys.argv = old_argv
+
+
+# ── cmd_end(): Issue #184 -- JSON_MERGE_PATCH en vez de reemplazo de detalle,
+# mismo defecto que #132 ya corrigio en cron_jobs.py. Ademas, estado invalido
+# se rechaza antes de tocar la DB en vez de dejar que MySQL lo rechace con un
+# error opaco de ENUM. ──
+
+def test_end_estado_invalido_rechaza_sin_tocar_la_db(capsys):
+    """La validacion corre antes de db_connect() -- no necesita MySQL
+    disponible para fallar limpio."""
+    rc = cmd_end("1", "no-es-un-estado", "TEST184X", "2024-01-01", "2024-01-31", "1.0")
+
+    assert rc != 0
+    err = capsys.readouterr().err
+    assert "[ERROR]" in err
+    assert "no-es-un-estado" in err
+
+
+def test_end_hace_merge_no_pisa_detalle_previo(monkeypatch):
+    """Caso central de #184, calcado de test_stale_sobrevive_al_end_posterior
+    en test_cron_jobs.py: un detalle escrito ANTES de `end` (ej. por un
+    chequeo hipotetico que corriera antes del cierre) debe sobrevivir al
+    UPDATE de `end`, en vez de perderse por un reemplazo directo."""
+    conn = _try_connect()
+    grupo = "TEST184A"
+    try:
+        _limpiar(conn, grupo)
+        detalle_previo = {
+            "subtipo": "backfill_ventas",
+            "grupo_id": grupo,
+            "chequeo_previo": {"algo": "valor"},
+        }
+        job_id = _insertar_job_con_detalle(conn, "ejecutando", detalle_previo)
+
+        monkeypatch.setattr(sys, "stdin", io.StringIO("dep=5 rango=x rc=10\n"))
+        rc = cmd_end(str(job_id), "exitoso", grupo, "2024-01-01", "2024-01-31", "12.5")
+
+        assert rc == 0
+        fila = _leer_fila(conn, job_id)
+        assert fila["estado"] == "exitoso"
+        assert fila["fecha_fin"] is not None
+        # Lo que ya estaba en detalle antes de `end` sigue ahi.
+        assert fila["detalle"]["chequeo_previo"] == {"algo": "valor"}
+        # Y lo que `end` agrega tambien esta.
+        assert fila["detalle"]["duracion_seg"] == 12.5
+        assert fila["detalle"]["grupo_id"] == grupo
+        assert fila["detalle"]["chunks_fallidos"] == ["dep=5 rango=x rc=10"]
+    finally:
+        _limpiar(conn, grupo)
+        conn.close()
