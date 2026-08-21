@@ -222,3 +222,35 @@ def test_venta_con_coma_ya_no_es_cero_silencioso():
     resultado = parsers.parse_entero(fx.ITEM_VENTA_DECIMAL_COMA["Venta"], signed=True)
     assert resultado != 0
     assert resultado == 2
+
+
+# ── redondear() -- Issue #182 ───────────────────────────────────────────────
+# round() nativo de Python redondea al par mas cercano ("banker's rounding"):
+# round(2.675, 2) == 2.67, no 2.68. parse_entero ya usa ROUND_HALF_UP a
+# proposito (ver arriba) -- redondear() expone el mismo criterio para
+# columnas con decimales (run_calc_planilla.py/run_calc_sugerencias.py),
+# no solo para enteros.
+
+@pytest.mark.parametrize("valor,decimales,esperado", [
+    (2.675, 2, 2.68),   # round() nativo da 2.67 -- este es el caso del issue
+    (0.125, 2, 0.13),   # round() nativo da 0.12
+    (19.395, 2, 19.4),  # round() nativo da 19.39
+    (1.00005, 4, 1.0001),
+    (2.5, 0, 3.0),
+])
+def test_redondear_usa_round_half_up_no_banker(valor, decimales, esperado):
+    assert parsers.redondear(valor, decimales) == esperado
+
+
+def test_redondear_valor_no_ambiguo_coincide_con_round_nativo():
+    assert parsers.redondear(3.14159, 2) == round(3.14159, 2) == 3.14
+
+
+def test_redondear_negativo_redondea_lejos_de_cero_en_el_medio():
+    """ROUND_HALF_UP de Decimal redondea .5 lejos de cero en negativos
+    (-2.675 -> -2.68), no hacia el par -- comportamiento distinto de
+    round() nativo (-2.67) y de "half up" en el sentido aritmetico
+    ingenuo (que seria -2.67). Documentado para que no sorprenda: es el
+    mismo ROUND_HALF_UP que ya usa parse_entero, sin casos especiales
+    para negativos."""
+    assert parsers.redondear(-2.675, 2) == -2.68

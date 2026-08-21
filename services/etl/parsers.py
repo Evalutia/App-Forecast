@@ -56,6 +56,25 @@ def parse_decimal(valor):
         raise ParseError(f"numero no interpretable: {valor!r}")
 
 
+def redondear(valor: float, decimales: int) -> float:
+    """Redondea con ROUND_HALF_UP -- Issue #182: el round() nativo de Python
+    redondea al par mas cercano ("banker's rounding"), round(2.675, 2) ==
+    2.67, no 2.68. Mismo criterio que parse_entero() ya usa para enteros
+    (mas abajo), expuesto para columnas con decimales de run_calc_planilla.py/
+    run_calc_sugerencias.py -- el caso `promedio` de valor_ajustado
+    ((historico + valor_no_historico) / 2) produce medios centavos
+    seguido, con un sesgo sistemico de banker's rounding en una columna que
+    el cliente ve directo.
+
+    Decimal(str(valor)), no Decimal(valor): un float como 2.675 no es
+    exactamente representable en binario (es en verdad
+    2.67499999999999982...), así que Decimal(valor) redondearia distinto
+    de lo que un humano escribiria a mano -- mismo motivo por el que
+    parse_decimal() ya hace Decimal(str(x)) en vez de Decimal(x) directo.
+    """
+    return float(Decimal(str(valor)).quantize(Decimal(1).scaleb(-decimales), rounding=ROUND_HALF_UP))
+
+
 def parse_entero(valor, *, signed=False, default=0, contexto=None):
     """Entero redondeado a partir de parse_decimal.
 

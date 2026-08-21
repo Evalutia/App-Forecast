@@ -27,6 +27,8 @@ import time
 
 import pymysql
 
+from parsers import redondear
+
 # ── Parámetros ─────────────────────────────────────────────────────────────────
 
 VENTANA_MESES        = 13     # mes actual + 12 anteriores completos
@@ -317,24 +319,30 @@ def valor_ajustado_y_criterio(
     - Historico faltante (SKU sin ningun mes disponible) en tickets<=4: usa
       el componente disponible (VentaRealMes/Extrapolacion) sin promediar,
       en vez de dejar el valor en None.
+
+    Issue #182: redondea con ROUND_HALF_UP (parsers.redondear), no con el
+    round() nativo de Python (banker's rounding) -- el caso `promedio`
+    ((historico + valor_no_historico) / 2) produce medios centavos seguido,
+    con sesgo sistemico hacia el par en esta columna que el cliente ve
+    directo (valor_ajustado).
     """
     if es_quiebre and extrapolacion is None:
         if historico is not None:
-            return (round(historico, 2), "historico")
-        return (round(float(ventas_real), 2), "real_extrapolado")
+            return (redondear(historico, 2), "historico")
+        return (redondear(float(ventas_real), 2), "real_extrapolado")
 
     valor_no_historico = _venta_real_o_extrapolada(ventas_real, extrapolacion, es_quiebre)
 
     if tickets >= TICKETS_ALTO_MIN:
-        return (round(valor_no_historico, 2), "real_extrapolado")
+        return (redondear(valor_no_historico, 2), "real_extrapolado")
 
     if historico is None:
-        return (round(valor_no_historico, 2), "real_extrapolado")
+        return (redondear(valor_no_historico, 2), "real_extrapolado")
 
     if tickets <= TICKETS_BAJO_MAX:
-        return (round(historico, 2), "historico")
+        return (redondear(historico, 2), "historico")
 
-    return (round((historico + valor_no_historico) / 2, 2), "promedio")
+    return (redondear((historico + valor_no_historico) / 2, 2), "promedio")
 
 # ── jobs_historial ─────────────────────────────────────────────────────────────
 
@@ -753,7 +761,11 @@ def calcular_filas(conn: pymysql.Connection) -> tuple[list[dict], int, int, int]
         extrapolacion = extrapolaciones_mes[(sku, fila["year"], fila["month"])]
         es_quiebre = fila["estado_mes"] != "normal"
 
-        fila["valor_historico"] = round(historico, 2) if historico is not None else None
+        # Issue #182: mismo redondeo (ROUND_HALF_UP) que valor_ajustado_y_criterio()
+        # usa sobre este mismo `historico` mas abajo -- con round() nativo, un
+        # historico exactamente en un borde de medio centavo podia guardar un
+        # valor en valor_historico y OTRO en valor_ajustado para la misma fila.
+        fila["valor_historico"] = redondear(historico, 2) if historico is not None else None
         fila["valor_ajustado"], fila["criterio_frecuencia"] = valor_ajustado_y_criterio(
             fila["tickets_mes"],
             fila["ventas_cantidad"],

@@ -62,6 +62,8 @@ from collections import defaultdict
 
 import pymysql
 
+from parsers import redondear
+
 MODELO                  = "weighted_avg_13m_v2"  # Issue #116: bump por cambio de criterio de elegibilidad
 MIN_MESES_CON_DATOS     = 3
 MAX_MESES               = 13
@@ -160,6 +162,9 @@ def calcular_rotacion_y_fiabilidad(valores: list[float]) -> tuple[float | None, 
     sobre una lista de rotaciones mensuales ya elegibles (ver SQL de
     calcular_sugerencias() para qué cuenta como elegible -- Issue #116).
     (None, None) si hay menos de MIN_MESES_CON_DATOS valores.
+
+    Issue #182: redondeo con ROUND_HALF_UP (parsers.redondear), no con el
+    round() nativo de Python (banker's rounding, sesga hacia el par).
     """
     n = len(valores)
     if n < MIN_MESES_CON_DATOS:
@@ -199,7 +204,7 @@ def calcular_rotacion_y_fiabilidad(valores: list[float]) -> tuple[float | None, 
         # comportamiento previo en vez de adivinar una formula nueva.
         fiabilidad = 0.0
 
-    return round(rotacion_sugerida, 4), round(fiabilidad, 2)
+    return redondear(rotacion_sugerida, 4), redondear(fiabilidad, 2)
 
 
 def calcular_dias_hasta_quiebre(
@@ -218,12 +223,15 @@ def calcular_dias_hasta_quiebre(
     Issue #183: el resultado se acota a MAX_DIAS_HASTA_QUIEBRE -- sin cap,
     una rotación mínima (0,0001) con stock alto desborda el DECIMAL(10,2)
     de la columna y aborta la escritura de TODO el batch, no solo esta fila.
+
+    Issue #182: redondeo con ROUND_HALF_UP (parsers.redondear), no round()
+    nativo (banker's rounding).
     """
     if rotacion_sugerida is None or rotacion_sugerida <= 0:
         return None
     if fecha_stock is None or (fecha_referencia - fecha_stock).days > umbral_dias:
         return None
-    return min(MAX_DIAS_HASTA_QUIEBRE, round(max(0.0, stock_actual) / rotacion_sugerida, 2))
+    return min(MAX_DIAS_HASTA_QUIEBRE, redondear(max(0.0, stock_actual) / rotacion_sugerida, 2))
 
 # ── Cálculo ────────────────────────────────────────────────────────────────────
 
