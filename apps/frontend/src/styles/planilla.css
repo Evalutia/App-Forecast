@@ -136,6 +136,17 @@ thead .planilla-sticky-col {
 }
 .planilla-leyenda-sinstock::before { background: rgba(100,116,139,0.6); }
 
+/* Sin datos (#177): mismo tono de slate que sin stock, pero mucho más tenue --
+   igual criterio que el Excel (COLOR_SINDATOS = versión clara de
+   COLOR_SINSTOCK en exportPlanilla.ts). No es un estado del artículo, es la
+   ausencia de fila calculada para ese mes. */
+.planilla-leyenda-sindatos {
+  background: rgba(100,116,139,0.08);
+  border: 1px solid rgba(100,116,139,0.15);
+  color: #64748b;
+}
+.planilla-leyenda-sindatos::before { background: rgba(100,116,139,0.3); }
+
 /* Sin factor estacional (#130): lila -- deliberadamente fuera de la escala
    amarillo/naranja/rojo del quiebre y del gris de sin stock, porque no habla
    del mes sino de un dato que falta del articulo. */
