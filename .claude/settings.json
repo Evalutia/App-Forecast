@@ -12,5 +12,10 @@
         ]
       }
     ]
+  },
+  "permissions": {
+    "allow": [
+      "Bash(ssh -i ~/.ssh/nueva_key_ec2.pem ubuntu@3.150.104.146:*)"
+    ]
   }
 }
