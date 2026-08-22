@@ -52,6 +52,17 @@ EVAL_VERSION = os.getenv("EVAL_VERSION", "eval-catalogo")
 # vez de al final.
 PERSIST_BATCH_SIZE = int(os.getenv("EVAL_PERSIST_BATCH_SIZE", "100"))
 
+# Issue #174: ventana histórica larga (2016-10-03 a 2024-08-11, 556.346 filas)
+# fuera del alcance del backfill de #80 -- toda devolución/nota de crédito de
+# ese período quedó clampeada a 0 en vez de negativa, indistinguible de "no
+# hubo venta". No se hizo backfill histórico completo (decisión documentada
+# en CONTEXTO.md, sesión de #174): impacto acotado a este módulo (walk-forward
+# de #86/#87), no afecta la planilla del cliente. Ningún filtro nuevo acá --
+# el walk-forward sigue corriendo sobre toda la historia disponible, pero
+# quien interprete resultados de SKUs con historia mayoritariamente anterior
+# a 2024-08-12 debe saber que esa porción subestima devoluciones/notas de
+# crédito.
+
 
 def _load_meses_historia(engine, only_skus) -> dict:
     """
