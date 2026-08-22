@@ -424,6 +424,155 @@ def test_coherencia_rango_totalmente_vacio_da_sin_observaciones(conn):
     assert resultado["pct_anomalo"] is None
 
 
+# ── Issue #166: punto ciego venta=0 con caida real ───────────────────────────
+# El WHERE viejo anclaba en ventas_historicas (INNER JOIN) con v.cantidad>0 --
+# un dia donde el stock cae pero la venta registrada es 0 (o no hay ninguna
+# fila de venta) nunca llegaba siquiera a evaluarse. Ahora el anchor es la
+# caida real de stock (LEFT JOIN a ventas_historicas), y ese caso se cuenta
+# aparte, sin mezclarse con num_observaciones/num_anomalos (que siguen
+# midiendo exactamente lo mismo que antes, solo entre los dias CON venta>0).
+
+def test_coherencia_venta_cero_con_caida_real_se_cuenta_aparte(conn, sku_articulo):
+    """El punto ciego que investigo #161: stock cae 15, la venta registrada
+    ese dia es 0 -- antes invisible al chequeo, ahora se cuenta en una
+    metrica separada, no en num_observaciones/num_anomalos."""
+    _cargar_stock(conn, sku_articulo, "2030-03-14", 100)
+    _cargar_stock(conn, sku_articulo, "2030-03-15", 85)
+    _cargar_venta(conn, sku_articulo, "2030-03-15", 0)
+
+    resultado = cron_jobs._calcular_coherencia(conn, "2030-03-15", "2030-03-15")
+
+    assert resultado["num_observaciones"] == 0  # sigue sin contar como venta>0
+    assert resultado["num_anomalos"] == 0
+    assert resultado["num_venta_cero_con_caida"] == 1
+    assert resultado["unidades_venta_cero_con_caida"] == 15
+
+
+def test_coherencia_venta_cero_sin_ninguna_fila_de_venta_tambien_se_cuenta(conn, sku_articulo):
+    """Mismo caso, pero mas extremo: ni siquiera hay una fila en
+    ventas_historicas para ese dia (no solo cantidad=0) -- el LEFT JOIN
+    tiene que cubrir esto tambien, no solo el caso con fila-en-cero."""
+    _cargar_stock(conn, sku_articulo, "2030-03-20", 50)
+    _cargar_stock(conn, sku_articulo, "2030-03-21", 42)
+    # sin _cargar_venta -- ninguna fila de venta ese dia
+
+    resultado = cron_jobs._calcular_coherencia(conn, "2030-03-21", "2030-03-21")
+
+    assert resultado["num_venta_cero_con_caida"] == 1
+    assert resultado["unidades_venta_cero_con_caida"] == 8
+
+
+def test_coherencia_venta_normal_y_venta_cero_conviven_sin_mezclarse(conn, sku_articulo):
+    """Dos SKUs (simulados con dos rangos de fecha del mismo SKU de prueba,
+    sin superposicion) -- uno con venta>0 normal, otro con venta=0 y caida.
+    Confirma que ninguna de las dos metricas contamina a la otra."""
+    _cargar_stock(conn, sku_articulo, "2030-04-09", 100)
+    _cargar_stock(conn, sku_articulo, "2030-04-10", 90)
+    _cargar_venta(conn, sku_articulo, "2030-04-10", 10)  # normal, ratio 1.0
+
+    _cargar_stock(conn, sku_articulo, "2030-04-11", 70)
+    _cargar_venta(conn, sku_articulo, "2030-04-11", 0)  # venta=0, caida real (90->70=20... ojo dia anterior es 04-10=90)
+
+    resultado = cron_jobs._calcular_coherencia(conn, "2030-04-10", "2030-04-11")
+
+    assert resultado["num_observaciones"] == 1
+    assert resultado["num_anomalos"] == 0
+    assert resultado["num_venta_cero_con_caida"] == 1
+    assert resultado["unidades_venta_cero_con_caida"] == 20
+
+
+def test_coherencia_venta_negativa_con_caida_no_queda_invisible(conn, sku_articulo):
+    """Hallazgo de /code-review: una nota de credito que supera la venta del
+    dia da venta neta negativa (#80 permite cantidad firmada) -- ni
+    venta>0 ni venta==0 la captaban, quedaba invisible en las dos
+    categorias. Se agrupa junto a venta=0 bajo "sin venta positiva"."""
+    _cargar_stock(conn, sku_articulo, "2030-04-19", 100)
+    _cargar_stock(conn, sku_articulo, "2030-04-20", 88)  # caida real de 12
+    _cargar_venta(conn, sku_articulo, "2030-04-20", -3)  # neta negativa
+
+    resultado = cron_jobs._calcular_coherencia(conn, "2030-04-20", "2030-04-20")
+
+    assert resultado["num_observaciones"] == 0  # no es venta>0
+    assert resultado["num_venta_cero_con_caida"] == 1
+    assert resultado["unidades_venta_cero_con_caida"] == 12
+
+
+def test_cmd_coherencia_alerta_cuando_pct_anomalo_supera_el_umbral(conn, sku_articulo, capsys):
+    """La parte 2 del issue: un consumidor, aunque sea un log [ALERTA]
+    visible en docker logs. Umbral superado -> aparece la etiqueta."""
+    _cargar_stock(conn, sku_articulo, "2030-05-14", 100)
+    _cargar_stock(conn, sku_articulo, "2030-05-15", 90)
+    _cargar_venta(conn, sku_articulo, "2030-05-15", 20)  # ratio 2.0, 100% anomalo
+
+    cron_jobs.cmd_coherencia("-", "2030-05-15", "2030-05-15")
+
+    salida = capsys.readouterr().out
+    assert "[ALERTA]" in salida
+
+
+def test_cmd_coherencia_pct_anomalo_exactamente_en_el_umbral_no_alerta(conn, sku_articulo, monkeypatch, capsys):
+    """Comparacion estricta `>` -- pct_anomalo == UMBRAL_ALERTA_PCT_ANOMALO
+    exacto no alerta, solo superarlo."""
+    monkeypatch.setattr(
+        cron_jobs, "_calcular_coherencia",
+        lambda conn_, desde, hasta: {
+            "fecha_desde": desde, "fecha_hasta": hasta,
+            "num_observaciones": 100, "num_anomalos": 5,
+            "pct_anomalo": cron_jobs.UMBRAL_ALERTA_PCT_ANOMALO,
+            "num_venta_cero_con_caida": 0, "unidades_venta_cero_con_caida": 0,
+        },
+    )
+
+    cron_jobs.cmd_coherencia("-", "2030-05-25", "2030-05-25")
+
+    assert "[ALERTA]" not in capsys.readouterr().out
+
+
+def test_cmd_coherencia_num_venta_cero_exactamente_en_el_umbral_no_alerta(conn, sku_articulo, monkeypatch, capsys):
+    monkeypatch.setattr(
+        cron_jobs, "_calcular_coherencia",
+        lambda conn_, desde, hasta: {
+            "fecha_desde": desde, "fecha_hasta": hasta,
+            "num_observaciones": 0, "num_anomalos": 0, "pct_anomalo": None,
+            "num_venta_cero_con_caida": cron_jobs.UMBRAL_ALERTA_VENTA_CERO_CON_CAIDA,
+            "unidades_venta_cero_con_caida": 999,
+        },
+    )
+
+    cron_jobs.cmd_coherencia("-", "2030-05-26", "2030-05-26")
+
+    assert "[ALERTA]" not in capsys.readouterr().out
+
+
+def test_cmd_coherencia_sin_alerta_dentro_del_umbral(conn, sku_articulo, capsys):
+    _cargar_stock(conn, sku_articulo, "2030-05-20", 100)
+    _cargar_stock(conn, sku_articulo, "2030-05-21", 90)
+    _cargar_venta(conn, sku_articulo, "2030-05-21", 10)  # ratio 1.0, sano
+
+    cron_jobs.cmd_coherencia("-", "2030-05-21", "2030-05-21")
+
+    salida = capsys.readouterr().out
+    assert "[ALERTA]" not in salida
+
+
+def test_cmd_coherencia_alerta_por_volumen_de_venta_cero_aunque_el_pct_anomalo_este_sano(conn, sku_articulo, capsys):
+    """La alerta tambien tiene que dispararse por el volumen de casos
+    venta=0-con-caida, no solo por pct_anomalo -- son metricas separadas y
+    cualquiera de las dos, sola, debe poder disparar la alerta."""
+    fecha_prev = "2030-06-09"
+    _cargar_stock(conn, sku_articulo, fecha_prev, 1000)
+    for i, dia in enumerate(range(10, 10 + cron_jobs.UMBRAL_ALERTA_VENTA_CERO_CON_CAIDA + 1)):
+        fecha = f"2030-06-{dia:02d}"
+        # cada dia cae 1 unidad de stock respecto al anterior, venta 0
+        _cargar_stock(conn, sku_articulo, fecha, 1000 - (i + 1))
+        _cargar_venta(conn, sku_articulo, fecha, 0)
+
+    cron_jobs.cmd_coherencia("-", "2030-06-10", f"2030-06-{9 + cron_jobs.UMBRAL_ALERTA_VENTA_CERO_CON_CAIDA + 1:02d}")
+
+    salida = capsys.readouterr().out
+    assert "[ALERTA]" in salida
+
+
 def test_cmd_coherencia_guarda_bajo_detalle_coherencia_sin_pisar_lo_de_end(conn, sku_articulo, capsys):
     """
     coherencia corre despues de `end` en run_ofelia.sh -- tiene que fusionar
@@ -477,7 +626,8 @@ def test_cmd_coherencia_default_sin_fechas_usa_ayer(conn, monkeypatch):
         capturado["desde"] = desde
         capturado["hasta"] = hasta
         return {"fecha_desde": desde, "fecha_hasta": hasta,
-                "num_observaciones": 0, "num_anomalos": 0, "pct_anomalo": None}
+                "num_observaciones": 0, "num_anomalos": 0, "pct_anomalo": None,
+                "num_venta_cero_con_caida": 0, "unidades_venta_cero_con_caida": 0}
 
     monkeypatch.setattr(cron_jobs, "_calcular_coherencia", _fake_calcular)
 
@@ -578,6 +728,44 @@ def test_cmd_stock_gaps_guarda_bajo_detalle_stock_gaps_sin_pisar_lo_de_end(conn,
     assert fila["detalle"]["exit_code"] == 0  # lo que escribio `end` sigue ahi
     assert fila["detalle"]["stock_gaps"]["num_dias_sin_datos"] == 1
     assert fila["detalle"]["stock_gaps"]["dias_sin_datos"] == ["2030-03-11"]
+
+
+# ── Issue #176: mismo defecto estructural que #166 -- nadie consumia el
+# resultado mas alla de un [INFO] en stdout. Un hueco (total o parcial) ya
+# es en si mismo el caso raro y accionable (a diferencia de coherencia, que
+# tiene ruido de fondo esperable) -- cualquier ocurrencia se marca
+# [ALERTA], sin necesidad de un umbral separado.
+
+def test_cmd_stock_gaps_alerta_en_hueco_total(conn, sku_articulo, capsys):
+    _cargar_stock(conn, sku_articulo, "2030-07-10", 10)
+    # 2030-07-11 sin cargar -- hueco total
+    _cargar_stock(conn, sku_articulo, "2030-07-12", 8)
+
+    cron_jobs.cmd_stock_gaps("-", "2030-07-10", "2030-07-12")
+
+    salida = capsys.readouterr().out
+    assert "[ALERTA]" in salida
+
+
+def test_cmd_stock_gaps_alerta_en_hueco_parcial(conn, sku_articulo, monkeypatch, capsys):
+    monkeypatch.setenv("S_DEPOSITOS", "D1,D2")
+    _cargar_stock(conn, sku_articulo, "2030-07-20", 10, deposito_id="D1")
+    # D2 -- sin cargar, el hueco parcial
+
+    cron_jobs.cmd_stock_gaps("-", "2030-07-20", "2030-07-20")
+
+    salida = capsys.readouterr().out
+    assert "[ALERTA]" in salida
+
+
+def test_cmd_stock_gaps_sin_alerta_cuando_no_hay_huecos(conn, sku_articulo, capsys):
+    _cargar_stock(conn, sku_articulo, "2030-07-30", 10)
+    _cargar_stock(conn, sku_articulo, "2030-07-31", 9)
+
+    cron_jobs.cmd_stock_gaps("-", "2030-07-30", "2030-07-31")
+
+    salida = capsys.readouterr().out
+    assert "[ALERTA]" not in salida
 
 
 def test_cmd_stock_gaps_con_job_id_guion_no_escribe_nada(conn, sku_articulo, capsys):

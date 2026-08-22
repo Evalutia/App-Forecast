@@ -122,6 +122,19 @@ import pymysql
 SUBTIPO = "cron_diario"
 UMBRAL_ATRASO_DIAS = 2  # el cron extrae "ayer": 1 dia de atraso es lo normal
 TOLERANCIA_RATIO = 0.1  # ratio venta/caida fuera de [0.9, 1.1] cuenta como anomalo
+# Issue #166: umbrales del consumidor minimo (log [ALERTA] visible en
+# `docker logs`) -- hasta que exista algo mas sofisticado, "alguien revisa
+# docker logs cuando aparece [ALERTA]" ES el proceso, documentado aca a
+# proposito en vez de dejarlo implicito. pct_anomalo tiene ruido de fondo
+# esperable (variabilidad dia a dia, ver CONTEXTO.md #166) por eso necesita
+# un umbral -- se alerta cuando SUPERA 5% (5.0% exacto todavia no alerta,
+# comparacion estricta `>`), no cuando lo alcanza.
+UMBRAL_ALERTA_PCT_ANOMALO = 5.0
+# Volumen de casos venta=0-con-caida-real: metrica nueva de #166, sin
+# historial propio para calibrar un umbral basado en ruido esperado -- se
+# usa un numero chico y redondo (revisar si genera demasiado ruido en la
+# practica y ajustar).
+UMBRAL_ALERTA_VENTA_CERO_CON_CAIDA = 10
 # Issue #132: 30h (no 24h) le da margen a una corrida que arranca tarde o se
 # alarga sin que eso solo ya dispare el heartbeat -- el umbral es para
 # detectar que el scheduler no corrio EN ABSOLUTO, no para medir puntualidad.
@@ -317,44 +330,64 @@ def cmd_stale(job_id: str = "-", umbral_dias: str = str(UMBRAL_ATRASO_DIAS)) -> 
 
 def _calcular_coherencia(conn, fecha_desde: str, fecha_hasta: str) -> dict:
     """
-    Para cada sku-dia con venta en [fecha_desde, fecha_hasta] donde el stock
-    bajo de un dia para el otro, compara venta contra caida de stock. Query
-    de referencia: issue #115 / diagnostico #114. Alcance honesto: detecta
+    Para cada sku-dia en [fecha_desde, fecha_hasta] donde el stock bajo de un
+    dia para el otro, compara venta contra caida de stock. Query de
+    referencia: issue #115 / diagnostico #114. Alcance honesto: detecta
     duplicacion o perdida de venta contrastada contra el stock -- no valida
     que el stock mismo este bien.
 
     stock_diario se consulta desde un dia antes de fecha_desde porque cada
-    fila de venta necesita el stock del dia anterior (sp) ademas del propio
-    (sh).
+    fila necesita el stock del dia anterior (sp) ademas del propio (sh).
+
+    Issue #166: el anchor de la query paso de ventas_historicas (INNER JOIN,
+    con v.cantidad>0 en el WHERE) a la caida real de stock (LEFT JOIN a
+    ventas_historicas) -- con el INNER JOIN viejo, un dia con caida de stock
+    real pero venta registrada en 0 (o sin ninguna fila de venta) nunca
+    llegaba siquiera a evaluarse: quedaba completamente afuera de la
+    comparacion, el mismo punto ciego que investigo #161 un dia antes de la
+    auditoria que encontro esto. Esos casos se cuentan aparte
+    (num_venta_cero_con_caida/unidades_venta_cero_con_caida), sin mezclarse
+    con num_observaciones/num_anomalos -- esa metrica sigue midiendo
+    exactamente lo mismo que antes, solo entre los dias que SI tienen
+    venta>0 registrada.
     """
     with conn.cursor() as cur:
         cur.execute(
             """
-            SELECT v.cantidad AS venta, (sp.st - sh.st) AS caida
-            FROM ventas_historicas v
+            SELECT COALESCE(v.cantidad, 0) AS venta, (sp.st - sh.st) AS caida
+            FROM (
+                SELECT sku, fecha, SUM(cantidad) AS st
+                FROM stock_diario
+                WHERE fecha BETWEEN DATE_SUB(%(desde)s, INTERVAL 1 DAY) AND %(hasta)s
+                GROUP BY sku, fecha
+            ) sh
             JOIN (
                 SELECT sku, fecha, SUM(cantidad) AS st
                 FROM stock_diario
                 WHERE fecha BETWEEN DATE_SUB(%(desde)s, INTERVAL 1 DAY) AND %(hasta)s
                 GROUP BY sku, fecha
-            ) sh ON sh.sku = v.sku AND sh.fecha = v.fecha
-            JOIN (
-                SELECT sku, fecha, SUM(cantidad) AS st
-                FROM stock_diario
-                WHERE fecha BETWEEN DATE_SUB(%(desde)s, INTERVAL 1 DAY) AND %(hasta)s
-                GROUP BY sku, fecha
-            ) sp ON sp.sku = v.sku AND sp.fecha = DATE_SUB(v.fecha, INTERVAL 1 DAY)
-            WHERE v.fecha BETWEEN %(desde)s AND %(hasta)s
-              AND v.cantidad > 0
+            ) sp ON sp.sku = sh.sku AND sp.fecha = DATE_SUB(sh.fecha, INTERVAL 1 DAY)
+            LEFT JOIN ventas_historicas v ON v.sku = sh.sku AND v.fecha = sh.fecha
+            WHERE sh.fecha BETWEEN %(desde)s AND %(hasta)s
               AND (sp.st - sh.st) > 0
             """,
             {"desde": fecha_desde, "hasta": fecha_hasta},
         )
         filas = cur.fetchall()
 
-    total = len(filas)
+    # Hallazgo de /code-review: una venta neta negativa (nota de credito que
+    # supera la venta del dia, #80 permite cantidad firmada) no es "venta>0"
+    # ni "venta==0" -- con un chequeo de igualdad estricta quedaba fuera de
+    # las dos categorias, invisible por completo, la misma clase de punto
+    # ciego que este ticket vino a cerrar. Se agrupa junto a venta=0 bajo
+    # "sin venta positiva pese a la caida real" (venta<=0): ninguna de las
+    # dos explica una caida de stock con una venta positiva registrada.
+    con_venta = [(venta, caida) for venta, caida in filas if venta > 0]
+    sin_venta = [(venta, caida) for venta, caida in filas if venta <= 0]
+
+    total = len(con_venta)
     anomalos = sum(
-        1 for venta, caida in filas
+        1 for venta, caida in con_venta
         if abs((float(venta) / float(caida)) - 1.0) > TOLERANCIA_RATIO
     )
     pct = round(100.0 * anomalos / total, 2) if total else None
@@ -365,6 +398,8 @@ def _calcular_coherencia(conn, fecha_desde: str, fecha_hasta: str) -> dict:
         "num_observaciones": total,
         "num_anomalos": anomalos,
         "pct_anomalo": pct,
+        "num_venta_cero_con_caida": len(sin_venta),
+        "unidades_venta_cero_con_caida": sum(int(caida) for _v, caida in sin_venta),
     }
 
 
@@ -416,13 +451,32 @@ def cmd_coherencia(job_id: str, fecha_desde: str = None, fecha_hasta: str = None
 
     if resultado["num_observaciones"] == 0:
         print(f"[CRON][COHERENCIA] {fecha_desde}..{fecha_hasta}: sin observaciones "
-              f"(ningun sku con caida de stock en el rango).")
-        return 0
+              f"(ningun sku con caida de stock y venta registrada en el rango).")
+    else:
+        print(f"[CRON][COHERENCIA] {fecha_desde}..{fecha_hasta}: "
+              f"{resultado['pct_anomalo']}% anomalo "
+              f"({resultado['num_anomalos']}/{resultado['num_observaciones']} filas, "
+              f"ratio venta/caida fuera de [{1 - TOLERANCIA_RATIO:.1f}, {1 + TOLERANCIA_RATIO:.1f}]).")
 
-    print(f"[CRON][COHERENCIA] {fecha_desde}..{fecha_hasta}: "
-          f"{resultado['pct_anomalo']}% anomalo "
-          f"({resultado['num_anomalos']}/{resultado['num_observaciones']} filas, "
-          f"ratio venta/caida fuera de [{1 - TOLERANCIA_RATIO:.1f}, {1 + TOLERANCIA_RATIO:.1f}]).")
+    if resultado["num_venta_cero_con_caida"] > 0:
+        print(f"[CRON][COHERENCIA] {fecha_desde}..{fecha_hasta}: "
+              f"{resultado['num_venta_cero_con_caida']} caso(s) de venta=0 con caida real de stock "
+              f"({resultado['unidades_venta_cero_con_caida']} unidad(es), punto ciego de #161).")
+
+    # Issue #166: el consumidor minimo -- hasta que exista algo mas
+    # sofisticado, este [ALERTA] en docker logs ES el proceso (documentado
+    # como tal, no un placeholder). Dos disparadores independientes, ninguno
+    # necesita al otro: un pct_anomalo alto sobre pocas observaciones no
+    # dice lo mismo que un volumen grande de venta=0-con-caida.
+    if resultado["pct_anomalo"] is not None and resultado["pct_anomalo"] > UMBRAL_ALERTA_PCT_ANOMALO:
+        print(f"[CRON][COHERENCIA][ALERTA] {fecha_desde}..{fecha_hasta}: "
+              f"pct_anomalo {resultado['pct_anomalo']}% supera el umbral de {UMBRAL_ALERTA_PCT_ANOMALO}% "
+              "-- revisar manualmente.")
+    if resultado["num_venta_cero_con_caida"] > UMBRAL_ALERTA_VENTA_CERO_CON_CAIDA:
+        print(f"[CRON][COHERENCIA][ALERTA] {fecha_desde}..{fecha_hasta}: "
+              f"{resultado['num_venta_cero_con_caida']} casos de venta=0 con caida real "
+              f"supera el umbral de {UMBRAL_ALERTA_VENTA_CERO_CON_CAIDA} -- revisar manualmente.")
+
     return 0
 
 
@@ -585,8 +639,14 @@ def cmd_stock_gaps(job_id: str, fecha_desde: str = None, fecha_hasta: str = None
               f"(stock_diario tiene datos todos los dias del rango).")
         return 0
 
+    # Issue #176: mismo defecto estructural que #166 -- nadie consumia esto
+    # mas alla de un [INFO] en stdout. A diferencia de coherencia (que tiene
+    # ruido de fondo esperable dia a dia y por eso necesita un umbral), un
+    # hueco de stock es ya en si mismo el caso raro -- no hay reparacion
+    # posible (ver docstring de _calcular_stock_gaps), asi que cualquier
+    # ocurrencia se marca [ALERTA] directamente, sin umbral separado.
     if hay_hueco_total:
-        print(f"[CRON][STOCK_GAPS] {fecha_desde}..{fecha_hasta}: "
+        print(f"[CRON][STOCK_GAPS][ALERTA] {fecha_desde}..{fecha_hasta}: "
               f"{resultado['num_dias_sin_datos']} dia(s) sin ningun dato de stock: "
               f"{', '.join(resultado['dias_sin_datos'])}")
 
@@ -595,7 +655,7 @@ def cmd_stock_gaps(job_id: str, fecha_desde: str = None, fecha_hasta: str = None
             f"{item['fecha']}: deposito(s) faltante(s) {', '.join(item['depositos_faltantes'])}"
             for item in dias_con_depositos_faltantes
         )
-        print(f"[CRON][STOCK_GAPS] {fecha_desde}..{fecha_hasta}: "
+        print(f"[CRON][STOCK_GAPS][ALERTA] {fecha_desde}..{fecha_hasta}: "
               f"{len(dias_con_depositos_faltantes)} dia(s) con hueco PARCIAL "
               f"(algun deposito de {', '.join(resultado['depositos_esperados'])} no "
               f"escribio ese dia, aunque la fecha tiene datos de otros): {detalle_por_dia}")
