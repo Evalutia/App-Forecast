@@ -156,7 +156,62 @@ def cargar_stock_actual(conn: pymysql.Connection) -> dict[str, tuple[float, dt.d
 
 # ── Cálculo puro (sin DB, unit-testeable) ──────────────────────────────────────
 
-def calcular_rotacion_y_fiabilidad(valores: list[float]) -> tuple[float | None, float | None]:
+def _pesos_por_distancia_calendario(
+    meses: list[tuple[int, int]], mes_referencia: tuple[int, int]
+) -> list[int]:
+    """
+    Issue #181: pesos proporcionales a la distancia calendario REAL desde
+    mes_referencia, no a la posición en la lista de meses elegibles -- con
+    73% de SKU-meses en sin_stock (#163), un SKU intermitente puede tener
+    meses elegibles no consecutivos (ej. ago-2026, mar-2026, sep-2025), y
+    el peso por posición trataba al más antiguo como "un mes antes" del
+    anterior sin importar el hueco real.
+
+    Se reduce EXACTAMENTE al peso viejo (range(n,0,-1)) cuando los meses
+    son mutuamente consecutivos entre sí (estén o no pegados a
+    mes_referencia) -- diverge del viejo SOLO cuando hay un hueco real
+    entre alguno de los meses elegibles, dándole menos peso relativo al
+    que está más lejos en el calendario en vez de tratarlo como si
+    estuviera pegado al anterior.
+
+    Fórmula: distancia_i = ordinal(mes_referencia) - ordinal(mes_i) (1 =
+    el mes cerrado inmediatamente anterior a mes_referencia, 2 = dos
+    meses atrás, etc). peso_i = max_distancia - distancia_i + 1, donde
+    max_distancia es el máximo entre las distancias de ESTE sku (no un
+    tope global) -- por eso el caso consecutivo (pegado a mes_referencia
+    o no) da exactamente range(n,0,-1): con distancias 1..n,
+    max_distancia=n, peso_i = n - distancia_i + 1 = n, n-1, ..., 1.
+
+    Hallazgo de /code-review, evaluado y NO aplicado: se consideró
+    validar distancia_i >= 1 (mes_referencia es por construcción el
+    (year, month) máximo de planilla_ventas_calculada -- ver
+    cargar_mes_referencia -- así que en producción ningún mes elegible
+    puede ser posterior). Se descartó: un `raise` acá correría dentro del
+    loop de calcular_sugerencias() sobre TODOS los SKUs, y una sola fila
+    anómala (dato manual, backfill de prueba en la réplica, corrida con
+    mes_referencia desalineado) abortaría el batch entero -- exactamente
+    la clase de falla que este mismo archivo ya evita en otros lugares
+    (ver comentario de MAX_DIAS_HASTA_QUIEBRE y chk_sugerencias_rotacion
+    más arriba). Confirmado en la práctica: la réplica local de este
+    ticket tiene SKUs reales con meses posteriores a un mes_referencia
+    viejo hardcodeado en dos tests de integración preexistentes
+    (test_issue_116.../test_issue_142...) -- con la validación agregada,
+    esos tests (que no tocan esos SKUs, solo pasan por el mismo loop)
+    empezaban a fallar. max_distancia=max(distancias) ya maneja distancias
+    negativas sin excepción (les da más peso que a distancia=1, que es
+    matemáticamente incorrecto pero no explota el batch) -- si algún día
+    se decide endurecer esto, debería ser con skip/clip por SKU, no un
+    raise que tira abajo la corrida completa.
+    """
+    ref_ordinal = mes_referencia[0] * 12 + mes_referencia[1]
+    distancias = [ref_ordinal - (yr * 12 + mo) for yr, mo in meses]
+    max_distancia = max(distancias)
+    return [max_distancia - d + 1 for d in distancias]
+
+
+def calcular_rotacion_y_fiabilidad(
+    valores: list[float], pesos: list[int] | None = None
+) -> tuple[float | None, float | None]:
     """
     Promedio ponderado (más reciente = mayor peso) + fiabilidad (CV inverso)
     sobre una lista de rotaciones mensuales ya elegibles (ver SQL de
@@ -165,13 +220,32 @@ def calcular_rotacion_y_fiabilidad(valores: list[float]) -> tuple[float | None, 
 
     Issue #182: redondeo con ROUND_HALF_UP (parsers.redondear), no con el
     round() nativo de Python (banker's rounding, sesga hacia el par).
+
+    Issue #181: `pesos` es opcional -- default None reproduce el
+    comportamiento viejo (peso por posición en la lista, range(n,0,-1)),
+    preservado por compatibilidad con los tests existentes que no pasan
+    pesos explícitos. calcular_sugerencias() SÍ pasa pesos reales,
+    calculados por distancia calendario real vía
+    _pesos_por_distancia_calendario() -- ver ahí el porqué.
+
+    Hallazgo de /code-review: si se pasan `pesos` explícitos, deben tener
+    el mismo largo que `valores` -- sin este chequeo, zip() los trunca en
+    silencio al más corto si alguna vez se arman por separado (como hacen
+    los tests nuevos) y se desincronizan por un elemento, produciendo un
+    promedio ponderado mal alineado sin ningún error que lo delate.
     """
     n = len(valores)
     if n < MIN_MESES_CON_DATOS:
         return None, None
 
     # valores[0] = mes más reciente → peso n; valores[-1] = más antiguo → peso 1
-    pesos  = list(range(n, 0, -1))
+    if pesos is None:
+        pesos = list(range(n, 0, -1))
+    elif len(pesos) != n:
+        raise ValueError(
+            f"calcular_rotacion_y_fiabilidad: len(pesos)={len(pesos)} != "
+            f"len(valores)={n}"
+        )
     suma_p = sum(pesos)
     # Issue #116 (hallazgo de /code-review): ventas_cantidad es signed desde
     # el #80 -- un mes con devoluciones/notas de credito que superan la venta
@@ -297,20 +371,31 @@ def calcular_sugerencias(
         cur.execute(sql, params)
         rows = cur.fetchall()
 
-    # Agrupar por SKU, retener solo los MAX_MESES más recientes (ya vienen DESC)
-    por_sku: dict[str, list[float]] = defaultdict(list)
-    for sku, _year, _month, _estado, rot in rows:
+    # Agrupar por SKU, retener solo los MAX_MESES más recientes (ya vienen
+    # DESC). Issue #181: se retiene (year, month) junto al valor -- antes se
+    # descartaba y el peso del promedio ponderado se calculaba por posición
+    # en la lista, no por distancia calendario real (ver
+    # _pesos_por_distancia_calendario()).
+    por_sku: dict[str, list[tuple[tuple[int, int], float]]] = defaultdict(list)
+    for sku, year, month, _estado, rot in rows:
         vals = por_sku[sku]
         if len(vals) < MAX_MESES:
-            vals.append(float(rot))
+            vals.append(((year, month), float(rot)))
 
     filas = []
     skus_con_sugerencia = 0
     skus_sin_datos      = 0
     skus_con_quiebre    = 0
 
-    for sku, valores in por_sku.items():
-        rotacion_sugerida, fiabilidad = calcular_rotacion_y_fiabilidad(valores)
+    for sku, valores_con_mes in por_sku.items():
+        meses   = [m for m, _ in valores_con_mes]
+        valores = [v for _, v in valores_con_mes]
+        pesos = (
+            _pesos_por_distancia_calendario(meses, mes_referencia)
+            if mes_referencia
+            else None
+        )
+        rotacion_sugerida, fiabilidad = calcular_rotacion_y_fiabilidad(valores, pesos)
 
         if rotacion_sugerida is None:
             skus_sin_datos += 1

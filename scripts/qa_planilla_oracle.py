@@ -334,6 +334,7 @@ def verificar_sku(cur, sku, ventana, cerrados, ref):
     fecha_ref_qbk = sug_row[3].date() if sug_row[3] else dt.date.today()
 
     elegibles = []
+    meses_elegibles = []
     for ym in sorted(stored, reverse=True):
         if ym == ref:
             continue
@@ -344,11 +345,21 @@ def verificar_sku(cur, sku, ventana, cerrados, ref):
              else None)
         if v is not None and len(elegibles) < MAX_MESES:
             elegibles.append(v)
+            meses_elegibles.append(ym)
     if len(elegibles) < MIN_MESES_CON_DATOS:
         r_rots = r_fiab = r_qbk = None
     else:
         n = len(elegibles)
-        pesos = list(range(n, 0, -1))
+        # Issue #181: pesos por distancia calendario real desde `ref`, no por
+        # posicion en la lista -- mismo criterio que
+        # _pesos_por_distancia_calendario() en run_calc_sugerencias.py (ver
+        # ahi el razonamiento completo). Sin esto el oraculo diverge del
+        # pipeline real para cualquier SKU con meses elegibles no
+        # consecutivos, y reporta un MISMATCH falso en ROT.S.
+        ref_ordinal = ref[0] * 12 + ref[1]
+        distancias = [ref_ordinal - (yr * 12 + mo) for yr, mo in meses_elegibles]
+        max_distancia = max(distancias)
+        pesos = [max_distancia - d + 1 for d in distancias]
         # max(0, ...): mismo recorte que run_calc_sugerencias.py (hallazgo de
         # /code-review -- ventas_cantidad signed puede dar un mes con
         # rotacion neta negativa, y chk_sugerencias_rotacion exige >= 0).

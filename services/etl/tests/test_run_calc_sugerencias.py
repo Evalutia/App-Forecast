@@ -9,6 +9,7 @@ from run_calc_sugerencias import (
     MIN_MESES_CON_DATOS,
     MODELO,
     UMBRAL_DIAS_STOCK_VIEJO,
+    _pesos_por_distancia_calendario,
     calcular_dias_hasta_quiebre,
     calcular_rotacion_y_fiabilidad,
     cargar_mes_referencia,
@@ -151,6 +152,75 @@ def test_hallazgo_code_review_rotacion_negativa_neta_se_recorta_a_cero():
     rot, _ = calcular_rotacion_y_fiabilidad([-100.0, 5.0, 5.0])
     assert rot is not None
     assert rot >= 0.0
+
+
+# ── _pesos_por_distancia_calendario() / Issue #181 ──────────────────────────
+
+def test_pesos_por_distancia_calendario_mutuamente_consecutivos_da_lo_mismo_que_range():
+    """
+    (2026,3),(2026,2),(2026,1) son mutuamente consecutivos ENTRE SI aunque
+    haya un hueco de 6 meses hasta mes_referencia (2026,9) -- lo que importa
+    para reproducir el peso viejo es que los meses ELEGIBLES esten pegados
+    entre si, no que esten pegados al mes de referencia. Debe dar
+    exactamente [3, 2, 1], igual que el viejo range(n, 0, -1).
+    """
+    meses = [(2026, 3), (2026, 2), (2026, 1)]
+    assert _pesos_por_distancia_calendario(meses, (2026, 9)) == [3, 2, 1]
+
+
+def test_pesos_por_distancia_calendario_pegados_al_mes_referencia_tambien_da_range():
+    meses = [(2026, 9), (2026, 8), (2026, 7)]
+    assert _pesos_por_distancia_calendario(meses, (2026, 10)) == [3, 2, 1]
+
+
+def test_pesos_por_distancia_calendario_no_consecutivos_diverge_del_viejo():
+    """
+    Issue #181, caso del propio issue: ago-2026, mar-2026, sep-2025 con
+    mes_referencia=sep-2026. Distancias reales: ago-2026 a 1 mes, mar-2026
+    a 6 meses, sep-2025 a 12 meses. max_distancia=12 (no 3=len(meses), como
+    asumiria el peso por posicion) -> pesos = [12-1+1, 12-6+1, 12-12+1] =
+    [12, 7, 1]. Bien distinto de [3, 2, 1] (el peso viejo por posicion) --
+    el viejo trataba a sep-2025 como "un mes antes" de mar-2026, exagerando
+    su peso relativo (1/6 del total viejo vs 1/20 del total nuevo).
+    """
+    meses = [(2026, 8), (2026, 3), (2025, 9)]
+    assert _pesos_por_distancia_calendario(meses, (2026, 9)) == [12, 7, 1]
+
+
+def test_issue_181_pesos_calendario_dan_rotacion_distinta_de_pesos_por_posicion():
+    """
+    Mismos 3 valores, dos formas de pesar: por posicion (viejo, pesos=None)
+    vs por distancia calendario real (nuevo, Issue #181) sobre el caso no
+    consecutivo de arriba -- ago-2026 vendio 10, mar-2026 y sep-2025
+    vendieron 0. El pesado viejo (posicion [3,2,1]) da (3*10+2*0+1*0)/6 =
+    5.0; el nuevo (calendario [12,7,1]) da (12*10+7*0+1*0)/20 = 6.0 -- el
+    mes mas reciente pesa proporcionalmente MAS porque los otros dos estan
+    mas lejos en el calendario de lo que su posicion en la lista sugeria.
+    """
+    valores = [10.0, 0.0, 0.0]
+    meses = [(2026, 8), (2026, 3), (2025, 9)]
+    pesos_calendario = _pesos_por_distancia_calendario(meses, (2026, 9))
+
+    rot_viejo, _ = calcular_rotacion_y_fiabilidad(valores)  # pesos=None -> range(n,0,-1)
+    rot_nuevo, _ = calcular_rotacion_y_fiabilidad(valores, pesos_calendario)
+
+    assert rot_viejo == 5.0
+    assert rot_nuevo == 6.0
+    assert rot_nuevo != rot_viejo
+
+
+def test_pesos_explicitos_consecutivos_reproduce_el_default():
+    """
+    Pasar pesos=None (default posicional) y pasar el equivalente explicito
+    [n,...,1] para un caso consecutivo da resultados identicos -- confirma
+    que el default no es un camino de codigo aparte, es literalmente el
+    mismo calculo con pesos=[3,2,1] construido a mano.
+    """
+    valores = [10.0, 0.0, 0.0]
+    rot_default, fiab_default = calcular_rotacion_y_fiabilidad(valores)
+    rot_explicito, fiab_explicito = calcular_rotacion_y_fiabilidad(valores, [3, 2, 1])
+    assert rot_default == rot_explicito
+    assert fiab_default == fiab_explicito
 
 
 # ── calcular_dias_hasta_quiebre() ───────────────────────────────────────────
@@ -333,6 +403,47 @@ def test_issue_142_sku_que_pierde_toda_elegibilidad_se_limpia_no_queda_huerfano(
         with conn.cursor() as cur:
             cur.execute("DELETE FROM planilla_ventas_calculada WHERE sku = %s", (sku,))
             cur.execute("DELETE FROM planilla_sugerencias WHERE sku = %s", (sku,))
+            cur.execute("DELETE FROM articulo_grupo WHERE sku = %s", (sku,))
+            cur.execute("DELETE FROM articulos WHERE sku = %s", (sku,))
+        conn.commit()
+
+
+def test_issue_181_calcular_sugerencias_usa_distancia_calendario_no_posicion(conn):
+    """
+    Test de integracion: sembramos un SKU con 3 meses elegibles NO
+    consecutivos (ago-2026, mar-2026, sep-2025) con mes_referencia fijo en
+    2026-09 -- mismo caso que los tests unitarios de
+    _pesos_por_distancia_calendario de mas arriba -- y confirmamos que
+    calcular_sugerencias() efectivamente pasa los pesos calendario reales a
+    calcular_rotacion_y_fiabilidad, no los pesos por posicion. Con pesos
+    calendario [12, 7, 1] sobre [10, 0, 0] (ago-2026 vendio 10, los otros
+    dos 0) da 6.0; el viejo peso por posicion [3, 2, 1] hubiera dado 5.0 --
+    si este test da 5.0 en vez de 6.0, calcular_sugerencias() no esta
+    pasando `pesos` al llamar a calcular_rotacion_y_fiabilidad.
+    """
+    sku = "TEST-ISSUE-181"
+    try:
+        with conn.cursor() as cur:
+            cur.execute("DELETE FROM planilla_ventas_calculada WHERE sku = %s", (sku,))
+            cur.execute("SELECT id FROM grupos LIMIT 1")
+            grupo_id = cur.fetchone()[0]
+            cur.execute(
+                "INSERT IGNORE INTO articulos (sku, descripcion, grupo_id) VALUES (%s, 'test issue 181', %s)",
+                (sku, grupo_id),
+            )
+            meses = [(2026, 8, 10.0), (2026, 3, 0.0), (2025, 9, 0.0)]
+            for year, month, rot in meses:
+                _sembrar_mes(cur, sku, year, month, "normal", rot)
+        conn.commit()
+
+        filas, _con, _sin, _quiebre, _huerfanos = calcular_sugerencias(
+            conn, stock_por_sku={}, mes_referencia=(2026, 9)
+        )
+        fila = next(f for f in filas if f["sku"] == sku)
+        assert fila["rotacion_sugerida"] == 6.0
+    finally:
+        with conn.cursor() as cur:
+            cur.execute("DELETE FROM planilla_ventas_calculada WHERE sku = %s", (sku,))
             cur.execute("DELETE FROM articulo_grupo WHERE sku = %s", (sku,))
             cur.execute("DELETE FROM articulos WHERE sku = %s", (sku,))
         conn.commit()
