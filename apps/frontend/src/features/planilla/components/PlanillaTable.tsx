@@ -15,7 +15,12 @@ const mesLabel = (year: number, month: number) => `${MESES[month - 1]}/${String(
 // Issue #145: `ingresoDuranteQuiebre` gana sobre el color por frecuencia --
 // mismo criterio que exportPlanilla.ts (celeste, deliberadamente fuera de la
 // paleta ámbar/naranja/rojo de quiebre y de los tonos de #65).
-function estadoMesBg(estado: string, frecuenciaNivel?: string | null, ingresoDuranteQuiebre?: boolean): string {
+//
+// Issue #177: exportada para poder probar la rama `sin_datos` sin renderizar
+// el componente completo -- mismo patrón que `fiabilidadClass` ya usa acá
+// abajo. Función pura sin estado, no afecta fast refresh en dev.
+// eslint-disable-next-line react-refresh/only-export-components
+export function estadoMesBg(estado: string, frecuenciaNivel?: string | null, ingresoDuranteQuiebre?: boolean): string {
   if (estado === 'quiebre_parcial') {
     if (ingresoDuranteQuiebre) return 'rgba(41,182,246,0.24)';
     if (frecuenciaNivel === 'baja')  return 'rgba(220,38,38,0.18)';
@@ -23,6 +28,13 @@ function estadoMesBg(estado: string, frecuenciaNivel?: string | null, ingresoDur
     return 'rgba(234,179,8,0.18)';
   }
   if (estado === 'sin_stock') return 'rgba(100,116,139,0.18)';
+  // Issue #177: el Excel sí pinta `sin_datos` (COLOR_SINDATOS = F1F5F9 en
+  // exportPlanilla.ts, una versión mucho más clara del gris de sin_stock) --
+  // la web lo dejaba sin color, una asimetría de leyenda (el dato no se
+  // pierde: la celda ya muestra un `—` muted con tooltip). Mismo tono de
+  // slate que sin_stock pero bastante más tenue, para leer "no hay dato" sin
+  // competir con el resto de la paleta de estado.
+  if (estado === 'sin_datos') return 'rgba(100,116,139,0.08)';
   // Issue #130: sólo en las columnas de rotación -- el mes tuvo stock y ventas
   // pero falta el factor estacional, así que no hay valor corregido que
   // mostrar. Sin esto la celda quedaría vacía y sin explicación.
@@ -87,21 +99,48 @@ function QbkCell({ s }: { s: PlanillaSugerenciaDto | undefined }) {
   return <span className={qbkClass(dias)}>{dias}d</span>;
 }
 
+// Issue #178: antes `AeCell` retornaba el `—` genérico apenas
+// `rotacionSugerida` era null, ANTES de mirar si `fiabilidadPorcentaje`
+// existía -- un acoplamiento implícito que el Excel no tiene (ROT.S y
+// Fiabilidad son celdas independientes en exportPlanilla.ts:190-191). Hoy no
+// se materializa (0 filas en la réplica con rotacion_sugerida IS NULL AND
+// fiabilidad_porcentaje IS NOT NULL) pero si el ETL alguna vez calcula
+// fiabilidad sin rotación sugerida, la web la perdía en silencio.
+//
+// Exportada como función pura -- separa "qué mostrar" (datos) de "cómo
+// pintarlo" (JSX), para poder probar los cuatro casos (ambos, sólo rotación,
+// sólo fiabilidad, ninguno) sin renderizar el componente. Mismo patrón que
+// `fiabilidadClass`/`estadoMesBg` ya usan en este archivo.
+// eslint-disable-next-line react-refresh/only-export-components
+export function resolveAeCell(s: PlanillaSugerenciaDto | undefined): {
+  rotacionLabel: string | null;
+  fiabilidad: { pct: number; className: string } | null;
+} | null {
+  if (!s || (s.rotacionSugerida === null && s.fiabilidadPorcentaje === null)) return null;
+  return {
+    rotacionLabel: s.rotacionSugerida !== null ? s.rotacionSugerida.toFixed(4) : null,
+    // Issue #169: un único redondeo fuente-de-verdad -- el texto y el color
+    // del badge tienen que coincidir siempre, incluso en el borde.
+    fiabilidad: s.fiabilidadPorcentaje !== null
+      ? (() => {
+          const fiabRedondeada = redondearFiabilidad(s.fiabilidadPorcentaje);
+          return { pct: fiabRedondeada, className: fiabilidadClass(fiabRedondeada) };
+        })()
+      : null,
+  };
+}
+
 function AeCell({ s }: { s: PlanillaSugerenciaDto | undefined }) {
-  if (!s || s.rotacionSugerida === null) return <span className="muted">—</span>;
+  const data = resolveAeCell(s);
+  if (!data) return <span className="muted">—</span>;
   return (
     <div className="planilla-ae-cell">
-      <span className="planilla-ae-rot">{s.rotacionSugerida.toFixed(4)}</span>
-      {s.fiabilidadPorcentaje !== null && (() => {
-        // Issue #169: un único redondeo fuente-de-verdad -- el texto y el
-        // color del badge tienen que coincidir siempre, incluso en el borde.
-        const fiabRedondeada = redondearFiabilidad(s.fiabilidadPorcentaje);
-        return (
-          <span className={fiabilidadClass(fiabRedondeada)}>
-            {fiabRedondeada}%
-          </span>
-        );
-      })()}
+      <span className="planilla-ae-rot">
+        {data.rotacionLabel ?? <span className="muted">—</span>}
+      </span>
+      {data.fiabilidad && (
+        <span className={data.fiabilidad.className}>{data.fiabilidad.pct}%</span>
+      )}
     </div>
   );
 }
@@ -204,6 +243,15 @@ const ESTADO_ENTRIES: LeyendaEntry[] = [
     className: 'planilla-leyenda-sinstock',
     label: 'Sin stock (mes completo)',
     tip: 'Estado: Sin stock\nEl artículo no tuvo stock ningún día del mes -- no hay rotación real calculable ese mes.',
+  },
+  {
+    // Issue #177: mismo hueco que el Excel ya resuelve en su hoja Criterios
+    // ("Gris claro") -- la web pintaba `sin_datos` sin color y sin entrada en
+    // la leyenda general, aunque la celda ya avisaba con un `—` muted y un
+    // tooltip propio.
+    className: 'planilla-leyenda-sindatos',
+    label: 'Sin datos',
+    tip: 'Estado: Sin datos\nEl artículo no existía o no hay información de ese mes (sin fila calculada). La celda queda vacía.',
   },
   {
     className: 'planilla-leyenda-sinfactor',
@@ -409,7 +457,11 @@ export default function PlanillaTable({ params, onPageChange, sugerencias, suger
                             tip={
                               esRef
                                 ? `Vta.${mesLabel(m.year, m.month)} — Mes de referencia\nUnidades vendidas (mes en curso, incompleto).`
-                                : `Vta.${mesLabel(m.year, m.month)} — Unidades vendidas\nTotal de unidades vendidas en el mes.\nAmarillo = quiebre alta freq · Naranja = quiebre media · Rojo = quiebre baja freq · Gris = sin stock`
+                                // Issue #175: faltaban el celeste de #145 (ingreso de
+                                // stock durante quiebre) y el gris claro de sin_datos --
+                                // mismo texto que ESTADO_ENTRIES y la hoja Criterios del
+                                // Excel usan para estos dos colores.
+                                : `Vta.${mesLabel(m.year, m.month)} — Unidades vendidas\nTotal de unidades vendidas en el mes.\nAmarillo = quiebre alta freq · Naranja = quiebre media · Rojo = quiebre baja freq · Celeste = ingreso de stock durante quiebre · Gris = sin stock · Gris claro = sin datos`
                             }
                           />
                         </th>
@@ -428,7 +480,9 @@ export default function PlanillaTable({ params, onPageChange, sugerencias, suger
                             tip={
                               esRef
                                 ? `${mesLabel(m.year, m.month)} — Mes de referencia\nRotación corregida por estacionalidad.\nNo entra en el promedio de Rot. DesEstac.`
-                                : `${mesLabel(m.year, m.month)} — Rotación diaria corregida por estacionalidad\nEs el valor que promedia Rot. DesEstac., así que ese promedio se puede verificar con estas celdas.\nLa rotación sin corregir está en el tooltip de cada celda.\nAmarillo = quiebre alta freq · Naranja = quiebre media · Rojo = quiebre baja freq · Gris = sin stock · Lila = sin factor estacional`
+                                // Issue #175: faltaba el celeste de #145 (ya tenía el
+                                // lila de #130) -- mismo texto que ESTADO_ENTRIES.
+                                : `${mesLabel(m.year, m.month)} — Rotación diaria corregida por estacionalidad\nEs el valor que promedia Rot. DesEstac., así que ese promedio se puede verificar con estas celdas.\nLa rotación sin corregir está en el tooltip de cada celda.\nAmarillo = quiebre alta freq · Naranja = quiebre media · Rojo = quiebre baja freq · Celeste = ingreso de stock durante quiebre · Gris = sin stock · Lila = sin factor estacional`
                             }
                           />
                         </th>
