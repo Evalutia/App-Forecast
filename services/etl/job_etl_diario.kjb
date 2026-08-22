@@ -465,6 +465,28 @@ ON DUPLICATE KEY UPDATE
       <xloc>1320</xloc><yloc>200</yloc><draw>Y</draw>
     </entry>
 
+    <!-- Issue #170: informativo, solo tiene sentido cuando el merge llego a
+         correr (rama de exito), necesita ventas_historicas_stage todavia
+         poblado, por eso va aca y no en run_ofelia.sh (que corre despues de
+         TRUNCATE VENTAS STAGE END). Si el merge en si fallo (deadlock,
+         perdida de conexion), MARK VENTAS MERGE FAILED ya deja su propia
+         auditoria, este chequeo no agrega nada en esa rama, la razon del
+         fallo es otra. El `|| true` es porque un chequeo caido no debe
+         frenar la cadena: el dato ya se perdio en el merge de todas formas. -->
+    <entry>
+      <name>COUNT CATALOGO GAP MERGE VENTAS</name>
+      <type>SHELL</type>
+      <filename>/bin/sh</filename>
+      <work_directory>${Internal.Entry.Current.Directory}</work_directory>
+      <arguments><argument>-c</argument></arguments>
+      <insertScript>Y</insertScript>
+      <script><![CDATA[
+python3 /app/services/etl/cron_jobs.py catalogo_gap || true
+      ]]></script>
+      <wait>Y</wait>
+      <xloc>1410</xloc><yloc>64</yloc><draw>Y</draw>
+    </entry>
+
     <entry>
       <name>RUN PREDICT.PY</name>
       <type>SHELL</type>
@@ -819,8 +841,9 @@ exit 0
          grupos que si salieron bien. -->
     <hop><from>MARK VENTAS EXTRACT FAILED</from><to>MERGE STAGING -> VENTAS (con snapshot)</to><enabled>Y</enabled><unconditional>Y</unconditional></hop>
 
-    <hop><from>MERGE STAGING -> VENTAS (con snapshot)</from><to>RUN PREDICT.PY</to><enabled>Y</enabled><evaluation>Y</evaluation><unconditional>N</unconditional></hop>
+    <hop><from>MERGE STAGING -> VENTAS (con snapshot)</from><to>COUNT CATALOGO GAP MERGE VENTAS</to><enabled>Y</enabled><evaluation>Y</evaluation><unconditional>N</unconditional></hop>
     <hop><from>MERGE STAGING -> VENTAS (con snapshot)</from><to>MARK VENTAS MERGE FAILED</to><enabled>Y</enabled><evaluation>N</evaluation><unconditional>N</unconditional></hop>
+    <hop><from>COUNT CATALOGO GAP MERGE VENTAS</from><to>RUN PREDICT.PY</to><enabled>Y</enabled><unconditional>Y</unconditional></hop>
     <hop><from>MARK VENTAS MERGE FAILED</from><to>RUN PREDICT.PY</to><enabled>Y</enabled><unconditional>Y</unconditional></hop>
 
     <hop><from>RUN PREDICT.PY</from><to>RUN CALC_PLANILLA</to><enabled>Y</enabled><evaluation>Y</evaluation><unconditional>N</unconditional></hop>

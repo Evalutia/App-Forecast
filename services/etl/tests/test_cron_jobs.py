@@ -233,6 +233,88 @@ def test_start_no_toca_jobs_ejecutando_de_otro_subtipo(conn, capsys):
     assert _fila(conn, backfill_id)["estado"] == "ejecutando"
 
 
+def _insertar_fila_sin_subtipo(conn, horas_atras: float) -> int:
+    """Simula una fila 'etl' 'ejecutando' SIN detalle.subtipo -- mismo shape
+    exacto que insertan job_start() de run_calc_planilla.py/
+    run_calc_sugerencias.py/run_calc_stock_resumen.py (la columna detalle ni
+    se toca en el INSERT, queda NULL) y que dejaban las filas pre-#111
+    (Issue #185). fecha_inicio calculado en SQL (DATE_SUB) para no depender
+    del reloj de la maquina que corre el test."""
+    with conn.cursor() as cur:
+        cur.execute(
+            "INSERT INTO jobs_historial (tipo_job, estado, fecha_inicio) "
+            "VALUES ('etl', 'ejecutando', DATE_SUB(NOW(6), INTERVAL %s HOUR))",
+            (horas_atras,),
+        )
+        job_id = cur.lastrowid
+    conn.commit()
+    return job_id
+
+
+def _insertar_referencia_subtipo(conn, horas_atras: float) -> None:
+    """Inserta una fila subtipo=cron_diario historica -- simula que #111 ya
+    lleva un buen tiempo taggeando, para poder probar filas sin subtipo
+    tanto ANTES como DESPUES de ese corte real (en la DB de test, vacia de
+    filas jobs_historial reales, el corte por defecto es NULL)."""
+    with conn.cursor() as cur:
+        cur.execute(
+            "INSERT INTO jobs_historial (tipo_job, estado, fecha_inicio, fecha_fin, detalle) "
+            "VALUES ('etl', 'exitoso', DATE_SUB(NOW(6), INTERVAL %s HOUR), "
+            "        DATE_SUB(NOW(6), INTERVAL %s HOUR), %s)",
+            (horas_atras, horas_atras, json.dumps({"subtipo": cron_jobs.SUBTIPO})),
+        )
+    conn.commit()
+
+
+def test_cerrar_zombis_cierra_fila_sin_subtipo_anterior_al_primer_cron_diario(conn):
+    """Issue #185: 3 filas 'etl' 'ejecutando' de antes de #111 (sin
+    detalle.subtipo) nunca matcheaban el filtro por SUBTIPO y quedaban
+    colgadas para siempre. Una fila fechada antes de la primera corrida real
+    con subtipo=cron_diario (aca simulada a 1000h atras) es inequivocamente
+    de ese esquema viejo -> se cierra."""
+    _insertar_referencia_subtipo(conn, 1000)
+    vieja = _insertar_fila_sin_subtipo(conn, 2000)
+
+    cron_jobs._cerrar_zombis(conn)
+
+    cerrada = _fila(conn, vieja)
+    assert cerrada["estado"] == "fallido"
+    assert cerrada["fecha_fin"] is not None
+    assert cerrada["detalle"]["resultado"] == "interrumpido_sin_subtipo"
+
+
+def test_cerrar_zombis_no_toca_fila_sin_subtipo_posterior_al_primer_cron_diario(conn):
+    """Hallazgo de /code-review: run_calc_planilla.py/run_calc_sugerencias.py/
+    run_calc_stock_resumen.py insertan su propia fila 'etl' 'ejecutando' sin
+    detalle (mismo shape exacto que una fila pre-#111) cada noche, hoy. Sin
+    el corte contra la primera fila real con subtipo=cron_diario, la
+    limpieza de #185 las cerraria igual con una etiqueta
+    ('interrumpido_sin_subtipo') que no les corresponde -- el caso concreto:
+    una fila sin subtipo bien vieja (muy por encima de
+    UMBRAL_ZOMBI_SIN_SUBTIPO_HORAS, que sola ya alcanzaria para cerrarla si
+    solo se mirara la edad) pero POSTERIOR a esa primera fila real no se
+    toca -- podria perfectamente ser un job CALC legitimo de alguna noche
+    pasada, no un resabio de antes de #111."""
+    _insertar_referencia_subtipo(conn, 1000)
+    vieja_pero_posterior_al_corte = _insertar_fila_sin_subtipo(conn, 500)
+    assert 500 > cron_jobs.UMBRAL_ZOMBI_SIN_SUBTIPO_HORAS, "el caso solo es interesante si la edad sola ya dispararia el cierre"
+
+    cron_jobs._cerrar_zombis(conn)
+
+    assert _fila(conn, vieja_pero_posterior_al_corte)["estado"] == "ejecutando"
+
+
+def test_cerrar_zombis_sin_ninguna_fila_subtipo_no_toca_filas_sin_subtipo(conn):
+    """Si nunca corrio una sola fila real con subtipo=cron_diario (corte
+    NULL), no hay forma segura de saber que una fila sin subtipo es vieja-de
+    -antes-de-#111 y no un job CALC en curso -- mejor no tocar nada."""
+    vieja = _insertar_fila_sin_subtipo(conn, cron_jobs.UMBRAL_ZOMBI_SIN_SUBTIPO_HORAS * 10)
+
+    cron_jobs._cerrar_zombis(conn)
+
+    assert _fila(conn, vieja)["estado"] == "ejecutando"
+
+
 def test_stale_cuenta_dias_desde_el_ultimo_dato_de_ventas(conn, capsys):
     """
     La señal de atraso se mide sobre la frescura del DATO (MAX(fecha) de
@@ -993,6 +1075,164 @@ def test_cmd_stock_gaps_sin_depositos_faltantes_no_menciona_parcial(
 
     salida = capsys.readouterr().out
     assert "PARCIAL" not in salida
+
+
+# ---------------------------------------------------------------------------
+# catalogo_gap (Issue #170) -- filas de ventas_historicas_stage que el merge
+# va a descartar en silencio por no tener registro en articulos.
+# ---------------------------------------------------------------------------
+
+SKU_CATGAP_HUERFANO = "TEST-CATGAP-170-HUERFANO"
+SKU_CATGAP_CONOCIDO = "TEST-CATGAP-170-CONOCIDO"
+GRUPO_CATGAP = 90170
+GRUPO_CATGAP_FALLIDO = 90171
+FECHA_CATGAP = dt.date(2026, 8, 1)
+SKUS_CATGAP = (SKU_CATGAP_HUERFANO, SKU_CATGAP_CONOCIDO)
+GRUPOS_CATGAP = (GRUPO_CATGAP, GRUPO_CATGAP_FALLIDO)
+
+
+@pytest.fixture
+def catgap(conn):
+    """
+    Datos de stage/catalogo propios de #170, aislados de sku_articulo (usa
+    otro SKU/grupo) para no interferir con los tests de coherencia/stock_gaps
+    que corren en la misma suite.
+    """
+
+    def _limpiar(cur):
+        cur.execute(
+            "DELETE FROM ventas_historicas_stage WHERE sku IN (%s, %s)", SKUS_CATGAP
+        )
+        cur.execute(
+            "DELETE FROM ventas_grupos_fallidos_run WHERE grupo_id IN (%s, %s)",
+            GRUPOS_CATGAP,
+        )
+        cur.execute("DELETE FROM articulos WHERE sku IN (%s, %s)", SKUS_CATGAP)
+        cur.execute("DELETE FROM grupos WHERE id IN (%s, %s)", GRUPOS_CATGAP)
+
+    with conn.cursor() as cur:
+        _limpiar(cur)
+        cur.executemany(
+            "INSERT INTO grupos (id, descripcion) VALUES (%s, %s)",
+            [(GRUPO_CATGAP, "TEST GRUPO 170"), (GRUPO_CATGAP_FALLIDO, "TEST GRUPO 170 FALLIDO")],
+        )
+        # Solo SKU_CATGAP_CONOCIDO tiene registro en articulos -- el otro es
+        # a proposito el huerfano que el chequeo debe contar.
+        cur.execute(
+            "INSERT INTO articulos (sku, grupo_id) VALUES (%s, %s)",
+            (SKU_CATGAP_CONOCIDO, GRUPO_CATGAP),
+        )
+    conn.commit()
+
+    yield
+
+    with conn.cursor() as cur:
+        _limpiar(cur)
+    conn.commit()
+
+
+def _stage_catgap(conn, sku, grupo_id, deposito_id="5"):
+    with conn.cursor() as cur:
+        cur.execute(
+            "INSERT INTO ventas_historicas_stage "
+            "(fecha, sku, cantidad, deposito_id, grupo_id, fuente) "
+            "VALUES (%s, %s, %s, %s, %s, 'ws_consstockventa')",
+            (FECHA_CATGAP, sku, 1, deposito_id, grupo_id),
+        )
+    conn.commit()
+
+
+def test_calcular_catalogo_gap_cuenta_sku_huerfano(conn, catgap):
+    _stage_catgap(conn, SKU_CATGAP_HUERFANO, GRUPO_CATGAP)
+
+    resultado = cron_jobs._calcular_catalogo_gap(conn)
+
+    assert resultado["filas"] == 1
+    assert resultado["skus"] == 1
+
+
+def test_calcular_catalogo_gap_no_cuenta_sku_con_articulo(conn, catgap):
+    _stage_catgap(conn, SKU_CATGAP_CONOCIDO, GRUPO_CATGAP)
+
+    resultado = cron_jobs._calcular_catalogo_gap(conn)
+
+    assert resultado["filas"] == 0
+    assert resultado["skus"] == 0
+
+
+def test_calcular_catalogo_gap_varios_depositos_mismo_sku_cuenta_cada_fila(conn, catgap):
+    """Mismo SKU huerfano en dos depositos distintos: 2 filas, 1 SKU -- misma
+    distincion filas/skus que usan _calcular_stock_gaps y _calcular_coherencia."""
+    _stage_catgap(conn, SKU_CATGAP_HUERFANO, GRUPO_CATGAP, deposito_id="5")
+    _stage_catgap(conn, SKU_CATGAP_HUERFANO, GRUPO_CATGAP, deposito_id="6")
+
+    resultado = cron_jobs._calcular_catalogo_gap(conn)
+
+    assert resultado["filas"] == 2
+    assert resultado["skus"] == 1
+
+
+def test_calcular_catalogo_gap_excluye_grupos_ya_marcados_fallidos(conn, catgap):
+    """Issue #157 ya excluye del merge los grupos que fallaron en la
+    extraccion de esta corrida -- ese descarte tiene su propia causa (y su
+    propia tabla, ventas_grupos_fallidos_run) y no debe mezclarse con el
+    conteo de huerfanos por falta de catalogo."""
+    _stage_catgap(conn, SKU_CATGAP_HUERFANO, GRUPO_CATGAP_FALLIDO)
+    with conn.cursor() as cur:
+        cur.execute(
+            "INSERT IGNORE INTO ventas_grupos_fallidos_run (grupo_id) VALUES (%s)",
+            (GRUPO_CATGAP_FALLIDO,),
+        )
+    conn.commit()
+
+    resultado = cron_jobs._calcular_catalogo_gap(conn)
+
+    assert resultado["filas"] == 0
+    assert resultado["skus"] == 0
+
+
+def test_cmd_catalogo_gap_guarda_bajo_detalle_de_la_fila_ejecutando(conn, catgap, capsys):
+    cron_jobs.cmd_start()
+    capsys.readouterr()
+    _stage_catgap(conn, SKU_CATGAP_HUERFANO, GRUPO_CATGAP)
+
+    rc = cron_jobs.cmd_catalogo_gap()
+    assert rc == 0
+
+    salida = capsys.readouterr().out
+    assert "[CRON][CATALOGO_GAP][ALERTA]" in salida
+    assert "1 fila" in salida
+
+    with conn.cursor() as cur:
+        cur.execute(
+            "SELECT detalle FROM jobs_historial "
+            " WHERE tipo_job='etl' AND detalle->>'$.subtipo'='cron_diario' "
+            " ORDER BY id DESC LIMIT 1"
+        )
+        detalle = json.loads(cur.fetchone()[0])
+    assert detalle["catalogo_gap"] == {"filas": 1, "skus": 1}
+
+
+def test_cmd_catalogo_gap_sin_huerfanos_no_alerta(conn, catgap, capsys):
+    cron_jobs.cmd_start()
+    capsys.readouterr()
+
+    rc = cron_jobs.cmd_catalogo_gap()
+    assert rc == 0
+
+    salida = capsys.readouterr().out
+    assert "ALERTA" not in salida
+
+
+def test_cmd_catalogo_gap_conexion_caida_no_propaga_excepcion(monkeypatch, capsys):
+    def _falla():
+        raise RuntimeError("sin conexion")
+
+    monkeypatch.setattr(cron_jobs, "db_connect", _falla)
+
+    rc = cron_jobs.cmd_catalogo_gap()
+    assert rc == 1
+    assert "no se pudo conectar" in capsys.readouterr().err
 
 
 # ---------------------------------------------------------------------------

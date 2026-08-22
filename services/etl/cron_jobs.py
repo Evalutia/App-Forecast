@@ -84,6 +84,21 @@ Subcomandos:
       siempre trae la foto de HOY, sin importar el deposito) -- esto avisa,
       no repara.
 
+  catalogo_gap
+      Issue #170. A diferencia de `coherencia`/`stock_gaps` (invocados desde
+      run_ofelia.sh, afuera de Kettle, despues de que kitchen.sh termina),
+      este corre DESDE ADENTRO de job_etl_diario.kjb, justo despues del
+      merge de ventas y antes del TRUNCATE del stage al final -- necesita
+      ventas_historicas_stage todavia poblado con los datos de la corrida.
+      Cuenta filas/SKUs que el INNER JOIN con articulos del merge descarto
+      en silencio por falta de registro en el catalogo (mismo mecanismo que
+      tumbo 51.024 filas en #111). Sin job_id explicito (Kettle no lo
+      conoce, igual que mark_step_failed) -- escribe bajo detalle.
+      catalogo_gap de la fila 'ejecutando' del cron, identificable sin
+      ambiguedad porque no-overlap=true de ofelia garantiza que nunca hay
+      mas de una. No bloqueante: un chequeo caido se loguea y devuelve !=0,
+      pero nunca corta la corrida.
+
   abort <motivo>
       Issue #132: fallo ANTES de poder registrar `start` (ej. run_ofelia.sh
       aborta por un archivo faltante, como paso el 2026-08-11 con
@@ -139,6 +154,13 @@ UMBRAL_ALERTA_VENTA_CERO_CON_CAIDA = 10
 # alarga sin que eso solo ya dispare el heartbeat -- el umbral es para
 # detectar que el scheduler no corrio EN ABSOLUTO, no para medir puntualidad.
 UMBRAL_LAST_RUN_HORAS = 30
+# Issue #185: filas 'etl' 'ejecutando' sin detalle.subtipo (esquema anterior
+# a #111, que introdujo el campo) nunca matchean el filtro por SUBTIPO de
+# _cerrar_zombis y quedan colgadas para siempre. A diferencia de esas (donde
+# no-overlap=true de ofelia garantiza que 'ejecutando' es siempre zombie), una
+# fila sin subtipo es de un esquema mas viejo sin esa garantia documentada --
+# el umbral evita tocar algo que, en teoria, todavia pudiera estar corriendo.
+UMBRAL_ZOMBI_SIN_SUBTIPO_HORAS = 24
 
 
 def db_connect():
@@ -177,6 +199,26 @@ def _cerrar_zombis(conn) -> int:
     no-overlap=true, asi que nunca hay dos corridas del cron en paralelo.
     Acotado a tipo_job='etl' + subtipo del cron para no tocar backfills ni
     los jobs propios de los pasos CALC.
+
+    Issue #185: ademas del subtipo actual, tambien cierra filas 'etl'
+    'ejecutando' SIN subtipo -- esquema anterior a #111, que introdujo el
+    campo. Esas nunca matchean el filtro de arriba (detalle->>'$.subtipo' =
+    SUBTIPO) y quedaban colgadas para siempre, porque #111 solo empezo a
+    taggear subtipo hacia adelante, no reparo lo viejo.
+
+    OJO -- "sin subtipo" NO es exclusivo de esas filas viejas: los tres
+    scripts de CALC (run_calc_planilla.py/run_calc_sugerencias.py/
+    run_calc_stock_resumen.py) insertan su propia fila 'etl' 'ejecutando'
+    via su propio job_start() sin tocar detalle en absoluto (columna NULL),
+    HOY, cada noche -- serian indistinguibles de una fila pre-#111 por
+    subtipo solo. Por eso el segundo UPDATE no se limita a "sin subtipo +
+    antiguedad": tambien exige fecha_inicio anterior al MIN(fecha_inicio) de
+    la primera fila que SI tiene subtipo=SUBTIPO -- ese valor es, por
+    construccion, el momento en que #111 empezo a taggear, asi que ninguna
+    fila de CALC creada desde entonces (todas las de ahora en mas) puede
+    caer antes de ese corte. Si todavia no existe ninguna fila con SUBTIPO
+    (corte NULL, DB nueva/de test) esta segunda limpieza no toca nada -- mas
+    vale no actuar que cerrar de mas.
     """
     with conn.cursor() as cur:
         cur.execute(
@@ -189,6 +231,27 @@ def _cerrar_zombis(conn) -> int:
             (SUBTIPO,),
         )
         cerradas = cur.rowcount
+
+        cur.execute(
+            "SELECT MIN(fecha_inicio) FROM jobs_historial "
+            " WHERE tipo_job = 'etl' AND detalle->>'$.subtipo' = %s",
+            (SUBTIPO,),
+        )
+        corte_subtipo = cur.fetchone()[0]
+
+        if corte_subtipo is not None:
+            cur.execute(
+                "UPDATE jobs_historial "
+                "   SET estado = 'fallido', fecha_fin = NOW(6), "
+                "       detalle = JSON_SET(COALESCE(detalle, JSON_OBJECT()), "
+                "                          '$.resultado', 'interrumpido_sin_subtipo') "
+                " WHERE tipo_job = 'etl' AND estado = 'ejecutando' "
+                "   AND detalle->>'$.subtipo' IS NULL "
+                "   AND fecha_inicio < %s "
+                "   AND fecha_inicio < DATE_SUB(NOW(6), INTERVAL %s HOUR)",
+                (corte_subtipo, UMBRAL_ZOMBI_SIN_SUBTIPO_HORAS),
+            )
+            cerradas += cur.rowcount
     conn.commit()
     return cerradas
 
@@ -663,6 +726,102 @@ def cmd_stock_gaps(job_id: str, fecha_desde: str = None, fecha_hasta: str = None
     return 0
 
 
+def _calcular_catalogo_gap(conn) -> dict:
+    """
+    Issue #170: cuenta cuantas filas/SKUs de ventas_historicas_stage se van a
+    perder en el merge de esta corrida por no tener registro en articulos --
+    el mecanismo de silent-drop que ya tumbo 51.024 filas en #111 (39 SKUs
+    nuevos sin catalogo, el 02/08/2026) y que la auditoria de datos confirmo
+    de nuevo con I02855-I02860 (2 años sin sincronizar, cero visibilidad
+    hasta ahora).
+
+    JOIN/WHERE calcado del step "MERGE STAGING -> VENTAS (con snapshot)" de
+    job_etl_diario.kjb (LEFT en vez de INNER, invertido para contar los
+    huerfanos en vez de descartarlos) -- si ese SQL cambia, este debe
+    cambiar junto para no medir una pregunta distinta de la que de verdad
+    se mergea. El NOT EXISTS contra ventas_grupos_fallidos_run excluye del
+    conteo los grupos que ya fallaron en la extraccion de esta corrida
+    (#157) -- esos son una causa distinta, ya visible en su propia tabla, no
+    hace falta contarlos de nuevo aca.
+    """
+    with conn.cursor() as cur:
+        cur.execute(
+            """
+            SELECT COUNT(*), COUNT(DISTINCT TRIM(s.sku))
+            FROM ventas_historicas_stage s
+            LEFT JOIN articulos a ON a.sku = TRIM(s.sku)
+            WHERE s.sku IS NOT NULL
+              AND a.sku IS NULL
+              AND NOT EXISTS (
+                SELECT 1 FROM ventas_grupos_fallidos_run f WHERE f.grupo_id = s.grupo_id
+              )
+            """
+        )
+        filas, skus = cur.fetchone()
+    return {"filas": int(filas), "skus": int(skus)}
+
+
+def cmd_catalogo_gap() -> int:
+    """
+    Issue #170: corre DENTRO del .kjb, justo despues del merge de ventas y
+    antes de "TRUNCATE VENTAS_STAGE END" -- a diferencia de `coherencia`/
+    `stock_gaps` (que corren desde run_ofelia.sh, afuera de Kettle, despues
+    de que kitchen.sh termina), este chequeo necesita ventas_historicas_stage
+    todavia poblado con los datos de ESTA corrida, asi que no puede esperar
+    a que el job termine. Por el mismo motivo que mark_step_failed.sh (#131),
+    Kettle no le pasa el job_id de la fila oficial (ese vive en
+    run_ofelia.sh) -- en vez de una fila de auditoria propia y desconectada
+    como hace mark_step_failed, esto agrega detalle.catalogo_gap directo a
+    la fila 'ejecutando' del cron (identificable sin ambiguedad: no-overlap
+    =true de ofelia garantiza que nunca hay mas de una).
+
+    No bloqueante, mismo criterio que `coherencia`/`stock_gaps`: un chequeo
+    caido se loguea y nunca corta la corrida -- el dato ya se perdio en el
+    merge de todas formas, frenar aca no lo recupera.
+    """
+    try:
+        conn = db_connect()
+    except Exception as e:
+        print(f"[CRON][CATALOGO_GAP] no se pudo conectar a MySQL: {e}", file=sys.stderr)
+        return 1
+
+    try:
+        resultado = _calcular_catalogo_gap(conn)
+    except Exception as e:
+        print(f"[CRON][CATALOGO_GAP] chequeo fallo (no bloquea el ETL): {e}", file=sys.stderr)
+        conn.close()
+        return 1
+
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                "UPDATE jobs_historial "
+                "   SET detalle = JSON_SET(COALESCE(detalle, JSON_OBJECT()), "
+                "                          '$.catalogo_gap', CAST(%s AS JSON)) "
+                " WHERE tipo_job = 'etl' AND estado = 'ejecutando' "
+                "   AND detalle->>'$.subtipo' = %s "
+                " ORDER BY id DESC LIMIT 1",
+                (json.dumps(resultado, ensure_ascii=False), SUBTIPO),
+            )
+        conn.commit()
+    except Exception as e:
+        print(f"[CRON][CATALOGO_GAP] no se pudo guardar en jobs_historial: {e}", file=sys.stderr)
+    conn.close()
+
+    if resultado["filas"] == 0:
+        print("[CRON][CATALOGO_GAP] sin filas huerfanas (todos los SKUs de esta corrida ya estan en articulos).")
+        return 0
+
+    # Issue #170: igual que stock_gaps, cualquier ocurrencia es el caso raro
+    # y se marca directo sin umbral separado -- es exactamente el mecanismo
+    # que ya causo un incidente real (#111).
+    print(f"[CRON][CATALOGO_GAP][ALERTA] {resultado['filas']} fila(s) / "
+          f"{resultado['skus']} SKU(s) de ventas_historicas_stage no se mergearon "
+          "a ventas_historicas por no tener registro en articulos todavia -- "
+          "revisar manualmente (mismo mecanismo que #111).")
+    return 0
+
+
 def cmd_abort(motivo: str) -> int:
     """
     Issue #132: fallo de run_ofelia.sh ANTES de poder llamar a `start` (ej.
@@ -755,8 +914,8 @@ def cmd_last_run(umbral_horas: str = str(UMBRAL_LAST_RUN_HORAS)) -> int:
 
 def main() -> int:
     if len(sys.argv) < 2:
-        print("[ERROR] Uso: cron_jobs.py start|end|skip|stale|coherencia|stock_gaps|abort|"
-              "mark_step_failed|last_run ...", file=sys.stderr)
+        print("[ERROR] Uso: cron_jobs.py start|end|skip|stale|coherencia|stock_gaps|"
+              "catalogo_gap|abort|mark_step_failed|last_run ...", file=sys.stderr)
         return 2
     sub, args = sys.argv[1], sys.argv[2:]
     if sub == "start" and not args:
@@ -771,6 +930,8 @@ def main() -> int:
         return cmd_coherencia(*args)
     if sub == "stock_gaps" and 1 <= len(args) <= 3:
         return cmd_stock_gaps(*args)
+    if sub == "catalogo_gap" and not args:
+        return cmd_catalogo_gap()
     if sub == "abort" and len(args) == 1:
         return cmd_abort(*args)
     if sub == "mark_step_failed" and len(args) == 2:
