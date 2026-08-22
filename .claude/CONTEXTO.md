@@ -4156,3 +4156,43 @@ Sobre los 128 SKUs afectados: 84 bajan, 43 suben, 1 sin cambio (coincidencia num
 **Nota de proceso, sexta vez en la sesión**: este worktree también arrancó con el `HEAD` desactualizado -- parado en `7fa1da4`, sin ninguno de los commits de #163-#184 en el árbol. Se confirmó que `git log --oneline -5` en el worktree no mostraba los commits esperados (`backfill_jobs.py`, `ROUND_HALF_UP`, `GetAbcClassification`, `stock_resumen_365`) que sí aparecían en `origin/Develop`, y se hizo `git fetch origin && git merge --ff-only origin/Develop` antes de empezar -- fast-forward limpio, 134 archivos, sin conflictos. Sexta vez seguida con el mismo síntoma exacto (#169, #171, #173, #180, #184, ahora #181) -- la investigación del mecanismo de creación de worktrees para agentes en background, pedida desde la nota de #173, sigue pendiente.
 
 **Coordinador, post-merge**: se aplicó el hallazgo (c) de arriba -- `scripts/qa_planilla_oracle.py` recalculaba ROT.S con el peso viejo por posición, mismo patrón de desalineación de oráculo ya visto y corregido en #164 (`ingreso_durante_quiebre`) y #183 (`dias_hasta_quiebre`/QBK). Se agregó el mismo cálculo de `_pesos_por_distancia_calendario` inline (este script no importa `run_calc_sugerencias.py`, reimplementa a propósito para no depender de import cruzado entre `scripts/` y `services/etl/`, mismo criterio que ya usaba antes de este fix). Verificado sin errores de sintaxis y corrida de humo contra `C00054` en la réplica local -- ROT.S/Fiabilidad/QBK siguen en `OK` para ese SKU (meses consecutivos, no hay divergencia esperable ahí). `scripts/verificar_rotacion_vs_ddstk.py`, en cambio, se dejó sin tocar -- es una herramienta de análisis puntual y ya histórica de #116 (mide una pregunta específica ya resuelta, no un oráculo de consistencia en curso), no el mismo perfil de riesgo que `qa_planilla_oracle.py`.
+
+---
+
+### Caída de producción por OOM: 40 horas de downtime que nadie detectó (2026-08-20/21)
+
+**Cómo se descubrió:** el usuario pidió ayuda con un error de permisos IAM en AWS Session Manager (`la instancia no está configurada para su uso con AWS Systems Manager`). Al intentar entrar por SSH para arreglarlo, la VM **no respondía en ningún puerto** -- ni 22, ni 80, ni 443. Los cuatro dominios resolvían bien a `3.150.104.146` (Elastic IP, sin cambios) y daban timeout. El error de SSM era un síntoma menor; el problema real es que producción llevaba casi dos días caída y **nadie se había enterado**.
+
+**Estado en la consola de EC2:** instancia `En ejecución`, **2/3 comprobaciones** -- sistema OK, EBS OK, **instancia FALLO** desde el 2026-08-20 06:14 local. Que el check de *sistema* estuviera en verde descarta problema del host de AWS y define la acción: **reboot**, no stop/start (un reboot no sirve si falla el check de sistema, porque deja la VM en el mismo host; acá era al revés).
+
+**Timeline reconstruido** (kernel log vía "Obtener registro del sistema", timestamps convertidos desde el boot del 17/08 23:07:25 UTC; hora local = UTC-3):
+
+| Hora local | Evento |
+|---|---|
+| 19/08 21:25 | se buildean `evalutia-etl` y `evalutia-webapp` -- el deploy de #167/#169 documentado más arriba (`docker images` da `2026-08-20 00:25 UTC`) |
+| **20/08 00:51** | `Out of memory: Killed process 1653 (mysqld)`, anon-rss 1.36 GB. Docker lo reinicia por su `restart: unless-stopped` |
+| 20/08 03:00 | arranca el ETL diario (`ofelia.ini`, `0 0 3 * * *`) contra un MySQL recién reiniciado |
+| **20/08 06:14** | falla el status check de instancia -- la VM deja de responder |
+| 20/08 06:49+ | `systemd: Failed to start Journal Service` / `Snap Daemon`, repetido durante horas |
+| **20/08 21:50** | `Out of memory: Killed process 151166 (dotnet)` -- la webapi, anon-rss 1.21 GB |
+| 20/08 21:50 | `SSM Agent unable to acquire credentials` |
+| 21/08 ~01:45 | reboot manual desde la consola. Los 12 contenedores levantan solos, ninguno queda caído |
+
+**Qué NO fue, con evidencia:** no fue kernel panic -- el command line trae `panic=-1` (reiniciar ante panic) y la máquina siguió con el mismo boot del 17/08 hasta la intervención manual. Tampoco fue OOM de cgroup: el mensaje es `Out of memory: Killed process`, no `Memory cgroup out of memory`. Fue **agotamiento global de RAM del host**, con el OOM killer eligiendo a `mysqld` por ser el proceso más grande de la máquina -- no por ser el culpable. **Qué disparó la presión de memoria a las 00:51 quedó sin identificar**: no había ningún job programado a esa hora (el diario es a las 03:00) y el deploy había terminado 3h25m antes. No se persiguió más allá porque la evidencia del boot anterior se pierde al reiniciar y la prioridad era levantar producción.
+
+**El hallazgo que importa -- los `mem_limit` de #136 protegen solo a medias.** #136 (2026-08-13/14) puso `mem_limit` en `mysql` (2300m) y `etl` (1200m) justamente para que un contenedor acaparador no tire la máquina entera. Funcionaron para lo que fueron diseñados, pero **no protegen a MySQL de la presión de los contenedores que siguen sin techo**: `webapi`, `python-worker`, `webapp`, `adminer`, `redis`, `ofelia`, `caddy` y los **tres del stack de matcher** (`matcher-api`, `matcher-web`, `matcher-db`, este último con su propia base de datos, ~400 MB en reposo) no tienen límite -- Docker les reporta los 3.7 GB del host como techo. Por eso el OOM del 20/08 volvió a elegir a `mysqld` pese a los límites.
+
+**Dato relevante para recalcular el presupuesto de memoria:** la VM corre **12 contenedores, no 9**. El stack de matcher (`ecologic.evalutia.net`, versionado en `ee89013` el 2026-08-07) tiene imágenes fechadas 2026-08-11 y **2026-08-15** -- o sea que terminó de aterrizar *después* del análisis de memoria de #136, y la entrada de #136 en este archivo no lo menciona. El presupuesto que se calculó ahí (MySQL en reposo al 55% de la RAM, Pentaho bajado a 768m) no contemplaba estos tres contenedores.
+
+**Restricción vigente:** subir el tamaño de instancia sigue **descartado explícitamente por el usuario por costo** (ya documentado en #105). La salida es por el otro lado: `mem_limit` en el resto de los contenedores y/o bajar el `--innodb-buffer-pool-size` de MySQL (hoy 2048m bajo un techo de 2300m).
+
+**Cuarta vez que la VM se cae por memoria**: dos veces en #105 (2026-07-31/08-01, cada una con Stop/Start manual), una en #136 (2026-08-13, durante su propia implementación, que abrió #148), y ésta. Lo nuevo de ésta no es el mecanismo -- es que **duró 40 horas**. Las tres anteriores se detectaron en minutos porque había alguien mirando la corrida que las causó. Esta pasó de madrugada, sin nadie encima, y siguió caída todo el día siguiente mientras en paralelo se mergeaban #166/#174/#175/#177/#178/#181 desde worktrees locales que no necesitan la VM.
+
+**Pendientes que deja (ninguno bloqueante, producción está arriba y verificada -- 3/3 comprobaciones, los 4 dominios respondiendo):**
+
+1. **Alarma de CloudWatch en `StatusCheckFailed_Instance`** con acción de recuperación automática. Es *el* pendiente de esta sesión: lo único que hubiera convertido 40 horas en minutos. Las cuatro caídas comparten causa, pero solo ésta tuvo ese costo, y fue por falta de detección, no de prevención.
+2. **Rol IAM de SSM** -- se creó `EvalutiaSSMInstanceRole` (trust `ec2.amazonaws.com` + política administrada `AmazonSSMManagedInstanceCore`); falta confirmar que quedó adjunto a la instancia y reiniciar `amazon-ssm-agent`. Importa por el mismo motivo que este incidente: cuando la VM se queda sin memoria, SSH es lo primero que deja de responder, justo cuando más hace falta entrar. Session Manager no necesita ningún puerto de entrada abierto.
+3. **`mem_limit` en los contenedores que no lo tienen**, con el stack de matcher incluido en la cuenta esta vez.
+4. **Disco al 86%** en `/srv/evalutia/data` (80 GB de 98). Hay `.log` y `.sql` sin trackear en `/opt/evalutia` -- backups de junio, logs de backfill de julio/agosto.
+
+**Nota de proceso, séptima vez:** el clon local del usuario estaba **105 commits atrasado** (parado en `ee89013`, del 2026-08-07). Durante la sesión se diagnosticó como "deriva del `docker-compose.yml` de la VM contra el repo" lo que en realidad era el clon local desactualizado: los `mem_limit` de #136 **sí estaban commiteados** en `origin/Develop` desde el 2026-08-14. Se llegó a hacer un commit para "versionarlos" que hubo que deshacer al fallar el `push`. Mismo síntoma que las seis notas de worktrees desactualizados de #169/#171/#173/#180/#184/#181 -- pero acá el árbol viejo no solo hizo trabajo redundante, produjo un **diagnóstico falso**. Lección concreta: antes de afirmar que algo "solo vive en la VM y no está en el repo", correr `git fetch` y verificar contra `origin/`, no contra el working tree local.
