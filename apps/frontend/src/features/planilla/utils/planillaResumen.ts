@@ -45,6 +45,31 @@ export type EstadoCeldaRotacion =
  * ya no aplica -- y esa celda mentía: el factor sí estaba cargado, solo que
  * el mes no vendió nada.
  */
+/**
+ * Issue #179: si el último mes de la ventana es realmente el mes calendario
+ * actual, esta señal decide si corresponde tratarlo como "en curso,
+ * incompleto" -- en vez de asumir POSICIONALMENTE que el último elemento del
+ * array siempre lo es. La ventana viene de `GetVentanaMeses` (MIN/MAX de
+ * `planilla_ventas_calculada`), que solo refleja hasta donde el ETL corrió
+ * anoche. Si el cron todavía no escribió el mes calendario nuevo (la
+ * ventana horaria entre medianoche y que termine la corrida nocturna, TODOS
+ * los meses) o si el ETL se atrasó varias noches (confirmado históricamente
+ * contra `jobs_historial`: el incidente de #111, 23/07→02/08/2026, dejó la
+ * ventana varada en julio -- ya cerrado -- durante los primeros días de
+ * agosto), el último elemento del array es en realidad un mes YA CERRADO, y
+ * tratarlo como "en curso" lo excluía en silencio de VTA/Rot.DesEstac.
+ *
+ * `hoy` inyectable para tests, default `new Date()` -- alcanza el reloj del
+ * cliente, la comparación es a granularidad de mes, no de milisegundos.
+ */
+export function esMesEnCursoReal(
+  mes: { year: number; month: number } | undefined,
+  hoy: Date = new Date(),
+): boolean {
+  if (!mes) return false;
+  return mes.year === hoy.getFullYear() && mes.month === hoy.getMonth() + 1;
+}
+
 export function celdaRotacionMes(
   mes: PlanillaMesDto,
 ): { valor: number | null; estado: EstadoCeldaRotacion } {
@@ -63,8 +88,9 @@ export function celdaRotacionMes(
 
 /**
  * Rotación diaria promedio del año, corregida por estacionalidad, sobre los
- * meses cerrados (excluye siempre el último elemento del array = mes de
- * referencia en curso).
+ * meses cerrados -- excluye el último elemento del array SOLO si de verdad
+ * es el mes calendario en curso (#179, ver `esMesEnCursoReal` y el
+ * docstring de `calcularRotDesEstac`, que consume esta función).
  *
  * Promedia exactamente los valores que `rotacionDesestacionalizadaMes`
  * devuelve para cada mes -- que son los mismos que muestran las columnas
@@ -103,9 +129,15 @@ export function rotacionDesestacionalizadaMes(m: PlanillaMesDto): number | null 
   return null;
 }
 
-export function calcularRotDesEstac(meses: PlanillaMesDto[]): number | null {
-  const vals = meses
-    .slice(0, -1)
+/**
+ * Issue #179: el último mes de `meses` solo se excluye si `esMesEnCursoReal`
+ * confirma que es de verdad el mes calendario actual -- ya no se asume por
+ * posición. Ver el docstring de `esMesEnCursoReal` para el mecanismo
+ * completo (por qué el último elemento puede ser un mes ya cerrado).
+ */
+export function calcularRotDesEstac(meses: PlanillaMesDto[], hoy: Date = new Date()): number | null {
+  const cerrados = esMesEnCursoReal(meses[meses.length - 1], hoy) ? meses.slice(0, -1) : meses;
+  const vals = cerrados
     .map(rotacionDesestacionalizadaMes)
     .filter((v): v is number => v != null);
   return vals.length === 0 ? null : vals.reduce((s, v) => s + v, 0) / vals.length;
@@ -179,9 +211,9 @@ export function redondearFiabilidad(pct: number): number {
 }
 
 /**
- * VTA: suma de `ventasCantidad` de los meses cerrados (excluye siempre el
- * último elemento del array = mes de referencia en curso, mismo contrato que
- * `calcularRotDesEstac`).
+ * VTA: suma de `ventasCantidad` de los meses cerrados -- excluye el último
+ * elemento del array solo si `esMesEnCursoReal` confirma que es de verdad
+ * el mes calendario en curso (#179), mismo contrato que `calcularRotDesEstac`.
  *
  * Issue #171: `PlanillaTable.tsx` y `exportPlanilla.ts` reimplementaban esta
  * misma expresión cada uno por su lado -- carácter por carácter idénticas al
@@ -189,6 +221,7 @@ export function redondearFiabilidad(pct: number): number {
  * la forma que #117 y #129 tenían antes de divergir de verdad en este mismo
  * código. Fuente única para que arreglar una implique arreglar la otra.
  */
-export function calcularVta(meses: PlanillaMesDto[]): number {
-  return meses.slice(0, -1).reduce((s, m) => s + (m.ventasCantidad ?? 0), 0);
+export function calcularVta(meses: PlanillaMesDto[], hoy: Date = new Date()): number {
+  const cerrados = esMesEnCursoReal(meses[meses.length - 1], hoy) ? meses.slice(0, -1) : meses;
+  return cerrados.reduce((s, m) => s + (m.ventasCantidad ?? 0), 0);
 }

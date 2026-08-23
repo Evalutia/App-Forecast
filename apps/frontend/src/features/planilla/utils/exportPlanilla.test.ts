@@ -1,11 +1,24 @@
-import { describe, expect, it } from 'vitest';
-import type { Cell } from 'exceljs';
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
+import type { Cell, Workbook, Worksheet } from 'exceljs';
 import { buildPlanillaWorkbook, CRITERIOS_COLUMNAS } from './exportPlanilla';
 import type { PlanillaMesDto, PlanillaSugerenciaDto, PlanillaVentasDto } from '../types/planilla';
 
 // Fixture mínima: ventana normalizada de 3 meses (may/jun/jul 2026, jul = mes
 // de referencia), un SKU con historia completa y otro recién dado de alta con
 // placeholder sin_datos (#106).
+//
+// Issue #179: julio solo cuenta como "mes de referencia" si esMesEnCursoReal
+// lo confirma contra el calendario real -- se congela el reloj del test en
+// julio/2026 para que el fixture conserve el mismo rol que tenía antes de
+// ese fix, sin reescribir los fixtures/tests existentes.
+beforeAll(() => {
+  vi.useFakeTimers();
+  vi.setSystemTime(new Date(2026, 6, 15)); // mes 6 = julio (0-indexado)
+});
+
+afterAll(() => {
+  vi.useRealTimers();
+});
 
 function mes(overrides: Partial<PlanillaMesDto>): PlanillaMesDto {
   return {
@@ -79,9 +92,21 @@ function headerValues(values: Cell['value'][] | { [key: string]: Cell['value'] }
 }
 
 describe('buildPlanillaWorkbook (#107)', () => {
-  const wb = buildPlanillaWorkbook([skuA, skuB], sugerencias);
-  const hoja1 = wb.getWorksheet('Planilla de Reposición')!;
-  const hoja2 = wb.getWorksheet('Detalle de cálculo')!;
+  // Issue #179: buildPlanillaWorkbook (que llama a calcularVta/
+  // calcularRotDesEstac, ahora dependientes del reloj vía esMesEnCursoReal)
+  // tiene que construirse DESPUÉS de que el beforeAll de arriba congele el
+  // reloj -- un `const` a nivel de describe corre durante la fase de
+  // colección, ANTES de que cualquier hook se ejecute, así que vería la
+  // fecha real de la máquina en vez de julio/2026.
+  let wb: Workbook;
+  let hoja1: Worksheet;
+  let hoja2: Worksheet;
+
+  beforeAll(() => {
+    wb = buildPlanillaWorkbook([skuA, skuB], sugerencias);
+    hoja1 = wb.getWorksheet('Planilla de Reposición')!;
+    hoja2 = wb.getWorksheet('Detalle de cálculo')!;
+  });
 
   it('crea exactamente las tres hojas, en orden', () => {
     expect(wb.worksheets.map(w => w.name)).toEqual(['Planilla de Reposición', 'Detalle de cálculo', 'Criterios']);
@@ -281,6 +306,10 @@ describe('buildPlanillaWorkbook (#107)', () => {
 // curso" (última columna de la ventana, `idx === lastMesIdx`) y el mismo
 // tratamiento incondicional, más un borde punteado como segundo canal (no solo
 // tipografía) para que se note incluso sobre fondos sólidos.
+//
+// Issue #179: "mes en curso" ya no es `idx === lastMesIdx` -- es
+// esMesEnCursoReal contra el calendario real (congelado en julio/2026 arriba
+// para este archivo). El fixture de julio sigue jugando el mismo rol.
 describe('issue #165: mes en curso queda marcado como incompleto aun con color de estado', () => {
   function buildConMesRef(estadoRef: Partial<PlanillaMesDto>) {
     const meses = [skuA.meses[0], skuA.meses[1], mes({ month: 7, ventasCantidad: 40, ...estadoRef })];
@@ -335,10 +364,23 @@ describe('issue #165: mes en curso queda marcado como incompleto aun con color d
 });
 
 describe('hoja Criterios (#109)', () => {
-  const wb = buildPlanillaWorkbook([skuA, skuB], sugerencias);
-  const hoja1 = wb.getWorksheet('Planilla de Reposición')!;
-  const hoja2 = wb.getWorksheet('Detalle de cálculo')!;
-  const criterios = wb.getWorksheet('Criterios')!;
+  // Issue #179: mismo motivo que en buildPlanillaWorkbook (#107) arriba --
+  // construir el workbook tiene que esperar al beforeAll que congela el reloj.
+  let wb: Workbook;
+  let hoja1: Worksheet;
+  let hoja2: Worksheet;
+  let criterios: Worksheet;
+  let filasCriterios: Set<string>;
+  let textoCompleto: string;
+
+  beforeAll(() => {
+    wb = buildPlanillaWorkbook([skuA, skuB], sugerencias);
+    hoja1 = wb.getWorksheet('Planilla de Reposición')!;
+    hoja2 = wb.getWorksheet('Detalle de cálculo')!;
+    criterios = wb.getWorksheet('Criterios')!;
+    filasCriterios = new Set(CRITERIOS_COLUMNAS.map(c => c.col));
+    textoCompleto = criterios.getSheetValues().flat().map(String).join('\n');
+  });
 
   // Header real 'Vta.May/26' → fila genérica 'Vta.[mes]', 'May/26' → '[mes]'
   const MES_RE = /^([A-Z][a-zá-ú]{2}\/\d{2})$/i;
@@ -346,9 +388,6 @@ describe('hoja Criterios (#109)', () => {
     if (MES_RE.test(header)) return '[mes]';
     return header.replace(/[A-Z][a-zá-ú]{2}\/\d{2}$/i, '[mes]');
   }
-
-  const filasCriterios = new Set(CRITERIOS_COLUMNAS.map(c => c.col));
-  const textoCompleto = criterios.getSheetValues().flat().map(String).join('\n');
 
   it('toda columna de la hoja 1 tiene su fila en Criterios', () => {
     for (const h of headerValues(hoja1.getRow(1).values).map(String)) {

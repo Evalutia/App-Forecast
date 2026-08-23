@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import type { PlanillaMesDto } from '../types/planilla';
 import {
   DDSTK_MIN_DIAS_CON_STOCK,
@@ -6,6 +6,7 @@ import {
   calcularRotDesEstac,
   calcularVta,
   celdaRotacionMes,
+  esMesEnCursoReal,
   redondearDiasQuiebre,
   redondearFiabilidad,
 } from './planillaResumen';
@@ -33,10 +34,25 @@ function mes(overrides: Partial<PlanillaMesDto>): PlanillaMesDto {
   };
 }
 
-// El ultimo mes del array es siempre el mes de referencia (se excluye) --
-// mismo contrato que exportPlanilla.ts / PlanillaTable.tsx.
+// Issue #179: calcularVta/calcularRotDesEstac ya no excluyen el último mes
+// del array por posición -- solo si esMesEnCursoReal confirma que es de
+// verdad el mes calendario actual. El "reloj" del test se congela más abajo
+// (beforeAll/afterAll) en 2026-06-15 para que este mes de referencia siga
+// jugando su mismo rol de siempre en toda la suite, sin tocar los ~18 call
+// sites existentes.
+const HOY_TEST = new Date(2026, 5, 15); // mes 5 = junio (0-indexado)
+
+beforeAll(() => {
+  vi.useFakeTimers();
+  vi.setSystemTime(HOY_TEST);
+});
+
+afterAll(() => {
+  vi.useRealTimers();
+});
+
 function conReferencia(cerrados: PlanillaMesDto[]): PlanillaMesDto[] {
-  return [...cerrados, mes({ year: 2026, month: 99, estadoMes: 'sin_datos' })];
+  return [...cerrados, mes({ year: 2026, month: 6, estadoMes: 'sin_datos' })];
 }
 
 describe('calcularRotDesEstac', () => {
@@ -157,10 +173,10 @@ describe('calcularRotDesEstac', () => {
     expect(calcularRotDesEstac(meses)).toBe(5.0);
   });
 
-  it('el mes de referencia (ultimo del array) siempre se excluye', () => {
+  it('el mes de referencia (ultimo del array) se excluye si es de verdad el mes en curso', () => {
     const meses = [
       mes({ estadoMes: 'normal', rotacionDiariaDesestacionalizada: 2.0 }),
-      mes({ estadoMes: 'normal', rotacionDiariaDesestacionalizada: 999.0 }), // referencia
+      mes({ year: 2026, month: 6, estadoMes: 'normal', rotacionDiariaDesestacionalizada: 999.0 }), // referencia -- coincide con HOY_TEST
     ];
     expect(calcularRotDesEstac(meses)).toBe(2.0);
   });
@@ -378,10 +394,10 @@ describe('calcularVta', () => {
     expect(calcularVta(meses)).toBe(30);
   });
 
-  it('el mes de referencia (ultimo del array) nunca participa en la suma', () => {
+  it('el mes de referencia (ultimo del array) no participa en la suma si es de verdad el mes en curso', () => {
     const meses = [
       mes({ ventasCantidad: 5 }),
-      mes({ ventasCantidad: 999 }), // referencia
+      mes({ year: 2026, month: 6, ventasCantidad: 999 }), // referencia -- coincide con HOY_TEST
     ];
     expect(calcularVta(meses)).toBe(5);
   });
@@ -396,6 +412,68 @@ describe('calcularVta', () => {
 
   it('sin meses cerrados (solo el de referencia) da 0', () => {
     expect(calcularVta(conReferencia([]))).toBe(0);
+  });
+});
+
+describe('esMesEnCursoReal (#179)', () => {
+  it('true cuando el mes coincide con el calendario real (año y mes)', () => {
+    expect(esMesEnCursoReal({ year: 2026, month: 6 }, HOY_TEST)).toBe(true);
+  });
+
+  it('false para un mes anterior, aunque sea el mismo año', () => {
+    expect(esMesEnCursoReal({ year: 2026, month: 5 }, HOY_TEST)).toBe(false);
+  });
+
+  it('false para el mismo mes de un año distinto', () => {
+    expect(esMesEnCursoReal({ year: 2025, month: 6 }, HOY_TEST)).toBe(false);
+  });
+
+  it('false para un mes futuro (defensivo, no debería pasar en la práctica)', () => {
+    expect(esMesEnCursoReal({ year: 2026, month: 7 }, HOY_TEST)).toBe(false);
+  });
+
+  it('undefined (ventana vacía) da false, no rompe', () => {
+    expect(esMesEnCursoReal(undefined, HOY_TEST)).toBe(false);
+  });
+});
+
+// Issue #179: el caso real que motivó el ticket -- confirmado contra
+// producción (jobs_historial) que el ETL puede quedarse varias noches sin
+// escribir el mes calendario nuevo (el incidente de #111, 23/07→02/08/2026,
+// dejó la ventana de planilla_ventas_calculada varada en julio -- ya
+// cerrado -- durante los primeros días de agosto). Antes de este fix,
+// calcularVta/calcularRotDesEstac asumían POSICIONALMENTE que el último
+// elemento del array era "el mes en curso, incompleto" y lo excluían
+// siempre -- así que un mes YA CERRADO (el ETL simplemente no llegó a
+// escribir el mes nuevo todavía) se perdía en silencio de los totales.
+describe('#179: el ETL todavía no escribió el mes en curso -- el último mes de la ventana ya está cerrado', () => {
+  // HOY_TEST = 2026-06-15. Si el ETL se atrasó y la ventana todavía termina
+  // en mayo (un mes ya cerrado, no "en curso"), ni VTA ni Rot.DesEstac.
+  // deben excluirlo -- mismo escenario que dejó el incidente de #111.
+  const mesMayoYaCerrado = mes({
+    year: 2026, month: 5,
+    ventasCantidad: 999,
+    estadoMes: 'normal',
+    rotacionDiariaDesestacionalizada: 7.0,
+  });
+
+  it('calcularVta incluye el último mes si ya está cerrado (no es el mes calendario real)', () => {
+    const meses = [mes({ ventasCantidad: 1 }), mesMayoYaCerrado];
+    expect(calcularVta(meses, HOY_TEST)).toBe(1000); // 1 + 999, nada excluido
+  });
+
+  it('calcularRotDesEstac incluye el último mes si ya está cerrado (no es el mes calendario real)', () => {
+    const meses = [
+      mes({ estadoMes: 'normal', rotacionDiariaDesestacionalizada: 3.0 }),
+      mesMayoYaCerrado,
+    ];
+    expect(calcularRotDesEstac(meses, HOY_TEST)).toBe(5.0); // (3+7)/2, nada excluido
+  });
+
+  it('contraste: el mismo mes SÍ se excluye si de verdad coincide con hoy', () => {
+    const mesJunioEnCurso = { ...mesMayoYaCerrado, year: 2026, month: 6 };
+    const meses = [mes({ ventasCantidad: 1 }), mesJunioEnCurso];
+    expect(calcularVta(meses, HOY_TEST)).toBe(1); // junio sí es HOY_TEST -- se excluye
   });
 });
 

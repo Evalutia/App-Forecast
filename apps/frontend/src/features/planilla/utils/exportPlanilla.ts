@@ -1,6 +1,6 @@
 import ExcelJS, { type Cell } from 'exceljs';
 import { fetchPlanillaVentas } from './api';
-import { DDSTK_MIN_DIAS_CON_STOCK, calcularDdstk, calcularRotDesEstac, calcularVta, celdaRotacionMes, redondearDiasQuiebre, redondearFiabilidad } from './planillaResumen';
+import { DDSTK_MIN_DIAS_CON_STOCK, calcularDdstk, calcularRotDesEstac, calcularVta, celdaRotacionMes, esMesEnCursoReal, redondearDiasQuiebre, redondearFiabilidad } from './planillaResumen';
 import type { PlanillaMesDto, PlanillaSugerenciaDto, PlanillaVentasDto, PlanillaVentasParams } from '../types/planilla';
 
 const MESES = ['Ene','Feb','Mar','Abr','May','Jun','Jul','Ago','Sep','Oct','Nov','Dic'];
@@ -137,8 +137,10 @@ function buildHojaPlanilla(
 
   const meses      = items[0].meses;
   const n          = meses.length;
-  const lastMesIdx = n - 1;
   const mesLabels  = meses.map(m => mesLabel(m.year, m.month));
+  // Issue #179: una sola vez para todo el sheet -- ver esMesEnCursoReal, ya
+  // no se asume por posición que el último mes de la ventana es "en curso".
+  const hoy = new Date();
 
   // Column index helpers (1-based).
   // Bloque del cliente: Articulo, Descripcion, Codigos Barras, Vta×n, Rot×n
@@ -175,8 +177,8 @@ function buildHojaPlanilla(
     { width: 13 },                                              // Articulo
     { width: 34 },                                              // Descripcion
     { width: 18 },                                              // Codigos Barras
-    ...meses.map((_, i) => ({ width: i === lastMesIdx ? 10 : 9 })),  // Vta months
-    ...meses.map((_, i) => ({ width: i === lastMesIdx ? 10 : 9 })),  // Rot months
+    ...meses.map((m) => ({ width: esMesEnCursoReal(m, hoy) ? 10 : 9 })),  // Vta months
+    ...meses.map((m) => ({ width: esMesEnCursoReal(m, hoy) ? 10 : 9 })),  // Rot months
     { width: 17 },                                              // Rotacion DesEstac.
     { width: 12 },                                              // Estado Art.
     { width: 10 },                                              // VTA
@@ -198,9 +200,9 @@ function buildHojaPlanilla(
       // Meses sin_datos (#106) exportan celda vacía (null), no un 0 inventado.
       ...item.meses.map(m => m.ventasCantidad),
       ...item.meses.map(m => celdaRotacionMes(m).valor),
-      calcularRotDesEstac(item.meses),
+      calcularRotDesEstac(item.meses, hoy),
       item.estadoArticulo ?? 'activo',
-      calcularVta(item.meses),
+      calcularVta(item.meses, hoy),
       calcularDdstk(item.meses),
       sug?.rotacionSugerida ?? null,
       // Issue #169: mismo redondeo fuente-de-verdad que usa la web
@@ -219,11 +221,11 @@ function buildHojaPlanilla(
     item.meses.forEach((mes, i) => {
       const vta = row.getCell(COL_VTA_MES(i));
       vta.numFmt = '#,##0';
-      applyMesStyle(vta, mes, i === lastMesIdx);
+      applyMesStyle(vta, mes, esMesEnCursoReal(mes, hoy));
 
       const rot = row.getCell(COL_ROT_MES(i));
       rot.numFmt = '0.0000';
-      applyMesStyle(rot, mes, i === lastMesIdx, celdaRotacionMes(mes).estado);
+      applyMesStyle(rot, mes, esMesEnCursoReal(mes, hoy), celdaRotacionMes(mes).estado);
     });
 
     applySummaryStyle(row.getCell(COL_RD),   '0.0000');
@@ -249,8 +251,9 @@ function buildHojaDetalle(wb: ExcelJS.Workbook, items: PlanillaVentasDto[]): voi
 
   const meses      = items[0].meses;
   const n          = meses.length;
-  const lastMesIdx = n - 1;
   const mesLabels  = meses.map(m => mesLabel(m.year, m.month));
+  // Issue #179: ver el comentario equivalente en buildHojaPlanilla.
+  const hoy = new Date();
 
   // Issue #130: RotReal es el primer bloque -- la rotación sin corregir por
   // estacionalidad, que salió de la hoja 1 cuando las columnas mensuales
@@ -331,7 +334,7 @@ function buildHojaDetalle(wb: ExcelJS.Workbook, items: PlanillaVentasDto[]): voi
     row.getCell(1).alignment = { vertical: 'middle' };
 
     item.meses.forEach((mes, i) => {
-      const isRef = i === lastMesIdx;
+      const isRef = esMesEnCursoReal(mes, hoy);
       const rotr = row.getCell(COL_ROTR(i));
       rotr.numFmt = '0.0000';
       applyMesStyle(rotr, mes, isRef);
@@ -383,13 +386,13 @@ export const CRITERIOS_COLUMNAS: CriterioRow[] = [
   { col: 'Descripcion', hoja: 'Planilla', que: 'Descripción del artículo.', como: 'Tal como figura en el catálogo.' },
   { col: 'Codigos Barras', hoja: 'Planilla', que: 'Código de barras.', como: 'Tal como figura en el catálogo. Vacío si el artículo no tiene.' },
   { col: 'Vta.[mes]', hoja: 'Planilla', que: 'Unidades vendidas en ese mes (ventas netas: descuenta devoluciones).',
-    como: 'Suma de las ventas del mes. La columna de más a la derecha es el mes en curso (incompleto): letra itálica y borde punteado en la celda, tenga o no color de estado. Celda vacía gris claro = sin datos de ese mes (ej. artículo dado de alta después).' },
+    como: 'Suma de las ventas del mes. La columna de más a la derecha es el mes en curso (incompleto) SOLO si coincide con el mes calendario real de hoy: letra itálica y borde punteado en la celda, tenga o no color de estado. Si el ETL todavía no cargó el mes nuevo (issue #179), la última columna es un mes ya cerrado como cualquier otro, sin la marca de incompleto. Celda vacía gris claro = sin datos de ese mes (ej. artículo dado de alta después).' },
   { col: '[mes]', hoja: 'Planilla', que: 'Rotación diaria del mes, corregida por estacionalidad.',
-    como: 'Unidades vendidas ÷ días con stock, dividido por el factor estacional del mes; en los meses con quiebre se parte de la rotación ajustada por frecuencia. Un mes con quiebre y venta 0 muestra 0 (dato real, no se descarta). Es exactamente el valor que promedia la columna "Rotacion DesEstac.": ese promedio es el de estas celdas, sin contar el mes en curso (la última columna) ni las vacías. Queda vacía si el mes no tuvo stock, o si el artículo no tiene factor estacional cargado para ese mes (celda lila). La rotación sin corregir está en la hoja "Detalle de cálculo".' },
+    como: 'Unidades vendidas ÷ días con stock, dividido por el factor estacional del mes; en los meses con quiebre se parte de la rotación ajustada por frecuencia. Un mes con quiebre y venta 0 muestra 0 (dato real, no se descarta). Es exactamente el valor que promedia la columna "Rotacion DesEstac.": ese promedio es el de estas celdas, sin contar el mes en curso (la última columna, solo si de verdad coincide con el mes calendario real -- #179) ni las vacías. Queda vacía si el mes no tuvo stock, o si el artículo no tiene factor estacional cargado para ese mes (celda lila). La rotación sin corregir está en la hoja "Detalle de cálculo".' },
   { col: 'Rotacion DesEstac.', hoja: 'Planilla', que: 'Rotación diaria promedio del año, corregida por estacionalidad.',
-    como: 'Promedio sobre los 12 meses cerrados: los meses con stock completo usan su rotación ÷ factor estacional del mes; los meses con quiebre usan la rotación ajustada por frecuencia, corregida con el mismo factor. Un mes con quiebre y venta 0 participa con rotación 0 — no se descarta, mismo criterio que ROT.S. Un mes (con o sin quiebre) que no tenga factor estacional cargado no participa — no se mezcla un valor sin corregir en un promedio "desestacionalizado". Los meses sin stock o sin datos tampoco participan. Excluye el mes en curso. Vacía si el artículo no tiene ningún factor estacional cargado.' },
+    como: 'Promedio sobre los 12 meses cerrados: los meses con stock completo usan su rotación ÷ factor estacional del mes; los meses con quiebre usan la rotación ajustada por frecuencia, corregida con el mismo factor. Un mes con quiebre y venta 0 participa con rotación 0 — no se descarta, mismo criterio que ROT.S. Un mes (con o sin quiebre) que no tenga factor estacional cargado no participa — no se mezcla un valor sin corregir en un promedio "desestacionalizado". Los meses sin stock o sin datos tampoco participan. Excluye el mes en curso -- solo si la última columna de verdad coincide con el mes calendario real, no por posición (#179). Vacía si el artículo no tiene ningún factor estacional cargado.' },
   { col: 'Estado Art.', hoja: 'Planilla', que: 'Estado del artículo en el catálogo.', como: 'activo (en venta normal), inactivo (temporalmente inactivo) o discontinuo (sin reposición futura).' },
-  { col: 'VTA', hoja: 'Planilla', que: 'Total de unidades vendidas en el año.', como: 'Suma de las ventas de los 12 meses cerrados. Excluye el mes en curso.' },
+  { col: 'VTA', hoja: 'Planilla', que: 'Total de unidades vendidas en el año.', como: 'Suma de las ventas de los 12 meses cerrados. Excluye el mes en curso -- solo si la última columna de verdad coincide con el mes calendario real, no por posición (#179).' },
   { col: 'DDSTK', hoja: 'Planilla', que: 'Demanda diaria con stock: venta promedio por día en los días que hubo stock.',
     como: `Suma de ventas de los meses con al menos un día de stock ÷ suma de sus días con stock, sobre la ventana de 13 meses. Un mes sin ningún día de stock no aporta venta al numerador (si vendió algo pese a no tener stock registrado, esa venta no cuenta). Vacía si el total de días con stock en la ventana es menor a ${DDSTK_MIN_DIAS_CON_STOCK} (muy pocos días de base dan un número poco confiable).` },
   { col: 'ROT.S', hoja: 'Planilla', que: 'Rotación diaria sugerida para planificar la reposición.',

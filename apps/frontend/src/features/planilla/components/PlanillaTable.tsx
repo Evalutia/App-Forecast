@@ -3,7 +3,7 @@ import { useRef, useState } from 'react';
 import type { PlanillaSugerenciaDto, PlanillaVentasDto, PlanillaVentasParams } from '../types/planilla';
 import { usePlanillaVentas } from '../hooks/usePlanilla';
 import { exportPlanillaExcel } from '../utils/exportPlanilla';
-import { DDSTK_MIN_DIAS_CON_STOCK, calcularDdstk, calcularRotDesEstac, calcularVta, celdaRotacionMes, redondearDiasQuiebre, redondearFiabilidad } from '../utils/planillaResumen';
+import { DDSTK_MIN_DIAS_CON_STOCK, calcularDdstk, calcularRotDesEstac, calcularVta, celdaRotacionMes, esMesEnCursoReal, redondearDiasQuiebre, redondearFiabilidad } from '../utils/planillaResumen';
 import { useUmbralesTickets } from '../../configuracion/hooks/useConfiguracion';
 import { useAuthUser } from '../../auth/hooks/useAuthUser';
 
@@ -394,8 +394,12 @@ export default function PlanillaTable({ params, onPageChange, sugerencias, suger
   const total      = data?.total ?? 0;
   const totalPages = Math.max(1, Math.ceil(total / params.pageSize));
   const mesHeaders: { year: number; month: number }[] = items[0]?.meses ?? [];
-  const lastMesIdx = mesHeaders.length - 1;
   const totalCols  = 3 + mesHeaders.length * 2 + 6; // SKU+Desc, Cód.Barras, Género, [Vta months], [Rot months], Rot.DesEstac., Estado, VTA, DDSTK, ROT.S, QBK
+  // Issue #179: calculado una sola vez por render (no por celda) -- calcula
+  // contra el reloj del cliente si cada mes es de verdad el mes calendario
+  // actual, en vez de asumir POSICIONALMENTE que el último de la ventana
+  // siempre lo es (ver esMesEnCursoReal).
+  const hoy = new Date();
 
   const handleExport = async () => {
     setExporting(true);
@@ -444,8 +448,8 @@ export default function PlanillaTable({ params, onPageChange, sugerencias, suger
                     <th key={i}><span className="skeleton skel-40" /></th>
                   ))
                 : (<>
-                    {mesHeaders.map((m, idx) => {
-                      const esRef = idx === lastMesIdx;
+                    {mesHeaders.map((m) => {
+                      const esRef = esMesEnCursoReal(m, hoy);
                       return (
                         <th
                           key={`vta-${m.year}-${m.month}`}
@@ -467,8 +471,8 @@ export default function PlanillaTable({ params, onPageChange, sugerencias, suger
                         </th>
                       );
                     })}
-                    {mesHeaders.map((m, idx) => {
-                      const esRef = idx === lastMesIdx;
+                    {mesHeaders.map((m) => {
+                      const esRef = esMesEnCursoReal(m, hoy);
                       return (
                         <th
                           key={`rot-${m.year}-${m.month}`}
@@ -599,9 +603,9 @@ export default function PlanillaTable({ params, onPageChange, sugerencias, suger
               </tr>
             ) : (
               items.map((row: PlanillaVentasDto) => {
-                const rd  = fmtResumen(calcularRotDesEstac(row.meses));
+                const rd  = fmtResumen(calcularRotDesEstac(row.meses, hoy));
                 const dd  = fmtResumen(calcularDdstk(row.meses));
-                const vta = calcularVta(row.meses);
+                const vta = calcularVta(row.meses, hoy);
                 return (
                   <tr key={row.sku}>
                     <td className="planilla-sticky-col planilla-col-sku">
@@ -611,7 +615,7 @@ export default function PlanillaTable({ params, onPageChange, sugerencias, suger
                     <td className="planilla-col-barras">{row.codigoBarras ?? '—'}</td>
                     <td>{row.generoDescripcion ?? '—'}</td>
 
-                    {row.meses.map((mes, idx) => (
+                    {row.meses.map((mes) => (
                       <td
                         key={`vta-${mes.year}-${mes.month}`}
                         className="planilla-col-mes"
@@ -626,7 +630,7 @@ export default function PlanillaTable({ params, onPageChange, sugerencias, suger
                               (mes.ingresoDuranteQuiebre ? ' · Entró stock (importación) durante el mes' : '')
                         }
                       >
-                        <span style={idx === lastMesIdx ? { opacity: 0.6, fontStyle: 'italic' } : undefined}>
+                        <span style={esMesEnCursoReal(mes, hoy) ? { opacity: 0.6, fontStyle: 'italic' } : undefined}>
                           {mes.estadoMes === 'sin_datos'
                             ? <span className="muted">—</span>
                             : (mes.ventasCantidad ?? 0).toLocaleString('es-UY')}
@@ -634,7 +638,7 @@ export default function PlanillaTable({ params, onPageChange, sugerencias, suger
                       </td>
                     ))}
 
-                    {row.meses.map((mes, idx) => {
+                    {row.meses.map((mes) => {
                       // Issue #130: muestra la rotación desestacionalizada, que
                       // es lo que promedia Rot. DesEstac. -- antes mostraba la
                       // cruda y el promedio no se podía verificar a mano.
@@ -653,7 +657,7 @@ export default function PlanillaTable({ params, onPageChange, sugerencias, suger
                                   (mes.ingresoDuranteQuiebre ? ' · Entró stock (importación) durante el mes' : '')
                           }
                         >
-                          <span style={idx === lastMesIdx ? { opacity: 0.6, fontStyle: 'italic' } : undefined}>
+                          <span style={esMesEnCursoReal(mes, hoy) ? { opacity: 0.6, fontStyle: 'italic' } : undefined}>
                             {celda.valor != null ? celda.valor.toFixed(4) : <span className="muted">—</span>}
                           </span>
                         </td>
