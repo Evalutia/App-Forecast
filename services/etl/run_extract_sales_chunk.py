@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-import html, json, os, pymysql
+import html, json, os, re, pymysql
 
 import parsers
 
@@ -10,6 +10,23 @@ CAMPOS_VENTA = ['Venta', 'VentaQty', 'Cantidad', 'CantVenta', 'CantidadVta',
                 'CantVta', 'CantidadVenta', 'CANTIDAD', 'CANT_VENTA']
 CAMPOS_STOCK = ['Stock', 'StockDisp', 'StockDisponible', 'Existencia',
                 'Existencias', 'CantidadStock']
+
+# Issue #186: nombres de tabla configurables -- permite reusar exactamente
+# esta misma logica de parseo/escritura para poblar el almacen de
+# comparacion aislado (ventas_historicas_stage_comparacion/
+# stock_diario_comparacion) en vez de las tablas de produccion, sin
+# duplicar el script. Los nombres de tabla no se pueden parametrizar via
+# placeholder de pymysql (%s) -- se valida el formato antes de interpolar
+# en el SQL, para que un env var mal seteado falle fuerte en vez de abrir
+# una superficie de inyeccion.
+_TABLA_ID_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+
+
+def _resolver_tabla(explicito, env_var, default):
+    nombre = explicito or os.environ.get(env_var) or default
+    if not _TABLA_ID_RE.match(nombre):
+        raise ValueError(f"{env_var}={nombre!r} no es un nombre de tabla valido")
+    return nombre
 
 
 class ContractDriftError(Exception):
@@ -39,13 +56,19 @@ def _campo_ausente_en_todas(payload, candidatos):
     )
 
 
-def procesar_payload(conn, payload, deposito_forzado=None, grupo_id=None):
+def procesar_payload(conn, payload, deposito_forzado=None, grupo_id=None,
+                      tabla_stage=None, tabla_stock=None):
     """
     Inserta/actualiza en ventas_historicas_stage y stock_diario a partir de
     un payload ya parseado de ConsStockVenta. Retorna (rows_ins, rows_skip,
     rows_stock_ins, rows_failed, rows_stock_failed) -- rows_failed/
     rows_stock_failed son excepciones reales de MySQL al escribir (Issue
     #154), distintas de rows_skip (descarte legitimo de datos).
+
+    Issue #186: tabla_stage/tabla_stock (o las env vars TABLA_VENTAS_STAGE/
+    TABLA_STOCK_DIARIO si no se pasan explicitos) redirigen la escritura al
+    almacen de comparacion aislado en vez de a las tablas de produccion --
+    default sin cambios de comportamiento cuando no se setea nada.
 
     Issue #159: si NINGUNA fila del payload trae un campo de venta
     reconocible, levanta ContractDriftError ANTES de escribir nada -- sin
@@ -82,6 +105,9 @@ def procesar_payload(conn, payload, deposito_forzado=None, grupo_id=None):
     # colapsar al sentinel de "sin deposito" solo porque 0 es falsy en Python.
     # En la practica los depositos reales nunca son 0 (1,5,8,9,10,11), pero la
     # correctitud de la clave unica no deberia depender de esa suposicion.
+    tabla_stage = _resolver_tabla(tabla_stage, "TABLA_VENTAS_STAGE", "ventas_historicas_stage")
+    tabla_stock = _resolver_tabla(tabla_stock, "TABLA_STOCK_DIARIO", "stock_diario")
+
     deposito_id = str(deposito_forzado) if deposito_forzado not in (None, "") else ""
     grupo_val = None
     if grupo_id not in (None, ""):
@@ -111,7 +137,7 @@ def procesar_payload(conn, payload, deposito_forzado=None, grupo_id=None):
         cur.execute("""
             SELECT COLUMN_NAME, DATA_TYPE FROM INFORMATION_SCHEMA.COLUMNS
             WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = %s
-        """, ("ventas_historicas_stage",))
+        """, (tabla_stage,))
         meta = {row[0].lower(): row[1].lower() for row in cur.fetchall()}
 
     has_stock = "stock" in meta
@@ -145,7 +171,7 @@ def procesar_payload(conn, payload, deposito_forzado=None, grupo_id=None):
         update_cols.append("fuente")
         update_clause = ", ".join(f"{c} = VALUES({c})" for c in update_cols)
         sql = (
-            f"INSERT INTO ventas_historicas_stage({','.join(insert_cols)}) "
+            f"INSERT INTO {tabla_stage}({','.join(insert_cols)}) "
             f"VALUES({placeholders}) "
             f"ON DUPLICATE KEY UPDATE {update_clause}"
         )
@@ -155,18 +181,18 @@ def procesar_payload(conn, payload, deposito_forzado=None, grupo_id=None):
             update_cols_sin_stock = [c for c in update_cols if c != "stock"]
             update_clause_sin_stock = ", ".join(f"{c} = VALUES({c})" for c in update_cols_sin_stock)
             sql_sin_stock = (
-                f"INSERT INTO ventas_historicas_stage({','.join(insert_cols_sin_stock)}) "
+                f"INSERT INTO {tabla_stage}({','.join(insert_cols_sin_stock)}) "
                 f"VALUES({placeholders_sin_stock}) "
                 f"ON DUPLICATE KEY UPDATE {update_clause_sin_stock}"
             )
     else:
-        print("[WARN] ventas_historicas_stage sin columna deposito_id -- falta correr "
+        print(f"[WARN] {tabla_stage} sin columna deposito_id -- falta correr "
               "infra/sql/19-ventas-stage-deposito-grupo.sql. La ingesta NO es idempotente "
               "por deposito (Issue #114 reabierto hasta que corra la migracion).")
-        sql = f"INSERT INTO ventas_historicas_stage({','.join(insert_cols)}) VALUES({placeholders})"
+        sql = f"INSERT INTO {tabla_stage}({','.join(insert_cols)}) VALUES({placeholders})"
 
-    sql_stock_diario = """
-        INSERT INTO stock_diario (sku, fecha, cantidad, deposito_id, fuente, ts_carga)
+    sql_stock_diario = f"""
+        INSERT INTO {tabla_stock} (sku, fecha, cantidad, deposito_id, fuente, ts_carga)
         VALUES (%s, %s, %s, %s, %s, NOW(6))
         ON DUPLICATE KEY UPDATE
           cantidad = VALUES(cantidad),
@@ -348,7 +374,9 @@ def main():
 
     try:
         rows_ins, rows_skip, rows_stock_ins, rows_failed, rows_stock_failed = procesar_payload(
-            conn, payload, deposito_forzado=deposito_forzado, grupo_id=grupo_id
+            conn, payload, deposito_forzado=deposito_forzado, grupo_id=grupo_id,
+            tabla_stage=os.environ.get("TABLA_VENTAS_STAGE"),
+            tabla_stock=os.environ.get("TABLA_STOCK_DIARIO"),
         )
     except ContractDriftError as e:
         # Issue #159: nada se escribio (el chequeo corre antes de la

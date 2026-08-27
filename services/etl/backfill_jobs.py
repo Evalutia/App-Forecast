@@ -29,7 +29,11 @@ import os
 import sys
 import pymysql
 
-SUBTIPO = "backfill_ventas"
+# Issue #186: BACKFILL_SUBTIPO override permite que run_backfill_comparacion.sh
+# lleve su propio tracking de resumibilidad en jobs_historial, aislado del
+# backfill real -- una corrida de comparacion pendiente/completa no debe
+# confundirse con (ni saltear) una corrida real de backfill_ventas, y viceversa.
+SUBTIPO = os.environ.get("BACKFILL_SUBTIPO", "backfill_ventas")
 
 # Valores validos de jobs_historial.estado (infra/sql/02-tablas.sql +
 # infra/sql/22-jobs-historial-estado-omitido.sql). cmd_end los valida antes

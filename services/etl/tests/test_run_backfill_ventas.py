@@ -117,17 +117,76 @@ def test_lock_libre_sigue_de_largo(script_dir):
     assert "no se obtuvo lista de grupos" in proc.stderr.lower()
 
 
+# ── Nombres de tabla configurables (Issue #186) -- validados antes del ────────
+# lock, para no tomar el flock (ni pegarle al WS) con una corrida condenada.
+
+def test_tabla_ventas_stage_invalida_aborta_antes_del_lock(script_dir):
+    lock = script_dir["tmp"] / "backfill.lock"
+
+    proc = _correr(script_dir, lock, TABLA_VENTAS_STAGE="ventas; DROP TABLE articulos")
+
+    assert proc.returncode == 2
+    assert "no es un nombre de tabla valido" in proc.stderr.lower()
+    assert not script_dir["marker"].exists(), (
+        "invalido antes del lock -- no debe llegar a get_grupos_backfill.py"
+    )
+    assert not lock.exists(), "no debe tomar/crear el lock con un nombre de tabla invalido"
+
+
+def test_tabla_ventas_invalida_aborta_antes_del_lock(script_dir):
+    lock = script_dir["tmp"] / "backfill.lock"
+
+    proc = _correr(script_dir, lock, TABLA_VENTAS="ventas_historicas; DROP TABLE articulos")
+
+    assert proc.returncode == 2
+    assert "no es un nombre de tabla valido" in proc.stderr.lower()
+    assert not script_dir["marker"].exists()
+
+
+def test_tabla_stock_diario_invalida_aborta_antes_del_lock(script_dir):
+    """TABLA_STOCK_DIARIO no se usa dentro de este script (lo consume
+    run_extract_sales_chunk.py via env) pero tiene que validarse en el mismo
+    punto que las otras dos -- sin esto, un valor invalido recien fallaba
+    despues de tomar el lock y de al menos una llamada SOAP real por chunk."""
+    lock = script_dir["tmp"] / "backfill.lock"
+
+    proc = _correr(script_dir, lock, TABLA_STOCK_DIARIO="stock_diario; DROP TABLE articulos")
+
+    assert proc.returncode == 2
+    assert "no es un nombre de tabla valido" in proc.stderr.lower()
+    assert not script_dir["marker"].exists()
+
+
+def test_nombres_de_tabla_por_defecto_pasan_la_validacion(script_dir):
+    """Caso negativo del anterior: sin overrides, los defaults de produccion
+    tienen que seguir pasando la validacion -- #186 no puede romper la
+    corrida real de backfill_ventas."""
+    lock = script_dir["tmp"] / "backfill.lock"
+
+    proc = _correr(script_dir, lock)
+
+    assert "no es un nombre de tabla valido" not in proc.stderr.lower()
+    assert script_dir["marker"].exists()
+
+
 def _extraer_join_where(texto: str) -> str:
     """Normaliza espacios para comparar el mismo bloque SQL entre un heredoc
     de bash indentado y un CDATA de XML indentado distinto."""
+    # Issue #186: el nombre de la tabla stage en run_backfill_ventas.sh
+    # dejo de ser el literal "ventas_historicas_stage" (ahora es la
+    # variable Python tabla_stage, para poder redirigir al almacen de
+    # comparacion) -- el FROM matchea cualquier identificador/variable, el
+    # invariante real que este test protege es el JOIN+WHERE de abajo, que
+    # sigue siendo texto fijo en los dos lados.
     m = re.search(
-        r"FROM ventas_historicas_stage s\s*"
+        r"FROM \S+ s\s*"
         r"INNER JOIN articulos a ON a\.sku = TRIM\(s\.sku\)\s*"
         r"WHERE s\.sku IS NOT NULL",
         texto,
     )
     assert m, "no se encontró el bloque FROM/JOIN/WHERE esperado"
-    return re.sub(r"\s+", " ", m.group(0)).strip()
+    normalizado = re.sub(r"\s+", " ", m.group(0)).strip()
+    return re.sub(r"^FROM \S+ s ", "FROM <TABLA> s ", normalizado)
 
 
 def test_filtro_del_merge_identico_al_del_cron_diario():

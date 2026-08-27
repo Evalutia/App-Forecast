@@ -45,6 +45,39 @@ BACKFILL_FROM="${BACKFILL_FROM:-$(date -d "${BACKFILL_TO} -2 years" +%F)}"
 BACKFILL_CHUNK_DAYS="${BACKFILL_CHUNK_DAYS:-30}"
 BACKFILL_LOCK_FILE="${BACKFILL_LOCK_FILE:-/app/data/backfill.lock}"
 
+# Issue #186: overrides para reusar este mismo script (loop, resumibilidad,
+# lock) desde run_backfill_comparacion.sh sin duplicarlo -- default sin
+# cambios de comportamiento cuando no se setea nada. GRUPOS_SCRIPT resuelve
+# la lista de grupos (get_grupos_backfill.py excluye el 201 por diseño de
+# #44; la comparacion contra produccion lo quiere incluido, ver
+# run_backfill_comparacion.sh). TABLA_VENTAS_STAGE/TABLA_VENTAS/
+# TABLA_STOCK_DIARIO redirigen el merge y el extractor (este ultimo via env,
+# ver run_extract_sales_chunk.py) al almacen de comparacion aislado.
+GRUPOS_SCRIPT="${GRUPOS_SCRIPT:-get_grupos_backfill.py}"
+TABLA_VENTAS_STAGE="${TABLA_VENTAS_STAGE:-ventas_historicas_stage}"
+TABLA_VENTAS="${TABLA_VENTAS:-ventas_historicas}"
+TABLA_STOCK_DIARIO="${TABLA_STOCK_DIARIO:-stock_diario}"
+
+# TABLA_VENTAS_STAGE/TABLA_VENTAS se interpolan directo en el heredoc de
+# Python de merge_y_truncar_stage() (no se pueden pasar como bind parameter
+# de pymysql, son nombres de tabla) -- validar el formato aca antes de que
+# lleguen a esa interpolacion, misma regla de identificador que ya aplica
+# run_extract_sales_chunk.py del lado Python.
+#
+# TABLA_STOCK_DIARIO no se usa en este script (lo lee run_extract_sales_chunk.py
+# via env, ver ese archivo) pero se valida en el mismo lugar y momento que
+# las otras dos -- code-review post-implement encontro que, sin esto, un
+# valor invalido recien fallaba adentro de procesar_payload(), DESPUES de
+# tomar el lock y de al menos una llamada SOAP real al WS del cliente por
+# chunk. Fallar aca, los tres juntos, evita ese desperdicio de lock/red por
+# un typo de config.
+for _v in TABLA_VENTAS_STAGE TABLA_VENTAS TABLA_STOCK_DIARIO; do
+  if [[ ! "${!_v}" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]]; then
+    echo "[ERROR] ${_v}=${!_v} no es un nombre de tabla valido" >&2
+    exit 2
+  fi
+done
+
 # ── Lock: exclusion mutua con el cron diario (run_ofelia.sh) y con otra
 #    corrida de este mismo script ────────────────────────────────────────────
 # Issue #119: antes esto era un archivo simple (test -e + echo $$ + trap rm) y
@@ -240,6 +273,12 @@ conn = pymysql.connect(
     user=os.environ["MYSQL_USER"], password=os.environ["MYSQL_PASSWORD"],
     database=os.environ["MYSQL_DB"], autocommit=False, charset="utf8mb4",
 )
+# Issue #186: nombres de tabla vienen del shell (\${TABLA_VENTAS_STAGE}/
+# \${TABLA_VENTAS}, ya validados como identificador seguro en el propio bash
+# via las mismas reglas de nombre de tabla de MySQL) -- no se pueden pasar
+# como bind parameter de pymysql, solo interpolar en el texto del SQL.
+tabla_stage = "${TABLA_VENTAS_STAGE}"
+tabla_ventas = "${TABLA_VENTAS}"
 try:
     with conn.cursor() as cur:
         # Issue #122: sin esto, NOW(6) de abajo usa el huso local del
@@ -248,19 +287,19 @@ try:
         # merge diario (job_etl_diario.kjb) escribe el mismo ts_carga con el
         # mismo problema, arreglado ahi tambien.
         cur.execute("SET time_zone = '+00:00'")
-        cur.execute("""
-            INSERT INTO ventas_historicas (fecha, sku, cantidad, ts_carga, fuente)
+        cur.execute(f"""
+            INSERT INTO {tabla_ventas} (fecha, sku, cantidad, ts_carga, fuente)
             SELECT DATE(s.fecha), TRIM(s.sku),
                    SUM(CAST(s.cantidad AS DECIMAL(12,3))),
                    NOW(6), COALESCE(MIN(s.fuente),'ws_consstockventa')
-            FROM ventas_historicas_stage s
+            FROM {tabla_stage} s
             INNER JOIN articulos a ON a.sku = TRIM(s.sku)
             WHERE s.sku IS NOT NULL
             GROUP BY DATE(s.fecha), TRIM(s.sku)
             ON DUPLICATE KEY UPDATE
               cantidad = VALUES(cantidad), ts_carga = VALUES(ts_carga), fuente = VALUES(fuente)
         """)
-        cur.execute("DELETE FROM ventas_historicas_stage")
+        cur.execute(f"DELETE FROM {tabla_stage}")
     conn.commit()
 finally:
     # Un close() que falla DESPUES de un commit exitoso no debe reportarse
@@ -280,9 +319,10 @@ conn = pymysql.connect(
     user=os.environ["MYSQL_USER"], password=os.environ["MYSQL_PASSWORD"],
     database=os.environ["MYSQL_DB"], autocommit=False, charset="utf8mb4",
 )
+tabla_stage = "${TABLA_VENTAS_STAGE}"
 try:
     with conn.cursor() as cur:
-        cur.execute("DELETE FROM ventas_historicas_stage")
+        cur.execute(f"DELETE FROM {tabla_stage}")
     conn.commit()
 finally:
     try:
@@ -308,7 +348,7 @@ truncar_stage_or_die() {
 
 # ── Loop principal ────────────────────────────────────────────────────────────
 
-GROUPS_LIST="$(python3 "${SELF_DIR}/get_grupos_backfill.py")"
+GROUPS_LIST="$(python3 "${SELF_DIR}/${GRUPOS_SCRIPT}")"
 if [[ -z "${GROUPS_LIST}" ]]; then
   echo "[ERROR] No se obtuvo lista de grupos para backfill" >&2
   exit 2

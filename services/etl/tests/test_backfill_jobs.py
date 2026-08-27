@@ -6,7 +6,7 @@ import sys
 import pytest
 
 import backfill_jobs
-from backfill_jobs import cmd_check, cmd_end
+from backfill_jobs import cmd_check, cmd_end, cmd_start
 
 
 def _try_connect():
@@ -214,6 +214,77 @@ def test_end_hace_merge_no_pisa_detalle_previo(monkeypatch):
         assert fila["detalle"]["duracion_seg"] == 12.5
         assert fila["detalle"]["grupo_id"] == grupo
         assert fila["detalle"]["chunks_fallidos"] == ["dep=5 rango=x rc=10"]
+    finally:
+        _limpiar(conn, grupo)
+        conn.close()
+
+
+# ── SUBTIPO configurable (Issue #186): la corrida de comparacion no debe ──────
+# confundirse con el backfill real, ni al revés -- cada una lleva su propio
+# rastro de resumibilidad en jobs_historial pese a compartir grupo/rango.
+
+def test_corrida_de_comparacion_no_cuenta_como_backfill_ventas_completo(capsys, monkeypatch):
+    conn = _try_connect()
+    grupo = "TEST186A"
+    try:
+        _limpiar(conn, grupo)
+        monkeypatch.setattr(backfill_jobs, "SUBTIPO", "backfill_comparacion")
+        _insertar_corrida_exitosa(conn, grupo, "2024-08-01", "2026-08-01")  # subtipo real hardcodeado en el helper
+
+        # El check corre con SUBTIPO parcheado a backfill_comparacion -- la
+        # corrida de backfill_ventas ya completa no debe contar como "hecho"
+        # para un subtipo distinto.
+        cmd_check(grupo, "2024-08-01", "2026-08-01")
+
+        assert capsys.readouterr().out.strip() == "0"
+    finally:
+        _limpiar(conn, grupo)
+        conn.close()
+
+
+def test_corrida_de_backfill_ventas_no_cuenta_como_comparacion_completa(capsys, monkeypatch):
+    """Misma garantia en la direccion opuesta: si backfill_comparacion ya
+    completo un grupo/rango, eso no debe hacer que backfill_ventas lo
+    saltee -- son ciclos de vida independientes."""
+    conn = _try_connect()
+    grupo = "TEST186B"
+    try:
+        _limpiar(conn, grupo)
+        monkeypatch.setattr(backfill_jobs, "SUBTIPO", "backfill_comparacion")
+        cmd_start(grupo, "2024-08-01", "2026-08-01")
+        job_id = capsys.readouterr().out.strip()
+        monkeypatch.setattr(sys, "stdin", io.StringIO(""))
+        cmd_end(job_id, "exitoso", grupo, "2024-08-01", "2026-08-01", "10.0")
+
+        monkeypatch.setattr(backfill_jobs, "SUBTIPO", "backfill_ventas")
+        cmd_check(grupo, "2024-08-01", "2026-08-01")
+
+        assert capsys.readouterr().out.strip() == "0"
+    finally:
+        _limpiar(conn, grupo)
+        conn.close()
+
+
+def test_comparacion_resumible_dentro_de_su_propio_subtipo(capsys, monkeypatch):
+    """El caso positivo: dentro del MISMO subtipo, check/start/end siguen
+    dando resumibilidad -- #186 no rompe lo que #104 ya garantizaba, solo lo
+    aisla por subtipo."""
+    conn = _try_connect()
+    grupo = "TEST186C"
+    try:
+        _limpiar(conn, grupo)
+        monkeypatch.setattr(backfill_jobs, "SUBTIPO", "backfill_comparacion")
+
+        cmd_start(grupo, "2024-08-01", "2026-08-01")
+        job_id = capsys.readouterr().out.strip()
+        monkeypatch.setattr(sys, "stdin", io.StringIO(""))
+        cmd_end(job_id, "exitoso", grupo, "2024-08-01", "2026-08-01", "5.0")
+
+        cmd_check(grupo, "2024-08-01", "2026-08-01")
+
+        assert capsys.readouterr().out.strip() == "1"
+        fila = _leer_fila(conn, int(job_id))
+        assert fila["detalle"]["subtipo"] == "backfill_comparacion"
     finally:
         _limpiar(conn, grupo)
         conn.close()
