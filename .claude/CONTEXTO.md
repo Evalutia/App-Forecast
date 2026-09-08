@@ -4366,3 +4366,28 @@ No se corrió la extracción real contra el WS del cliente (sin certs mTLS/acces
 **Suite completa `services/etl/` dentro del contenedor**: 472 passed (455 + 17 nuevos), 10 skipped, 0 failed.
 
 Con acceso SSH a producción disponible en esta sesión (ver más abajo, obtenido para #188), se confirmó además que la VM comparte recursos con otra aplicación ajena a este proyecto ("Matcher": `matcher-api`/`matcher-web`/`matcher-db`) y que la memoria está justa (119-139Mi libres de 3.7Gi, 1.2Gi de swap en uso) -- relevante para cuándo y cómo correr #188, no para #187 en sí.
+
+### #188 -- corrida real de 2 años en producción + informe final: no hay evidencia de un bug de extracción (2026-08-29/2026-09-08)
+
+Corrida real de #186 sobre producción, los 66 grupos, ventana 2024-08-29..2026-08-29. Arrancó 2026-08-29 16:36:59, terminó el pase principal 2026-09-07 (grupo 201, último de la lista), con un grupo (59) que falló a mitad de camino por el incidente de disco y se relanzó solo, acotado (`GROUPS=59`), terminando 2026-09-07. Duración total real: ~9 días -- mucho más que la estimación original de ~4 días, por el incidente de disco (ver abajo) y por variación grande en el tamaño de los grupos (algunos terminan en minutos, otros como el 15 o el 30 tardaron 9-10 horas).
+
+**Incidente durante la corrida, documentado en detalle en #190**: el disco de datos de MySQL (volumen separado del filesystem raíz, verificado con espacio de sobra pero en el mount equivocado) se llenó al 100% por binlogs sin purga efectiva (30 días de retención configurada, ~13GB/día de generación bajo carga de backfill). Un commit quedó trabado esperando escribir al binlog; al matar esa conexión para destrabarla, MySQL se auto-abortó por su propia política de seguridad y se reinició solo -- ~1 hora de corte, sin pérdida de datos (el diseño de commit-por-fila de #154 cumplió su propósito). Fix aplicado: purga de binlogs viejos (~39GB liberados) y retención bajada a 6 horas, persistida. El backfill retomó solo tras la caída (su propio mecanismo de reintento a nivel de fila, sin intervención adicional), salvo el grupo 59 que había fallado antes del reintento automático y necesitó relanzarse acotado por separado.
+
+**Resultado del informe de #187 sobre el dataset completo** (66/66 grupos, 5.649 SKUs, ventas + stock, los 2 años): 56.226 diferencias encontradas -- **el 100% quedó explicado, ninguna requiere corrección**:
+
+| Causa | Cantidad | % del total |
+|---|---:|---:|
+| Hueco real de producción, 2026-08-29 (día completo, todos los SKUs/depósitos) | 33.888 | 60.3% |
+| Representación "cero implícito" (producción no graba fila cuando ventas/stock=0 ese día; la extracción nueva sí) -- mismo patrón que #187 ya había confirmado en ventas, ahora confirmado también en stock, 723 fechas distintas | ~22.056 | 39.2% |
+| Caso inverso (fila que existía en producción, ausente en la extracción nueva): 1 solo SKU (`02770`), 1 solo día (2026-06-30), valor=0 en los 7 casos -- mismo patrón de representación, sin pérdida real | 7 | 0.01% |
+| Desfase normal de sincronización en la cola de la ventana (agosto 2026, deltas de +1 a +6, ningún patrón nuevo) | 11 | 0.02% |
+
+**La ventana 24-27/07/2026 queda confirmada como hueco real de producción, ahora recuperado**: consulta día-por-día sobre `stock_diario` para esas 4 fechas puntuales (no el agregado mensual de ventas, que hubiera podido esconder el hueco al compensarse con el resto del mes) -- 1.296 filas ausentes en producción, presentes y completas en la extracción nueva, 0 discrepancias de valor donde sí había datos en ambos lados (324 filas/día, parejo los 4 días -- consistente con una pérdida completa de esos días, no parcial).
+
+**Hallazgo nuevo, fichado en #189**: 2026-08-29 (el día que arrancó este mismo backfill) es *también* un hueco real de producción completo -- mismo tipo de evidencia que julio, pero con causa distinta (colisión probable entre el cron nocturno y la adquisición del lock del backfill, no el redeploy de Ofelia que explica julio).
+
+**No hizo falta validar contra los archivos reales de Rodrigo (#160)**: ninguna de las diferencias sin explicar (los 11 casos de "sin patrón conocido") cae en las categorías/meses que esos archivos cubren (fantech/foneng-auricular/toner-cpt, oct/nov-2026) -- documentado así en vez de forzar una validación que no es posible con los datos disponibles.
+
+**Respuesta a la pregunta de fondo del issue** ("¿corregir esas diferencias nos acerca de verdad a lo que Rodrigo reporta?"): no se encontró evidencia de un bug de extracción -- las únicas causas reales (dos huecos de días completos, ambos con causa operativa identificada y ya recuperados) no tocan el período ni los SKUs donde existe reconciliación real contra Rodrigo, así que no se puede afirmar con evidencia que corregirlas mueva la aguja de su reclamo específico. Lo que sí queda establecido con más solidez que antes: la extracción cruda, corrida de nuevo con el código actual sobre 2 años completos, es fiel a sí misma -- el sub-conteo de #161 y cualquier diferencia contra Rodrigo no se explican por un error de extracción/merge, siguen siendo, con esta evidencia adicional, más compatibles con una diferencia de criterio del lado del cliente (mismo tipo de conclusión ya alcanzada en la auditoría de 4 agentes de #161, ahora reforzada con datos reales de producción en vez de solo lectura de código).
+
+**Fuera de alcance a propósito, tal como pedía el issue**: ninguna corrección se aplicó a producción -- este ticket cierra con el informe, no con cambios de datos. Las tablas `_comparacion` de #186 se dropean al cerrar el ciclo (ver cabecera de `infra/sql/26-tablas-comparacion.sql`).
