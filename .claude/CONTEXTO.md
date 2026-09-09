@@ -4403,3 +4403,20 @@ Esto explica con precisión lo que la sesión del 2026-08-18/19 había verificad
 **Pide explícitamente que configuremos nuestro lado para que coincida con su ERP.** Esto no cierra #161 solo -- abre una decisión de implementación real: ¿se agrega el depósito 2 a la lista que consulta el cron, o se cuentan los remitos depo5->depo2 como venta en el cálculo? Cualquiera de las dos mueve números en la planilla de GRAVITY (y potencialmente de otras marcas con el mismo circuito depósito-a-salón). Queda pendiente decidir el alcance con el usuario y medir el impacto antes de implementar -- mismo criterio ya aplicado en #116/#117/#135. Registrado en #161, sin ticket de implementación todavía.
 
 **#135 -- confirma el criterio ya implementado, no hace falta cambiar código.** Respuesta textual: *"si el stock = stock mínimo entonces = sin stock"* -- exactamente lo que `dias_con_stock` ya hace (cuenta como "sin stock" cuando el stock está en el mínimo configurado o por debajo). El camino que sigue es el barato que el propio issue proponía: corregir la documentación (hoja "Criterios", descripciones de `Rot.Real.[mes]`/`V/E`) para que diga la verdad -- "vacía si el stock no superó el mínimo", no "vacía si no tuvo stock". Ningún número de la planilla cambia.
+
+### #161 -- verificación empírica de la respuesta de Rodrigo: el mecanismo es real pero solo reconcilia 1 de 4 SKUs (2026-09-09)
+
+Antes de implementar nada a partir de la respuesta de Rodrigo (ver sección anterior), se hizo una llamada real de solo-lectura al WS (`ConsStockVenta`, `IdEmpresa=1`, `IdGrupo=15`, `sDepositos=2`, sin escribir a ninguna tabla) para verificar el mecanismo con datos reales en vez de implementar a ciegas sobre lo que dijo el cliente -- mismo criterio que ya costó caro no aplicar en #160 (punto 2 de #126).
+
+**El circuito depo5->depo2 es real y verificable.** Para `C00204` el 03/07/2026 (la fecha que #161 ya había marcado con el hueco de -15): depósito 2 pasa de `Stock=0` a `Stock=14` con `Venta=1` ese mismo día -- 15 unidades netas entrantes, coincide exacto con lo que depósito 5 perdía esa fecha. La venta real a público sale de a poco en los días siguientes (10 unidades entre el 03 y el 10/07, quedan 5 en stock).
+
+**Pero sumar la venta propia de depósito 2 en todo julio -- la lectura más simple y literal de "las ventas del depósito 2 no las ven ustedes" -- solo reconcilia 1 de los 4 SKUs que #161 ya tenía documentados:**
+
+| SKU | Faltante real jul-2026 (cliente vs nosotros) | Venta depósito 2, julio completo (WS real) |
+|---|---:|---:|
+| `C00160` | faltan 4 | **4** -- coincide exacto |
+| `C00184` | faltan 2 | 6 -- no coincide |
+| `C00190` | sobramos 3 (ya de más) | 7 -- sumarlo empeora, no mejora |
+| `C00204` | faltan 16 | 29 -- se pasa de largo |
+
+Ni "sumar la venta propia de depósito 2" ni "tratar el salto de stock del día del remito como venta" reconcilian los 4 casos a la vez. No se implementó nada con esto -- se fichó #193 (profundizar el mecanismo, con hipótesis de desfase temporal y de que no todos los SKUs compartan la misma causa) bloqueando a #194 (implementación), en vez de adivinar una fórmula sobre un solo caso confirmado.
