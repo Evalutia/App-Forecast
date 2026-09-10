@@ -4420,3 +4420,7 @@ Antes de implementar nada a partir de la respuesta de Rodrigo (ver sección ante
 | `C00204` | faltan 16 | 29 -- se pasa de largo |
 
 Ni "sumar la venta propia de depósito 2" ni "tratar el salto de stock del día del remito como venta" reconcilian los 4 casos a la vez. No se implementó nada con esto -- se fichó #193 (profundizar el mecanismo, con hipótesis de desfase temporal y de que no todos los SKUs compartan la misma causa) bloqueando a #194 (implementación), en vez de adivinar una fórmula sobre un solo caso confirmado.
+
+### #135 cerrado -- documentación corregida en la hoja Criterios (2026-09-09)
+
+Camino elegido ya estaba definido por la respuesta de Rodrigo (ver más arriba, "Rodrigo respondió las dos preguntas de #161/#135"): mantener el criterio (`stock <= stock_minimo` = sin stock), corregir solo el texto. Cuatro strings en `apps/frontend/src/features/planilla/utils/exportPlanilla.ts` decían "vacía si el mes no tuvo stock" / "Mes completo sin stock" -- reescritas a "vacía si el stock del mes no superó el mínimo configurado del artículo" / "Mes completo con stock igual o por debajo del mínimo configurado del artículo" (líneas 391, 407, 413, 431). Ningún test asertaba el texto viejo (verificado antes de tocar el archivo); 34/34 tests de `exportPlanilla.test.ts` en verde después del cambio. No hay backfill ni recálculo -- ningún número de la planilla cambia, solo la hoja "Criterios" del export deja de afirmar algo falso.
