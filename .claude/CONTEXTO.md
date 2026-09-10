@@ -4445,3 +4445,26 @@ Backfill real sobre producción (`run_backfill_ventas.sh`, no comparación -- es
 **2) `binlog_expire_logs_seconds=21600` confirmado persistente.** Verificado contra producción: `performance_schema.persisted_variables` (no solo `SHOW VARIABLES`, que solo muestra el valor en memoria) tiene `21600` registrado. Más fuerte todavía: el contenedor `evalutia-mysql` se reinició al menos una vez desde que se aplicó el `SET PERSIST` original (`StartedAt=2026-09-09T04:21:29`, posterior al incidente) y el valor se mantuvo -- confirmación empírica de que sobrevive un reinicio real, no solo la promesa de la sintaxis `PERSIST`.
 
 **3) Monitoreo activo, evaluado y descartado por ahora.** No se construyó un cron/alerta dedicado. Razón: la causa raíz (binlogs sin purga efectiva, crecimiento sin límite) ya está resuelta en el origen por la retención de 6h del punto 2 -- no por un monitor que detecte el síntoma después. El patrón real detrás de #60/#112/#148/#190 no es degradación orgánica día a día, es siempre "antes de lanzar un job grande puntual" -- exactamente el momento que el chequeo del punto 1 cubre, encadenado a mano antes de la corrida. Construir monitoreo continuo (cron + destino de logs + umbral + canal de alerta) es más infraestructura de la que el problema real pide hoy, y no hay canal de notificación existente en el proyecto al que enviar esa alerta. Si en el futuro las corridas grandes se automatizan sin operador humano en el medio (hoy siempre las lanza alguien a mano), ahí sí valdría la pena un gate automático que llame a este mismo script antes de arrancar.
+
+### #193 -- dos investigaciones en paralelo: sin desfase temporal, pero el volumen no escala (2026-09-10)
+
+Dos subagentes en background, ángulos independientes, ambos read-only contra producción.
+
+**Hipótesis de desfase temporal: descartada.** El remito depósito 5→2 ocurre el mismo día calendario que la caída de stock, sin excepción -- verificado con datos frescos de `stock_diario`/`ventas_historicas` MÁS una llamada real de solo-lectura al WS (`ConsStockVenta`, `sDepositos=2`, sin escribir nada) para 3 fechas/SKUs distintos (C00160/C00184/C00190 el 2026-06-01, C00204 el 2026-07-03 y 2026-07-15): coincidencia exacta, mismo día, en los 6 casos probados.
+
+**Pero el agregado mensual no escala.** Sumando el WS de depósito 2 para julio completo contra la brecha real ya documentada:
+
+| SKU | Remitos jul (entrada bruta depo 2, WS) | Venta jul depo 2 (WS) | Brecha real jul |
+|---|---:|---:|---:|
+| C00160 | 10 | 4 | faltan 4 -- coincide |
+| C00184 | 10 | 6 | faltan 2 -- ambas cifras sobran (5x y 3x) |
+| C00190 | 12 | 7 | sobramos 3 -- signo contrario, cualquiera de las dos empeora |
+| C00204 | 30 | 29 | faltan 16 -- ambas cifras casi duplican la brecha real |
+
+Solo C00160 cuadra. En los otros 3, el volumen bruto que pasa por depósito 2 es entre 2 y 5 veces mayor que lo que el cliente realmente reclama -- sumar el 100% de esos remitos como "venta faltante" sobrecorregiría.
+
+**El mecanismo no es un caso aislado de 4 SKUs -- es generalizado dentro del grupo.** Sin acceso a la lista completa de "64 SKUs con sesgo" de Rodrigo (vive en un Excel de una sesión anterior, no commiteado), se construyó un proxy sobre los 556 artículos reales de `articulo_grupo` para grupo 15 (100% género `TONER CPT`, 90% GRAVITY Consumibles): caída de stock en depósito 5 sin venta que la explique, ventana 2026-01-01..2026-08-29 (mismo rango que #161). Resultado: **114 SKUs (20,5%) muestran la firma en algún grado, 26 (4,7%) con firma fuerte (≥20u no explicadas), 37 (6,7%) con firma recurrente (≥5 días distintos)**. Los 4 SKUs ya conocidos caen entre los de mayor magnitud del ranking completo (C00204 puesto 8, C00190 puesto 14, C00184 puesto 16, C00160 puesto 19) -- confirma que el proxy capta señal real. Por marca, ECOJET (35 SKUs, misma familia de tóner compatible) muestra tasa igual o mayor que GRAVITY -- el fenómeno parece asociado al tipo de producto (tóner CPT que pasa por salón de ventas), no exclusivo de una marca.
+
+**Conclusión combinada:** el mecanismo depósito 5→2 es real, instantáneo (sin desfase) y generalizado (no 4 casos aislados) -- pero la magnitud bruta que se mueve por depósito 2 NO es 1:1 con lo que el cliente reporta como venta extra. Hay algún filtro o regla contable del lado del ERP de Rodrigo que no capturamos todavía (¿se devuelve una porción a depósito 5? ¿solo se factura una fracción del remito?) antes de que la unidad cuente como "vendida" en su planilla. `C00190` sigue sin explicación propia -- tiene firma fuerte de stock (50u) pero va en la dirección contraria a lo que el mecanismo predice, así que su causa es otra, no depósito 2.
+
+**No se cerró #193** -- queda documentado como pregunta nueva y concreta para Rodrigo (qué fracción de cada remito a depósito 2 él registra como venta real, y si hay devoluciones de depósito 2 a depósito 5 que no vemos) en vez de pasar a implementar #194 con una fórmula adivinada.
