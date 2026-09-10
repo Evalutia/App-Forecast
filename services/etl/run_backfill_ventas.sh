@@ -13,6 +13,11 @@ set -uo pipefail
 # Corrida piloto sobre un solo grupo chico (recomendado antes de la corrida
 # completa, para validar tiempo/payload real del WS con BACKFILL_CHUNK_DAYS):
 #   docker compose exec -e GROUPS=42 etl /bin/bash /app/services/etl/run_backfill_ventas.sh
+#
+# Issue #190: antes de una corrida grande (varios dias), chequear espacio
+# libre en el volumen de datos de MySQL (no en el filesystem raiz -- ese fue
+# el error original) desde el HOST, antes del docker compose exec de arriba:
+#   ./scripts/check_disk_space.sh && docker compose exec etl /bin/bash /app/services/etl/run_backfill_ventas.sh
 
 : "${WS_URL:?missing}"
 : "${MYSQL_HOST:?missing}"
