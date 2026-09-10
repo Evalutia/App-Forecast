@@ -4424,3 +4424,14 @@ Ni "sumar la venta propia de depósito 2" ni "tratar el salto de stock del día 
 ### #135 cerrado -- documentación corregida en la hoja Criterios (2026-09-09)
 
 Camino elegido ya estaba definido por la respuesta de Rodrigo (ver más arriba, "Rodrigo respondió las dos preguntas de #161/#135"): mantener el criterio (`stock <= stock_minimo` = sin stock), corregir solo el texto. Cuatro strings en `apps/frontend/src/features/planilla/utils/exportPlanilla.ts` decían "vacía si el mes no tuvo stock" / "Mes completo sin stock" -- reescritas a "vacía si el stock del mes no superó el mínimo configurado del artículo" / "Mes completo con stock igual o por debajo del mínimo configurado del artículo" (líneas 391, 407, 413, 431). Ningún test asertaba el texto viejo (verificado antes de tocar el archivo); 34/34 tests de `exportPlanilla.test.ts` en verde después del cambio. No hay backfill ni recálculo -- ningún número de la planilla cambia, solo la hoja "Criterios" del export deja de afirmar algo falso.
+
+### #192 cerrado -- recuperación real de huecos + puesta al día, 65/65 grupos (2026-09-09/10)
+
+Backfill real sobre producción (`run_backfill_ventas.sh`, no comparación -- escribe directo en `ventas_historicas`/`stock_diario`), ventana 2026-07-24..2026-09-08 (chunks de 30 días), los 65 grupos de `get_grupos_backfill.py` (todos menos el 201). Lanzado 2026-09-09 ~19:20, terminó 2026-09-09 ~23:50 (grupo 200, el más pesado, tardó solo él 13.094s ≈ 3h38m de las ~4h30m totales). 0 fallos en los 65 grupos -- incluido el 59, que había fallado en la corrida original de #188 por el incidente de disco de #190 y esta vez completó sin problema.
+
+**Verificación de los 4 criterios de aceptación, con evidencia directa contra producción:**
+- `MAX(fecha)` en `ventas_historicas` y `stock_diario`: **2026-09-08** (al día, antes de que corriera el cron nocturno del 09/09).
+- Los 5 días del hueco (24-27/07 + 29/08) tienen filas parejas: **5.653 filas/día en `ventas_historicas`, 34.002 filas/día en `stock_diario`**, sin huecos parciales entre los 5 días.
+- 0 grupos fallidos, 65/65 exitosos.
+
+**Hallazgo colateral importante, no resuelto todavía:** al verificar por qué el grupo 201 quedó afuera de este backfill, se confirmó con `ts_carga` que el grueso de la historia real de **todos** los grupos (no solo 201) fue cargado el 2026-08-12/13 -- **antes** de los fixes del extractor del 2026-08-18 (#154 commit-por-fila, #159 contract-drift, #162 verificación del merge). Solo la ventana chica de este mismo backfill (24/07 en adelante) tiene el extractor más nuevo. Decisión tomada con el usuario: no re-extraer todavía -- primero cerrar #193 (mecanismo de depósito 2) y #194 (implementación), para no tener que repetir la re-extracción grande dos veces. El backfill final (grupo 201 + los ~2 años del resto, con el extractor ya corregido) queda como el paso siguiente después de #193/#194.
