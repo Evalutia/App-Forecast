@@ -4499,7 +4499,7 @@ Hipótesis original corregida con logs reales de `evalutia-ofelia` (`docker logs
 
 ### #195 implementado -- cargador de los archivos del cliente + cobertura de catálogo (2026-09-16)
 
-Prefactor del diagnóstico de calidad de datos (#195 → #201), abierto a partir de dos archivos que Rodrigo Cabezas pasó el 2026-09-16. `scripts/cargador_archivos_cliente.py` + `services/etl/tests/test_cargador_archivos_cliente.py` (64 tests, todos verdes) + los xlsx congelados en `scripts/fixtures/archivos_cliente_2026-09/` con su README. Solo lectura, mismo patrón que #127: funciones puras testeables sin `openpyxl`, import diferido dentro de las funciones de lectura, corre desde el host con túnel SSH porque la imagen de `etl` no trae `openpyxl`.
+Prefactor del diagnóstico de calidad de datos (#195 → #201), abierto a partir de dos archivos que Rodrigo Cabezas pasó el 2026-09-16. `scripts/cargador_archivos_cliente.py` + `services/etl/tests/test_cargador_archivos_cliente.py` (68 tests, todos verdes) + los xlsx congelados en `scripts/fixtures/archivos_cliente_2026-09/` con su README. Solo lectura, mismo patrón que #127: funciones puras testeables sin `openpyxl`, import diferido dentro de las funciones de lectura, corre desde el host con túnel SSH porque la imagen de `etl` no trae `openpyxl`.
 
 **Las dos trampas de parseo, verificadas sobre los archivos reales.** (1) La regla nulo/cero es **asimétrica**: las columnas de venta usan vacío para "no vendió" y nunca 0 (0 ceros explícitos en 70.564 celdas), pero las de rotación mensual están densas y sí usan cero real -- una sola regla para ambas familias genera miles de falsos positivos, es el "cero implícito" de #187/#188 en espejo. (2) El archivo de movimientos **no es una tabla plana**: es un reporte bandeado con 35 filas de subtotal, una fila `Total General` con las columnas corridas y un pie de página cuyo número de página cae en la columna de unidades. Un parser que no las filtre triplica los totales -- durante la verificación del plan dio +1209/−2457/+1399 en vez de +403/−819/+466.
 
@@ -4513,4 +4513,19 @@ El emparejamiento (`emparejar_recodificaciones`) es por monto vía subset-sum, s
 
 **Cobertura contra producción (2026-09-16):** 5.656 artículos en `articulos`, 5.428 en su archivo de ventas, **5.355 comunes**, 73 suyos que no tenemos (buena parte códigos `HX*`, la misma familia de promo) y 301 nuestros que él no mandó. Los 5.355 son el conjunto sobre el que trabajan #196 en adelante: comparar totales sin restringir a ese conjunto sesga el resultado a favor nuestro.
 
-**Suite:** 64/64 de este módulo en verde. Los 30 fallos del resto de la suite (24 `test_run_ofelia.py`, 3 `test_run_extract_stockxml.py`, 2 `test_run_backfill_ventas.py`, 1 `test_run_extract_sales_chunk_window.py`) son preexistentes y de tests de scripts de shell bajo bash 3.2 de macOS -- este trabajo es puramente aditivo (tres paths nuevos) y no los toca.
+**Pasada de `/review` (2026-09-16), 9 hallazgos, los 9 corregidos:**
+1. `pytest.importorskip("openpyxl")` a nivel de módulo saltaba también los 57 tests de funciones puras cuando falta la librería -- exactamente el escenario del contenedor `etl` para el que el import diferido existe. Corregido a skip por test.
+2. `parsear_movimientos` descartaba `filas[0]` a ciegas: un export que arranque con una banda en vez de con el header perdía el tipo de documento de esa banda entera, y esas filas desaparecían en silencio del emparejamiento.
+3. Validaba unidades con `float()` pero convertía con `int()`: una celda `"12.0"` pasaba el filtro y reventaba la corrida completa. `_como_entero()` ahora pasa por `float` antes de `int`.
+4. SKU duplicado en el archivo de ventas se pisaba en silencio (se perdía la venta de la primera fila) -- ahora `ValueError` explícito.
+5. `_filas` caía a la primera hoja del libro si no encontraba la nombrada -- ahora sólo si el libro tiene una única hoja; con varias, error listando cuáles hay.
+6. `meses[0]`/`meses[-1]` sin guarda producían un `IndexError` crudo si el header no traía ninguna columna de mes reconocible.
+7. `ArticuloCliente` era `frozen=True` con dos `dict` adentro: el `__hash__` sintetizado explotaba siempre. Se sacó `frozen` y se documentó por qué.
+8. `parsear_movimientos` hacía slicing directo sobre `filas` en vez de `list(filas)` primero: `iter_rows` de openpyxl devuelve un generador, no una lista, y el slicing reventaba.
+9. Los tests de integración hardcodeaban los nombres de archivo de fixture en vez de usar las constantes `ARCHIVO_VENTAS`/`ARCHIVO_MOVIMIENTOS` exportadas -- un cambio de nombre los hubiera saltado en silencio sin romper CI.
+
+Se agregaron 4 tests para que los hallazgos 2, 3, 4 y 8 no vuelvan sin aviso (68 en total). El review también verificó por ejecución (no sólo lectura) que el subset-sum del emparejamiento es correcto -- 4.000 casos aleatorios contra fuerza bruta -- y que no hay fuga de file descriptors por no cerrar el workbook explícitamente.
+
+**Suite:** 68/68 de este módulo en verde (61 de ellos corren también sin `openpyxl` instalado, verificado bloqueando el import). Los 30 fallos del resto de la suite (24 `test_run_ofelia.py`, 3 `test_run_extract_stockxml.py`, 2 `test_run_backfill_ventas.py`, 1 `test_run_extract_sales_chunk_window.py`) son preexistentes y de tests de scripts de shell bajo bash 3.2 de macOS -- este trabajo es puramente aditivo (tres paths nuevos) y no los toca.
+
+Commit `7a091a4`, pusheado a `Develop`. Issue cerrado el 2026-09-16.
