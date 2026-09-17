@@ -137,7 +137,7 @@ def normalizar_rotacion(valor):
     return float(valor)
 
 
-def _sku(valor):
+def normalizar_sku(valor):
     return str(valor).strip().upper()
 
 
@@ -207,7 +207,7 @@ def parsear_ventas(filas):
     for fila in filas[1:]:
         if not fila or _vacio(fila[0]):
             continue
-        sku = _sku(fila[0])
+        sku = normalizar_sku(fila[0])
         if sku in articulos:
             # Pisar en silencio perdería la venta de la primera fila y el
             # diagnóstico lo leería como "ese artículo vendió menos". En una
@@ -325,7 +325,7 @@ def parsear_movimientos(filas):
             continue
 
         movimientos.append(Movimiento(
-            sku=_sku(primera),
+            sku=normalizar_sku(primera),
             descripcion=_texto(fila[1] if len(fila) > 1 else None),
             unidades=unidades,
             tipo_documento=tipo,
@@ -456,8 +456,8 @@ class Cobertura:
 
 def comparar_catalogo(skus_cliente, skus_nuestros):
     """Cruza ambos catálogos por SKU normalizado."""
-    del_cliente = {_sku(s) for s in skus_cliente}
-    nuestros = {_sku(s) for s in skus_nuestros}
+    del_cliente = {normalizar_sku(s) for s in skus_cliente}
+    nuestros = {normalizar_sku(s) for s in skus_nuestros}
     return Cobertura(
         comunes=tuple(sorted(del_cliente & nuestros)),
         solo_cliente=tuple(sorted(del_cliente - nuestros)),
@@ -526,8 +526,20 @@ def leer_movimientos(path=None, hoja=HOJA_MOVIMIENTOS):
         _filas(path or os.path.join(DIR_POR_DEFECTO, ARCHIVO_MOVIMIENTOS), hoja))
 
 
-def leer_skus_nuestros():
-    """SKUs de `articulos`. Devuelve None si no hay credenciales configuradas."""
+def leer_skus_nuestros(conn=None):
+    """
+    SKUs de `articulos`. Devuelve None si no hay credenciales configuradas y no
+    se pasó una conexión ya abierta.
+
+    Acepta una conexión existente (`conn`) para que un script que ya mantiene
+    la suya para varias queries -- como comparar_ventas_mensual.py -- no tenga
+    que abrir una segunda en paralelo sólo para este SELECT.
+    """
+    if conn is not None:
+        with conn.cursor() as cur:
+            cur.execute("SELECT sku FROM articulos")
+            return [f[0] for f in cur.fetchall()]
+
     if not os.environ.get("MYSQL_PASSWORD"):
         return None
     import pymysql
