@@ -22,6 +22,7 @@ from cargador_archivos_cliente import ArticuloCliente  # noqa: E402
 from comparar_ventas_mensual import (  # noqa: E402
     FECHA_CORTE_COHORTE,
     adjuntar_descomposicion_diaria,
+    agregado_mensual_por_tabla,
     cohorte_de_mes,
     construir_dataset_discrepancias,
     generar_ventana,
@@ -322,6 +323,38 @@ def test_unidades_excluidas_falla_con_mensaje_claro_si_la_cobertura_no_matchea()
 # que dar exactamente lo que ya se verificó a mano contra el archivo real, SIN
 # restringir al conjunto común -- es un chequeo de que el cargador y la
 # agregación están bien enganchados, no la comparación real del ticket.
+
+# ── agregado_mensual_por_tabla: guard de nombre de tabla ─────────────────────
+#
+# El nombre de tabla se interpola directo en el SQL (no se puede pasar como
+# bind parameter de pymysql) -- se valida ANTES de tocar la conexión, mismo
+# patrón que services/etl/run_extract_sales_chunk.py usa para el mismo riesgo.
+
+@pytest.mark.parametrize("tabla", [
+    "ventas_historicas; DROP TABLE articulos",
+    "ventas_historicas WHERE 1=1 OR",
+    "",
+    "123tabla",
+    "tabla con espacio",
+])
+def test_agregado_mensual_por_tabla_rechaza_nombres_invalidos(tabla):
+    # conn=None: si el guard no corta antes de usar la conexión, esto explota
+    # con un AttributeError distinto al ValueError esperado -- la prueba de
+    # que valida ANTES de tocar la DB, no después.
+    with pytest.raises(ValueError, match="nombre de tabla"):
+        agregado_mensual_por_tabla(None, [(2025, 8)], tabla)
+
+
+@pytest.mark.parametrize("tabla", [
+    "ventas_historicas", "ventas_historicas_comparacion", "_tabla", "Tabla2",
+])
+def test_agregado_mensual_por_tabla_acepta_nombres_validos(tabla):
+    # Nombres válidos pasan el guard y llegan a tocar la conexión -- falla con
+    # AttributeError (None no tiene .cursor), no con el ValueError del guard,
+    # confirmando que el formato en sí no es lo que lo frena.
+    with pytest.raises(AttributeError):
+        agregado_mensual_por_tabla(None, [(2025, 8)], tabla)
+
 
 def test_totales_mensuales_nuestros_reduce_por_sku():
     # Reemplaza a una segunda query SQL que hacía el mismo scan que el

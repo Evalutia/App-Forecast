@@ -53,6 +53,7 @@ real, no la comparación diagnóstica.
 import calendar
 import datetime as dt
 import os
+import re
 import sys
 from dataclasses import dataclass, replace
 
@@ -71,6 +72,12 @@ from cargador_archivos_cliente import (  # noqa: E402
 # #195). No es una fecha de negocio -- es puramente operativa, así que vive acá
 # como constante y no en config.
 FECHA_CORTE_COHORTE = dt.date(2026, 7, 24)
+
+# Mismo patrón que services/etl/run_extract_sales_chunk.py (#186): un nombre de
+# tabla no se puede pasar como bind parameter de pymysql, así que se valida el
+# formato ANTES de interpolarlo en el SQL, para que un nombre inesperado falle
+# fuerte acá en vez de abrir una superficie de inyección más adelante.
+_TABLA_ID_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
 
 def generar_ventana(inicio, n_meses):
@@ -340,7 +347,7 @@ def _en_lotes(items, tam=200):
         yield items[i:i + tam]
 
 
-def _conectar():
+def conectar():
     import pymysql
     return pymysql.connect(
         host=os.environ.get("MYSQL_HOST", "mysql"),
@@ -351,7 +358,7 @@ def _conectar():
     )
 
 
-def _rango_fechas(ventana):
+def rango_fechas(ventana):
     y0, m0 = ventana[0]
     y1, m1 = ventana[-1]
     desde = dt.date(y0, m0, 1)
@@ -377,7 +384,7 @@ def totales_mensuales_nuestros(agregados):
     return totales
 
 
-def leer_agregado_mensual_nuestro(conn, ventana):
+def agregado_mensual_por_tabla(conn, ventana, tabla):
     """
     {(sku,y,m): unidades}, TODO el catálogo, un solo GROUP BY (más simple y más
     rápido que un IN con miles de SKUs -- MySQL escanea el rango de fechas una
@@ -400,13 +407,27 @@ def leer_agregado_mensual_nuestro(conn, ventana):
     claves Python distintas de las de `cobertura` (que sí está normalizada) y
     `restringir_agregados` las descartaría en silencio. Se suman en vez de
     pisarse, por si acaso.
+
+    `tabla` tiene que ser siempre un literal hardcodeado en el call site --
+    nunca una variable que venga de input externo (env, argumento de usuario,
+    etc.). No se puede pasar como bind parameter de pymysql (es un nombre de
+    tabla, no un valor) y se interpola directo en el SQL, así que se valida el
+    formato antes de interpolar (mismo patrón y misma regex que
+    `services/etl/run_extract_sales_chunk.py` usa para el mismo riesgo, #186):
+    un nombre inesperado falla fuerte acá, no abre una superficie de inyección
+    más adelante. Hoy tiene dos call sites, los dos con el nombre escrito a
+    mano: `leer_agregado_mensual_nuestro` (ventas_historicas, producción) y
+    `medir_deposito2.leer_agregado_mensual_deposito2`
+    (ventas_historicas_comparacion, aislada -- #197).
     """
-    desde, hasta = _rango_fechas(ventana)
+    if not _TABLA_ID_RE.match(tabla):
+        raise ValueError(f"{tabla!r} no es un nombre de tabla válido")
+    desde, hasta = rango_fechas(ventana)
     agregados = {}
     with conn.cursor() as cur:
         cur.execute(
             "SELECT sku, YEAR(fecha), MONTH(fecha), SUM(cantidad) "
-            "FROM ventas_historicas WHERE fecha BETWEEN %s AND %s "
+            f"FROM {tabla} WHERE fecha BETWEEN %s AND %s "
             "GROUP BY sku, YEAR(fecha), MONTH(fecha)",
             (desde, hasta),
         )
@@ -414,6 +435,12 @@ def leer_agregado_mensual_nuestro(conn, ventana):
             clave = (normalizar_sku(sku), y, m)
             agregados[clave] = agregados.get(clave, 0) + int(total)
     return agregados
+
+
+def leer_agregado_mensual_nuestro(conn, ventana):
+    """{(sku,y,m): unidades} de `ventas_historicas` (producción). Ver
+    `agregado_mensual_por_tabla` para el detalle de índices/normalización."""
+    return agregado_mensual_por_tabla(conn, ventana, "ventas_historicas")
 
 
 def restringir_agregados(agregados, comunes):
@@ -439,7 +466,7 @@ def leer_diario_nuestro(conn, skus, ventana):
     skus = sorted(normalizar_sku(s) for s in set(skus))
     if not skus:
         return {}
-    desde, hasta = _rango_fechas(ventana)
+    desde, hasta = rango_fechas(ventana)
     diario = {}
     with conn.cursor() as cur:
         for lote in _en_lotes(skus):
@@ -466,7 +493,7 @@ def main():
 
     ventas_cliente = leer_ventas()
     ventana = ventana_desde_ventas_cliente(ventas_cliente)
-    conn = _conectar()
+    conn = conectar()
     try:
         nuestros = leer_skus_nuestros(conn)
         cobertura = comparar_catalogo(list(ventas_cliente), nuestros)
