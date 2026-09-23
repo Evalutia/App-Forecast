@@ -70,6 +70,7 @@ COL_BARCODE = "Codigos Barras"
 
 ENTRADA_MERCADERIA = "Entrada de Mercaderia"
 AJUSTE_SALIDA = "Ajuste de Salida"
+AJUSTE_ENTRADA = "Ajuste de Entrada"
 
 PREFIJO_TIPO = "Tipo de Documento:"
 PREFIJO_GENERO = "Genero:"

@@ -4571,3 +4571,39 @@ Commit `7a091a4`, pusheado a `Develop`. Issue cerrado el 2026-09-16.
 **Suite:** 9/9 de este módulo, 117/117 sumado a #195/#196. Corrida completa contra producción dos veces (antes y después de los arreglos del review), resultado idéntico las dos veces -- 99,0% explicado.
 
 **Impacto en el resto del frente:** con esto, #194 (que estaba bloqueado por la respuesta de Rodrigo a #193) tiene ya el fundamento técnico para avanzar sin esperarla -- la causa está confirmada con datos propios, no solo con el relato del cliente. Queda a criterio del usuario si vale la pena escribirle a Rodrigo de todos modos con este número, o directamente destrabar #194.
+
+---
+
+### #199 implementado -- las 303 unidades genuinas de depósito 5 cierran exacto con ventas + ajuste (2026-09-22/23)
+
+`scripts/reconciliar_deposito5.py` + `services/etl/tests/test_reconciliar_deposito5.py` (19 tests) + `AJUSTE_ENTRADA` agregada a `cargador_archivos_cliente.py` (constante que faltaba junto a `AJUSTE_SALIDA`/`ENTRADA_MERCADERIA`). Reconcilia el archivo de movimientos de julio del depósito 5 contra `stock_diario`/`ventas_historicas`, sin tocar producción.
+
+**Desglose de las −819 unidades de Ajuste de Salida, las cuatro partes cuadran exacto contra el archivo real:**
+
+| Categoría | Unidades | Causa |
+|---|---:|---|
+| Recodificación de SKU (8 pares, #195) | 466 | Códigos retirados y re-ingresados con otro nombre |
+| Autocancelante (`C00477`) | 50 | +50 Ajuste de Entrada / −50 Ajuste de Salida, error tipeado corregido el mismo mes |
+| **Genuina** | **303** | Salida real, cruzada contra `stock_diario`/`ventas_historicas` |
+| **Total** | **819** | |
+
+**Corrige el "~353" del planteo original del issue**: esa cifra salía de 819−466 (sólo descontando la recodificación), sin descontar también el autocancelante `C00477` (−50). El número correcto de salida sin explicar previo al cruce es 303, no 353.
+
+**Resultado del cruce -- las 303 unidades genuinas cierran casi exacto contra stock + ventas, SKU por SKU:** para cada uno de los 51 SKUs de salida genuina, `stock_diario` (depósito 5) fin-junio menos fin-julio predice casi perfectamente `ajuste + venta_julio` -- ejemplos verificados a mano: `C00216` (el mayor, −100u) cae de 1.683 a 21 (−1.662), contra 100(ajuste)+1.562(venta)=1.662, **exacto**; `C00622` (−51u) cae 167, contra 51+116=167, **exacto**; `T00314`/`E00953`/`I00975`/`I01706`/`I01836`/`I01758` también exactos. Los pocos con residuo (`I01393`: 299→0 observado vs 296 esperado, 3u; `I02144`: 82 vs 78, 4u) son ruido chico, <2% de esos montos. **No aparece ningún caso de "caída de stock sin venta asociada" que el ajuste + las ventas no expliquen** -- la preocupación original del issue (que las −819 unidades fueran stock perdido sin registrar) no se sostiene: nuestra extracción captura correctamente tanto las ventas como el efecto de los ajustes administrativos.
+
+**Continuidad de stock en los 8 pares de recodificación**, combinado origen+destino sin doble conteo (ver corrección del review más abajo): 6 de 8 con salto ≈0 (`I01951`, `I01878`, `I02320`, `HX030+I01874` -- este último con datos escasos, ver nota --, y `I01875` con −1u de ruido). Los 2 con salto visible, ambos investigados y explicados con un dato más:
+- **`I01396 → I02772`**: combinado cae 27u (142→115), pero las ventas de julio de ambos SKUs (`ventas_historicas`, todos los depósitos) suman 22+3=25 -- **el salto es casi enteramente ventas normales de julio**, no una pérdida por la migración, 2u de ruido.
+- **`C00482 → C00482`** (mismo SKU de los dos lados, un caso degenerado -- no es realmente una migración, es una corrección de ±10u que el matcher de #195 empareja igual): combinado SUBE 344u (483→827) pese a 66u vendidas en julio, o sea +410u de compras/reposición sin relación con el ajuste de 10u -- el salto es actividad de inventario normal, no un problema de extracción.
+- **`HX031 → I02210`**: sin datos de `stock_diario` para `HX031` (nunca estuvo en `articulos`, coherente con #195), así que el combinado no se puede calcular -- pero `I02210` solo (el destino) salta de 1 a 200, evidencia indirecta fuerte de que absorbió la transferencia.
+
+**Límite de alcance para #193, declarado explícito en el informe**: la whitelist `Doc.: AJE,AJS,EMR,SMR` de la fila `Total General` sigue siendo la misma limitación de #195 -- SMR devolvió 0 filas, evidencia a favor pero no concluyente (depende de que SMR sea efectivamente el código de remito, no confirmado), y una transferencia con otro código quedaría excluida por el filtro, no por ausencia real. Este archivo no puede, por sí solo, confirmar ni descartar la hipótesis de #193 -- aunque después de #197 (depósito 2 explica 99,0% de la brecha) esa pregunta ya casi no depende de este archivo en particular.
+
+**Pasada de `/review`, 1 hallazgo serio + 3 menores, los 4 corregidos:**
+1. **Doble conteo real quebraba el chequeo de continuidad en 2 de los 8 pares reales** (`C00482→C00482`, mismo SKU en origen y destino; `HX030+I01874→I01874`, donde el destino ES uno de los orígenes): `combinado = origen + destino` sumaba el mismo SKU dos veces. El propio test que agregué en la primera pasada (`test_continuidad_suma_varios_origenes`) codificaba el valor duplicado como correcto -- el review lo detectó corriendo `emparejar_recodificaciones` contra el archivo real, no como caso hipotético. Corregido: si el destino ya es uno de los orígenes, el combinado ES el total de orígenes, sin sumarlo de nuevo -- y se preservó a propósito el criterio estricto original (`None` si falta un lado entero, no tratarlo como 0), que un primer intento de fix había perdido de paso.
+2. `desglose_salida` no garantizaba que un SKU no pudiera clasificarse a la vez como recodificación y autocancelante (las dos categorías se arman de fuentes independientes) -- ahora falla fuerte con `ValueError` en vez de clasificar en silencio bajo la primera que encuentre.
+3. `leer_ventas_julio` tenía las fechas de julio como literales SQL sueltas en vez de usar las constantes del módulo -- ahora usa `INICIO_JULIO`/`FIN_JULIO`.
+4. El informe imprimía "8 pares" como texto fijo en vez de `len(pares)` -- silenciosamente desactualizable si el archivo cambia.
+
+**Incidente de infraestructura de esta sesión, no relacionado con el código**: la VM de producción dejó de responder SSH por completo durante ~40 minutos (2026-09-22 tarde a 2026-09-23 madrugada) -- ni siquiera un `ssh ... echo OK` conectaba, mientras el resto de internet funcionaba normal. Se esperó con reintentos espaciados (5min, luego 10min) en vez de asumir que la VM estaba caída de verdad; al volver, `uptime` mostró 14 días sin reinicios y carga bajo 0.1 -- confirma que fue un corte de red en el camino, no un problema de la instancia. Corrida la parte de I/O directamente dentro del contenedor `etl` de la VM (sin túnel local: el túnel SSH con `-L` tampoco lograba bindear el puerto local en este sandbox, un problema aparte y también de infraestructura, no del código) usando un script standalone con los pares/SKUs ya calculados localmente contra el archivo real (sin necesidad de `openpyxl`, que el contenedor no tiene).
+
+**Suite:** 19/19 de este módulo, 136/136 sumado a #195/#196/#197. Corrida completa dos veces contra producción (antes y después del fix de doble conteo).
