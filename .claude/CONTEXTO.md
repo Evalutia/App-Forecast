@@ -4636,3 +4636,27 @@ Commit `7a091a4`, pusheado a `Develop`. Issue cerrado el 2026-09-16.
 **Suite:** 59/59 de este módulo, 195/195 sumado a #195/#196/#197/#199.
 
 **Preguntas abiertas que este ticket deja para el informe final (#201) o para un ticket de seguimiento**: (a) qué explica el 30,6% de SKUs con rotación nuestra por ENCIMA de la del cliente, más allá de depósito 2; (b) qué denominador usa realmente la columna mensual de rotación del cliente, dado que no es el mes calendario a secas.
+
+---
+
+### #198 implementado -- el pisado multi-grupo pesa 23,6x más que #114/#162 sospechaban (2026-09-23)
+
+`scripts/validaciones_transversales.py` + `services/etl/tests/test_validaciones_transversales.py` (26 tests). Tres barridos sobre el dataset de discrepancias de #196, restringidos al conjunto común y partidos por cohorte de extracción.
+
+**1. Los 331 negativos: 97,3% tiene contraparte (322/331).** De las celdas mensuales negativas del cliente, casi todas coinciden con al menos un día de cantidad negativa nuestra ese mismo mes -- consistente en las tres cohortes (pre 97,9%, post 92,3%, mixto 94,1%, sin un salto entre extractor viejo/nuevo). El fix de #80 (captura de devoluciones netas) se sostiene a escala completa, con un residuo chico de 9 sin contraparte. **Dirección inversa, la que explica por qué las escalas no son comparables 1 a 1**: de nuestros 1.152 (SKU,mes) con algún día negativo, sólo 322 (28%) caen en un mes que el cliente también reportó negativo -- el resto (830, 72%) tiene el o los día(s) negativo(s) neteado(s) a positivo dentro del agregado mensual del cliente. Es el comportamiento esperado de comparar una escala diaria contra una mensual, no una discrepancia.
+
+**2. Pisado multi-grupo (#114/#162): señal fuerte, mucho más fuerte que la muestra original de 2 SKUs.** SKUs de un solo grupo: 2.582, déficit total 726u (0,28 u/SKU). SKUs multi-grupo: 2.773, déficit total 18.334u (**6,61 u/SKU -- 23,6x más que los de un solo grupo**). Los 0 SKUs "sin_grupo" confirman que todo el conjunto común tiene al menos un grupo asignado (dato limpio). **Conclusión cuantificada: #114/#162 no cerraron el problema del todo -- el pisado multi-grupo (o algo que correlaciona fuertemente con pertenecer a varios grupos, posiblemente el mismo canal de depósito 2 concentrado en esos SKUs) sigue explicando una porción desproporcionada de la brecha.** Vale como candidato a ticket de seguimiento propio, separado del informe final.
+
+**3. Concentración por género: TONER CPT no es el género #1, pero junto con TINTA CPT S-CAB explican más de la mitad de todo el déficit.** Ranking real (15 géneros con déficit, de 17 totales del catálogo): TINTA CPT S-CAB 29,7% (5.656u), **TONER CPT 21,5% (4.104u)**, BOTELLA TINTA CPT 7,2%, RESMA PAPEL 5,8%, resto por debajo del 5% cada uno. **TINTA CPT S-CAB + TONER CPT = 51,2% del déficit total en sólo 2 de 17 géneros** -- la concentración sospechada por trabajo previo (#161) es real y hasta más fuerte de lo esperado a esta escala, aunque el género que más concentra no es exactamente el que se sospechaba. **Clasificación de género, archivo vs. nuestro dato: 119/119 (100%) coincide** donde ambos lados tienen dato -- la forma en que categorizamos por género no diverge de la del cliente, sin ninguna discrepancia de etiquetado real (5 SKUs sin género nuestro, la misma familia de códigos fuera de catálogo ya vista en #195/#199).
+
+**Pasada de `/review`, 4 hallazgos, los 4 corregidos:**
+1. `_normalizar_genero(None)` devolvía el string literal `"NONE"` en vez de señalar ausencia -- una fila de movimientos con `genero=None` (no pasa en el archivo de hoy, pero `parsear_movimientos` de #195 lo deja así hasta ver la primera banda `Genero:`, así que un archivo futuro con una fila de detalle antes de esa banda sí podría traerlo) se comparaba como si "NONE" fuera un género real, inflando `difiere` con falsos positivos. Separado en un contador `sin_dato_archivo` explícito.
+2. El mismo código además fijaba el género con el PRIMER valor visto por SKU (`setdefault`), incluso si era ese `None` -- si una ocurrencia posterior del mismo SKU traía el dato real, se perdía. Corregido a preferir el primer valor no nulo.
+3. `leer_negativos_nuestro`/`leer_grupos_por_sku` sobrescribían por clave normalizada en vez de sumar -- mismo invariante que `agregado_mensual_por_tabla` (#196/#197) ya protege para el mismo riesgo de colisión de casing/acento sin colapsar en el `GROUP BY`.
+4. Import de `replace` local a una función en vez de al tope del módulo (estilo, sin impacto funcional).
+
+**Incidente de infraestructura, mismo patrón que #199/#200**: sin túnel SSH local disponible en este sandbox, extracción del archivo del cliente a JSON localmente (1,2MB) y corrida de la parte de DB directo en el contenedor `etl` de la VM.
+
+**Suite:** 26/26 de este módulo, 221/221 sumado a #195/#196/#197/#199/#200.
+
+**Con #198 cerrado, los cuatro bloqueantes de #201 (informe final) están completos: #197, #198, #199, #200.**
